@@ -148,4 +148,31 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(150);
     expect(tip()).toBeNull();
   });
+
+  it("preserves a pre-existing aria-describedby, appending then removing only its own id", () => {
+    initTooltips();
+    const a = anchor("Hi");
+    a.setAttribute("aria-describedby", "foo");
+    pointerOver(a);
+    vi.advanceTimersByTime(1000);
+    const t = tip()!;
+    expect(a.getAttribute("aria-describedby")).toBe(`foo ${t.id}`);
+    pointerOut(a, null);
+    expect(a.getAttribute("aria-describedby")).toBe("foo"); // prior token restored
+    vi.advanceTimersByTime(150);
+  });
+
+  it("renders into an open ancestor <dialog> so it clears the modal's top layer", () => {
+    initTooltips();
+    const d = document.createElement("dialog");
+    d.setAttribute("open", "");
+    const a = document.createElement("button");
+    a.setAttribute("data-uip-tooltip", "In dialog");
+    d.appendChild(a);
+    document.body.appendChild(d);
+    pointerOver(a);
+    vi.advanceTimersByTime(1000);
+    const t = tip()!;
+    expect(t.parentElement).toBe(d); // appended into the dialog, not document.body
+  });
 });

@@ -148,4 +148,35 @@ describe("themeInitSnippet", () => {
     expect(document.documentElement.getAttribute("data-mode")).toBe("dark");
     localStorage.removeItem("snip");
   });
+
+  it("escapes the storage key against the <script> context (no raw </script> or line seps)", () => {
+    const snippet = themeInitSnippet("</script><x>\u2028\u2029");
+    expect(snippet).not.toContain("</script>");
+    expect(snippet).not.toContain("\u2028");
+    expect(snippet).not.toContain("\u2029");
+    expect(snippet).toContain("\\x3C"); // '<' was escaped
+  });
+
+  it("still applies the theme when the storage key contains script-breaking characters", () => {
+    const key = "</script>\u2028weird";
+    localStorage.setItem(key, "dark");
+    const snippet = themeInitSnippet(key);
+    document.documentElement.removeAttribute("data-theme");
+    (0, eval)(snippet);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    localStorage.removeItem(key);
+  });
+
+  it("its catch fallback resolves the system preference, not a hardcoded light", () => {
+    media.matches = true; // system = dark
+    const spy = vi.spyOn(localStorage, "getItem").mockImplementation(() => {
+      throw new Error("storage blocked");
+    });
+    const snippet = themeInitSnippet("k");
+    document.documentElement.removeAttribute("data-theme");
+    (0, eval)(snippet);
+    // Storage threw → catch runs → resolves system (dark), not a flash of light.
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    spy.mockRestore();
+  });
 });

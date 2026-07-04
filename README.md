@@ -117,17 +117,25 @@ toaster.show("Custom", { level: "info", duration: 2000 });
 
 - `toast: Toaster` — default shared toaster. `info` / `success` / `error` are the same methods as free functions.
 - `Toaster.show(message, opts?)` → returns a `() => void` dismiss function.
-- `Toaster.info(msg)` / `success(msg)` / `error(msg, retry?)` / `clear()`.
-- `createToaster({ maxVisible?, maxQueue?, defaultDuration? })` — isolated instance.
+- `Toaster.info(msg)` / `success(msg)` / `error(msg, retry?)` / `clear()` / `dispose()`.
+- `createToaster({ maxVisible?, maxQueue?, defaultDuration? })` — isolated instance. Call `dispose()` when the owning component unmounts to remove its document Escape listener and stack container. (The shared `toast` singleton lives for the app's lifetime and is never disposed.)
 - `ToastOptions` = `{ level?: "info" | "success" | "error"; duration?: number; retry?: ToastRetry }` (`duration: 0` = sticky).
 - `ToastRetry` = `{ label?: string; onClick: () => void | Promise<void> }` (async rejections + sync throws are caught and logged).
 
 Behavior: up to `maxVisible` (default 3) show at once; the rest queue (cap
 `maxQueue`, default 20, dropping the oldest). `info`/`success` auto-dismiss after
-4s; `error` is sticky. Hover/focus pauses the countdown and resumes on
-leave/blur. Click or press **Escape** (newest first) to dismiss. Each toast is
-`role="status"` inside the stack (`aria-live="polite"`), `role="alert"` when it
-is an error, keyboard-focusable, and carries a descriptive `aria-label`.
+4s; `error` is sticky. Hover or focus pauses the countdown; it resumes only once
+both the hover and the focus have ended (so a focused toast never auto-dismisses
+under the cursor). Click or press **Escape** (newest first) to dismiss. Each
+toast is `role="status"` inside the stack (`aria-live="polite"`), `role="alert"`
+when it is an error, keyboard-focusable, and carries an affordance `aria-label`
+(`"<level> notification. Click to dismiss."`) — the message text is announced by
+the live region and is deliberately not duplicated in the label.
+
+Toasts mount on `document.body`. A toast raised while a modal `<dialog>` is open
+therefore renders behind the dialog's top layer; raise toasts before opening a
+modal, or after it closes. (Tooltips, by contrast, re-parent into an open
+ancestor `<dialog>` — see below.)
 
 ### view-transition — `@cplieger/ui-primitives/view-transition`
 
@@ -188,6 +196,14 @@ theme.dispose();
 </script>
 ```
 
+The snippet reads `window.localStorage` directly — it runs before any module
+loads, so it **cannot** use a custom `storage` backend passed to `createTheme`.
+Use it only when the preference lives in `localStorage`. When storage is
+unavailable it falls back to the OS preference (`prefers-color-scheme`), matching
+`createTheme`'s runtime default, so dark-mode users don't get a flash of light.
+The `storageKey` and `attribute` are escaped for the inline-`<script>` context,
+so a key containing `</script>` (or other HTML-breaking characters) is safe.
+
 ### confirm — `@cplieger/ui-primitives/confirm`
 
 ```ts
@@ -203,11 +219,13 @@ const ok = await confirm("Delete everything?", {
 - `confirm(message, opts?)` → `Promise<boolean>`.
 - `ConfirmOptions` = `{ title?; confirmLabel?; cancelLabel?; variant?: "normal" | "destructive" }`.
 
-Renders a lazily-created, reused native `<dialog>`, labelled by its message.
-`destructive` upgrades it to `role="alertdialog"` and focuses **Cancel** (so a
-keyboard user can't confirm by accident) and adds `is-destructive` to the
-confirm button for skinning. Escape, a backdrop click, or a newer `confirm()`
-call all resolve `false`.
+Renders a lazily-created, reused native `<dialog>` — labelled by its title
+(`aria-labelledby`), described by its message body (`aria-describedby`), or
+labelled by the message when there is no title. `showModal()` provides the focus
+trap and focus restoration; `destructive` upgrades it to `role="alertdialog"`
+and focuses **Cancel** (so a keyboard user can't confirm by accident) and adds
+`is-destructive` to the confirm button for skinning. Escape, a backdrop click,
+or a newer `confirm()` call all resolve `false`.
 
 ### dialog — `@cplieger/ui-primitives/dialog`
 
@@ -253,10 +271,13 @@ initTooltips(); // idempotent; installs one delegated controller
 
 One delegated controller handles every trigger. The first tooltip of a "cold"
 group waits `delayCold`; peers show instantly while the group is warm. The
-trigger text is wired to the anchor via `aria-describedby`; `\n` in the value
+trigger text is appended to the anchor's `aria-describedby` (preserving any
+token the app already set, and removing only its own on hide); `\n` in the value
 splits into `<br>`-separated lines. Escape, scroll, and window blur hide it.
 Positioned `fixed` above the anchor (flips below when there is no room), clamped
-to the viewport.
+to the viewport. When the anchor sits inside an open modal `<dialog>`, the
+tooltip is appended into that dialog so it shares the dialog's top layer instead
+of rendering behind it.
 
 ### announce — `@cplieger/ui-primitives/announce`
 

@@ -73,4 +73,29 @@ describe("viewTransition", () => {
     await expect(viewTransition(fn)).resolves.toBeUndefined();
     expect(fn).toHaveBeenCalledOnce();
   });
+
+  it("resolves (swallows) when fn rejects and the API is absent — matching the API path", async () => {
+    delete (document as MutableDoc).startViewTransition;
+    await expect(viewTransition(() => Promise.reject(new Error("boom")))).resolves.toBeUndefined();
+  });
+
+  it("resolves (swallows) when fn throws synchronously and the API is absent", async () => {
+    delete (document as MutableDoc).startViewTransition;
+    await expect(
+      viewTransition(() => {
+        throw new Error("sync boom");
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("a rejecting fn does not wedge the queue for the next call", async () => {
+    delete (document as MutableDoc).startViewTransition;
+    const order: number[] = [];
+    const p1 = viewTransition(() => Promise.reject(new Error("boom")));
+    const p2 = viewTransition(() => {
+      order.push(2);
+    });
+    await Promise.all([p1, p2]);
+    expect(order).toEqual([2]);
+  });
 });

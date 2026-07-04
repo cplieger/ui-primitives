@@ -111,14 +111,29 @@ export function createTheme(opts: ThemeOptions): ThemeController {
  *      <script>{themeInitSnippet("app-theme")}</script>
  */
 export function themeInitSnippet(storageKey: string, attribute = DEFAULT_ATTRIBUTE): string {
-  const key = JSON.stringify(storageKey);
-  const attr = JSON.stringify(attribute);
+  const key = jsonForScript(storageKey);
+  const attr = jsonForScript(attribute);
+  const system = `window.matchMedia("${DARK_QUERY}").matches?"dark":"light"`;
   return (
     `(function(){try{` +
     `var c=localStorage.getItem(${key});` +
     `if(c!=="light"&&c!=="dark"&&c!=="system"){c="system";}` +
-    `var r=c==="system"?(window.matchMedia("${DARK_QUERY}").matches?"dark":"light"):c;` +
+    `var r=c==="system"?(${system}):c;` +
     `document.documentElement.setAttribute(${attr},r);` +
-    `}catch(e){document.documentElement.setAttribute(${attr},"light");}})();`
+    // Fall back to the resolved system preference (matching createTheme's
+    // runtime default) rather than a hardcoded "light" that would flash the
+    // wrong theme for dark-mode users when storage is unavailable.
+    `}catch(e){document.documentElement.setAttribute(${attr},${system});}})();`
   );
+}
+
+/** `JSON.stringify` a value, then neutralize the characters that could break
+ *  out of an inline `<script>` context: `<` (so `</script>` can't close the
+ *  tag) and the raw line separators U+2028 / U+2029 (invalid in JS strings in
+ *  older engines, and stray line breaks in HTML). */
+function jsonForScript(value: string): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\x3C")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }

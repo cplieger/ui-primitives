@@ -6,7 +6,6 @@
 import { el } from "@cplieger/reactive";
 
 import { closeModal, openModal } from "./dialog.js";
-import { trapFocus } from "./focus-trap.js";
 
 export interface ConfirmOptions {
   title?: string;
@@ -73,13 +72,18 @@ export function confirm(message: string, opts?: ConfirmOptions): Promise<boolean
   }
 
   if (titleText !== undefined && titleText !== "") {
+    // With a title, the dialog's accessible NAME is the concise title and its
+    // DESCRIPTION is the message body (alertdialog wants a short name + body).
     r.title.textContent = titleText;
     r.title.hidden = false;
-    r.dialog.setAttribute("aria-labelledby", `${TITLE_ID} ${MSG_ID}`);
+    r.dialog.setAttribute("aria-labelledby", TITLE_ID);
+    r.dialog.setAttribute("aria-describedby", MSG_ID);
   } else {
+    // Title-less: fall back to labelling the dialog by its message.
     r.title.textContent = "";
     r.title.hidden = true;
     r.dialog.setAttribute("aria-labelledby", MSG_ID);
+    r.dialog.removeAttribute("aria-describedby");
   }
   r.message.textContent = message;
   r.ok.textContent = opts?.confirmLabel ?? "Confirm";
@@ -101,14 +105,14 @@ export function confirm(message: string, opts?: ConfirmOptions): Promise<boolean
     let settled = false;
 
     openModal(r.dialog);
-    const release = trapFocus(r.dialog, {
-      initialFocus: variant === "destructive" ? r.cancel : r.ok,
-      returnFocus: true,
-    });
+    // Native <dialog>.showModal() already traps Tab and restores focus to the
+    // opener on close, so we don't add a focus-trap (two would fight over Tab).
+    // We only place the initial focus: Cancel for destructive prompts, so a
+    // keyboard user can't confirm by accident.
+    (variant === "destructive" ? r.cancel : r.ok).focus();
 
     const teardown = (): void => {
       controller.abort();
-      release();
     };
 
     // Preemption: resolve false without animating closed — the newer confirm

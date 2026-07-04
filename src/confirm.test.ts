@@ -40,14 +40,23 @@ describe("confirm", () => {
     await expect(p).resolves.toBe(false);
   });
 
-  it("renders the message + labels and labels the dialog by its message", () => {
+  it("labels the dialog by its title and describes it by the message when a title is given", () => {
     void confirm("Are you sure?", { title: "Heads up", confirmLabel: "Yes", cancelLabel: "No" });
     const d = dialogEl();
     expect(d.querySelector(".uip-confirm-msg")!.textContent).toBe("Are you sure?");
     expect(d.querySelector(".uip-confirm-title")!.textContent).toBe("Heads up");
     expect(d.querySelector(".uip-confirm-ok")!.textContent).toBe("Yes");
     expect(d.querySelector(".uip-confirm-cancel")!.textContent).toBe("No");
-    expect(d.getAttribute("aria-labelledby")).toContain("uip-confirm-msg");
+    // Name = concise title; description = message body.
+    expect(d.getAttribute("aria-labelledby")).toBe("uip-confirm-title");
+    expect(d.getAttribute("aria-describedby")).toBe("uip-confirm-msg");
+  });
+
+  it("labels a title-less confirm by its message and sets no describedby", () => {
+    void confirm("Just a plain message");
+    const d = dialogEl();
+    expect(d.getAttribute("aria-labelledby")).toBe("uip-confirm-msg");
+    expect(d.getAttribute("aria-describedby")).toBeNull();
   });
 
   it("destructive variant uses role=alertdialog and focuses Cancel", () => {
