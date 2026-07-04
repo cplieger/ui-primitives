@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from "vitest";
 
-import { toast, info, error, _resetForTest } from "./index.js";
+import { toast, info, error, createToaster, _resetForTest } from "./index.js";
 
 afterEach(() => {
   _resetForTest();
@@ -33,7 +33,10 @@ describe("toast", () => {
     expect(nodes).toHaveLength(1);
     const node = nodes[0]!;
     expect(node.querySelector(".uip-toast-msg")!.textContent).toBe("Saved");
-    expect(node.getAttribute("aria-label")).toBe("info notification: Saved. Click to dismiss.");
+    // The label carries only the affordance hint; the message is announced by
+    // the visible `.uip-toast-msg` text, so it must not be duplicated here.
+    expect(node.getAttribute("aria-label")).toBe("info notification. Click to dismiss.");
+    expect(node.getAttribute("aria-label")).not.toContain("Saved");
     expect(node.getAttribute("tabindex")).toBe("0");
     expect(node.classList.contains("uip-toast--info")).toBe(true);
   });
@@ -122,5 +125,69 @@ describe("toast", () => {
     expect(progress.style.animationPlayState).toBe("paused");
     node.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
     expect(progress.style.animationPlayState).toBe("running");
+  });
+
+  it("ref-counts pause: un-hovering a still-focused toast does not restart its timer", () => {
+    vi.useFakeTimers();
+    try {
+      info("hover+focus"); // timed (default 4000ms)
+      const node = toasts()[0]!;
+      node.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true })); // pause (0->1)
+      node.dispatchEvent(new Event("focusin", { bubbles: true })); // still paused (1->2)
+      node.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true })); // still paused (2->1)
+      vi.advanceTimersByTime(10000); // focused → paused → must NOT auto-dismiss
+      expect(node.classList.contains("is-leaving")).toBe(false);
+      expect(toasts()).toHaveLength(1);
+      node.dispatchEvent(new Event("focusout", { bubbles: true })); // resume (1->0)
+      vi.advanceTimersByTime(4000); // countdown resumes → dismisses
+      expect(node.classList.contains("is-leaving")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels the pending enter frame on dismiss and settles into a leaving state", () => {
+    const cancelSpy = vi.spyOn(globalThis, "cancelAnimationFrame");
+    const dismiss = info("quick"); // dismissed before the enter rAF fires
+    const node = toasts()[0]!;
+    expect(node.classList.contains("is-entering")).toBe(true);
+    dismiss();
+    expect(cancelSpy).toHaveBeenCalled();
+    expect(node.classList.contains("is-entering")).toBe(false);
+    expect(node.classList.contains("is-leaving")).toBe(true);
+    endTransition(node); // transitionend fires (no 400ms fallback wait)
+    expect(toasts()).toHaveLength(0);
+  });
+
+  it("createToaster() is disposable: dispose stops the ESC listener without leaking it", () => {
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+
+    const toaster = createToaster();
+    // The ESC handler is live: a sticky toast is dismissed by Escape.
+    toaster.show("sticky", { level: "error" });
+    const node = document.querySelector<HTMLElement>(".uip-toast")!;
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(node.classList.contains("is-leaving")).toBe(true);
+
+    toaster.dispose();
+    // Container + toasts gone, and the document listener was removed.
+    expect(document.querySelector(".uip-toast-stack")).toBeNull();
+    const adds = addSpy.mock.calls.filter((c) => c[0] === "keydown").length;
+    const removes = removeSpy.mock.calls.filter((c) => c[0] === "keydown").length;
+    expect(adds).toBe(1);
+    expect(removes).toBe(1);
+  });
+
+  it("repeated createToaster()/dispose() cycles do not accumulate document listeners", () => {
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+    for (let i = 0; i < 5; i++) {
+      createToaster().dispose();
+    }
+    const adds = addSpy.mock.calls.filter((c) => c[0] === "keydown").length;
+    const removes = removeSpy.mock.calls.filter((c) => c[0] === "keydown").length;
+    expect(adds).toBe(5);
+    expect(removes).toBe(5);
   });
 });

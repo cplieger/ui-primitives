@@ -1,10 +1,15 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { announce, _resetForTest } from "./announce.js";
 
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+
 afterEach(() => {
   _resetForTest();
+  vi.useRealTimers();
   document.body.innerHTML = "";
 });
 
@@ -13,7 +18,7 @@ function regions(): HTMLElement[] {
 }
 
 describe("announce", () => {
-  it("creates a single polite live region and sets its text on the next microtask", async () => {
+  it("creates a single polite live region and sets its text after the delay", () => {
     announce("hello");
     const all = regions();
     expect(all).toHaveLength(1);
@@ -21,24 +26,24 @@ describe("announce", () => {
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(region.getAttribute("aria-atomic")).toBe("true");
     expect(region.textContent).toBe(""); // cleared synchronously
-    await Promise.resolve();
+    vi.advanceTimersByTime(100);
     expect(region.textContent).toBe("hello");
   });
 
-  it("reuses the same region across polite announcements", async () => {
+  it("reuses the same region across polite announcements", () => {
     announce("one");
-    await Promise.resolve();
+    vi.advanceTimersByTime(100);
     announce("two");
-    await Promise.resolve();
+    vi.advanceTimersByTime(100);
     const all = regions();
     expect(all).toHaveLength(1);
     expect(all[0]!.textContent).toBe("two");
   });
 
-  it("uses a separate assertive region with role=alert", async () => {
+  it("uses a separate assertive region with role=alert", () => {
     announce("polite msg", "polite");
     announce("assertive msg", "assertive");
-    await Promise.resolve();
+    vi.advanceTimersByTime(100);
     const polite = document.querySelector('[aria-live="polite"].uip-visually-hidden');
     const assertive = document.querySelector('[aria-live="assertive"].uip-visually-hidden');
     expect(polite?.textContent).toBe("polite msg");
@@ -47,13 +52,25 @@ describe("announce", () => {
     expect(regions()).toHaveLength(2);
   });
 
-  it("re-announces an identical message by clearing then re-setting", async () => {
+  it("re-announces an identical message by clearing then re-setting after the delay", () => {
     announce("same");
-    await Promise.resolve();
+    vi.advanceTimersByTime(100);
     expect(regions()[0]!.textContent).toBe("same");
     announce("same");
     expect(regions()[0]!.textContent).toBe(""); // cleared so the change is observable
-    await Promise.resolve();
+    vi.advanceTimersByTime(100);
     expect(regions()[0]!.textContent).toBe("same");
+  });
+
+  it("cancels a pending announce so a rapid second message wins (first never lands)", () => {
+    announce("first");
+    vi.advanceTimersByTime(50);
+    announce("second"); // cancels first's pending timer
+    // At +50ms from the second call (and +100ms from the first): the first
+    // would have landed here if it had NOT been cancelled. It must not.
+    vi.advanceTimersByTime(50);
+    expect(regions()[0]!.textContent).toBe("");
+    vi.advanceTimersByTime(50); // now +100ms from the second call
+    expect(regions()[0]!.textContent).toBe("second");
   });
 });

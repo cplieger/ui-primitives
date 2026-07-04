@@ -15,6 +15,10 @@ const LEAVE_FALLBACK_MS = 400;
 export interface ToastHandle {
   readonly el: HTMLElement;
   readonly progressEl: HTMLElement | null;
+  /** Handle of the pending enter `requestAnimationFrame`, or `null` once it has
+   *  run (or been cancelled). Cancelled on leave/remove so a late enter frame
+   *  can't re-apply `is-shown` mid-leave. */
+  enterRaf: number | null;
 }
 
 /** Create a DOM-backed toast view. Owns a lazily-created `.uip-toast-stack`. */
@@ -42,7 +46,10 @@ export function createToastView(): ToastView<ToastHandle> {
       const node = el("div", {
         className: `uip-toast uip-toast--${data.level} is-entering`,
         tabindex: "0",
-        "aria-label": `${data.level} notification: ${data.message}. Click to dismiss.`,
+        // The message is announced by the visible `.uip-toast-msg` text (inside
+        // the polite live region), so the label carries only the affordance
+        // hint — repeating the message here would double-announce it.
+        "aria-label": `${data.level} notification. Click to dismiss.`,
       });
       if (data.level === "error") {
         node.setAttribute("role", "alert");
@@ -77,30 +84,55 @@ export function createToastView(): ToastView<ToastHandle> {
       node.addEventListener("click", () => {
         ctx.dismiss();
       });
-      node.addEventListener("mouseenter", () => {
-        ctx.pause();
-      });
-      node.addEventListener("mouseleave", () => {
-        ctx.resume();
-      });
-      node.addEventListener("focusin", () => {
-        ctx.pause();
-      });
-      node.addEventListener("focusout", () => {
-        ctx.resume();
-      });
 
+      // Two independent pause sources (hover and focus) share one engine timer,
+      // so ref-count them: pause on the first (0 -> 1) and resume only on the
+      // last (1 -> 0). Without this, un-hovering a still-focused toast would
+      // resume the countdown and it could auto-dismiss while focused.
+      let pauseCount = 0;
+      const addPause = (): void => {
+        pauseCount++;
+        if (pauseCount === 1) {
+          ctx.pause();
+        }
+      };
+      const removePause = (): void => {
+        if (pauseCount === 0) {
+          return;
+        }
+        pauseCount--;
+        if (pauseCount === 0) {
+          ctx.resume();
+        }
+      };
+      node.addEventListener("mouseenter", addPause);
+      node.addEventListener("mouseleave", removePause);
+      node.addEventListener("focusin", addPause);
+      node.addEventListener("focusout", removePause);
+
+      const handle: ToastHandle = { el: node, progressEl, enterRaf: null };
       stack.appendChild(node);
-      requestAnimationFrame(() => {
+      handle.enterRaf = requestAnimationFrame(() => {
+        handle.enterRaf = null;
         node.classList.remove("is-entering");
         node.classList.add("is-shown");
       });
 
-      return { el: node, progressEl };
+      return handle;
     },
 
     scheduleLeave(handle: ToastHandle, done: () => void): void {
       const node = handle.el;
+      // A dismiss can land before the enter frame runs. Cancel it (so it can't
+      // re-add `is-shown` mid-leave) and settle the node into `is-shown` now, so
+      // the leave transition runs from a defined start state and its
+      // `transitionend` fires instead of stalling on the fallback timer.
+      if (handle.enterRaf !== null) {
+        cancelAnimationFrame(handle.enterRaf);
+        handle.enterRaf = null;
+        node.classList.remove("is-entering");
+        node.classList.add("is-shown");
+      }
       let finished = false;
       let fallback: ReturnType<typeof setTimeout> | null = null;
       const finish = (): void => {
@@ -127,6 +159,10 @@ export function createToastView(): ToastView<ToastHandle> {
     },
 
     remove(handle: ToastHandle): void {
+      if (handle.enterRaf !== null) {
+        cancelAnimationFrame(handle.enterRaf);
+        handle.enterRaf = null;
+      }
       handle.el.remove();
     },
 

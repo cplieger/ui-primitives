@@ -17,6 +17,12 @@ export interface Toaster {
   error(message: string, retry?: ToastRetry): () => void;
   /** Dismiss all visible toasts and clear the queue. */
   clear(): void;
+  /** Tear down this toaster: remove its document keydown (Escape) listener,
+   *  clear all toasts, and remove its stack container. Call this for any
+   *  per-component `createToaster()` so its listener doesn't outlive the
+   *  component. (The module `toast` singleton lives for the app's lifetime, so
+   *  it is never disposed.) */
+  dispose(): void;
 }
 
 interface ResettableToaster extends Toaster {
@@ -52,6 +58,11 @@ function build(opts?: {
       engine.show(message, retry !== undefined ? { level: "error", retry } : { level: "error" }),
     clear: () => {
       engine.clear();
+    },
+    dispose: () => {
+      document.removeEventListener("keydown", onKeyDown);
+      engine.clear();
+      view.dispose();
     },
     reset: () => {
       engine.clear();

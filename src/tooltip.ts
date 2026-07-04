@@ -161,8 +161,12 @@ class TooltipController {
       { className: "uip-tooltip", role: "tooltip", id: tipId },
       ...renderLines(text),
     );
-    document.body.appendChild(tip);
-    anchor.setAttribute("aria-describedby", tipId);
+    // When the anchor is inside an open modal <dialog>, render the tooltip into
+    // that dialog so it shares the dialog's top-layer stacking context;
+    // appending to document.body would leave it painted behind the modal.
+    const host: Element = anchor.closest("dialog[open]") ?? document.body;
+    host.appendChild(tip);
+    addDescribedBy(anchor, tipId);
 
     this.position(anchor, tip);
 
@@ -203,7 +207,7 @@ class TooltipController {
       return;
     }
     const { anchor, tip } = this.state;
-    anchor.removeAttribute("aria-describedby");
+    removeDescribedBy(anchor, tip.id);
     tip.classList.add("is-leaving");
     this.state = { kind: "fading", tip };
     this.warmUntil = Date.now() + this.cooldown;
@@ -229,7 +233,7 @@ class TooltipController {
         clearTimeout(this.state.timer);
         break;
       case "visible":
-        this.state.anchor.removeAttribute("aria-describedby");
+        removeDescribedBy(this.state.anchor, this.state.tip.id);
         this.state.tip.remove();
         break;
       case "fading":
@@ -239,6 +243,32 @@ class TooltipController {
         break;
     }
     this.state = { kind: "idle" };
+  }
+}
+
+/** Append `id` to the anchor's `aria-describedby` token list, preserving any
+ *  tokens the app already set. */
+function addDescribedBy(anchor: HTMLElement, id: string): void {
+  const current = anchor.getAttribute("aria-describedby");
+  const tokens = current === null ? [] : current.split(/\s+/).filter((t) => t !== "");
+  if (!tokens.includes(id)) {
+    tokens.push(id);
+  }
+  anchor.setAttribute("aria-describedby", tokens.join(" "));
+}
+
+/** Remove only `id` from the anchor's `aria-describedby`, restoring the rest.
+ *  Removes the attribute entirely only when nothing else remains. */
+function removeDescribedBy(anchor: HTMLElement, id: string): void {
+  const current = anchor.getAttribute("aria-describedby");
+  if (current === null) {
+    return;
+  }
+  const tokens = current.split(/\s+/).filter((t) => t !== "" && t !== id);
+  if (tokens.length > 0) {
+    anchor.setAttribute("aria-describedby", tokens.join(" "));
+  } else {
+    anchor.removeAttribute("aria-describedby");
   }
 }
 
