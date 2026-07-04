@@ -651,6 +651,7 @@ describe("createPopover — reposition tracking", () => {
     expect(topOf(panel)).toBe(124);
     stubRect(anchor, 100, 50, 50, 20); // anchor scrolled up; bottom now 70
     document.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersToNextFrame(); // tracking is rAF-throttled — flush the frame
     expect(topOf(panel)).toBe(74);
   });
 
@@ -672,6 +673,7 @@ describe("createPopover — reposition tracking", () => {
     vi.advanceTimersByTime(1);
     stubRect(anchor, 200, 300, 50, 20); // moved
     window.dispatchEvent(new Event("resize"));
+    vi.advanceTimersToNextFrame(); // tracking is rAF-throttled — flush the frame
     expect(leftOf(panel)).toBe(200);
     expect(topOf(panel)).toBe(324);
   });
@@ -772,5 +774,238 @@ describe("createPopover — dispose + listener hygiene", () => {
     const removedTypes = (vvRemove.mock.calls as unknown[][]).map((cc) => cc[0]);
     expect(removedTypes).toContain("resize");
     expect(removedTypes).toContain("scroll");
+  });
+});
+
+// ===== createPopover: focus management (opt-in) ===========================
+
+describe("createPopover — focus management", () => {
+  it("initialFocus focuses the given element after show", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    const field = document.createElement("input");
+    panel.appendChild(field);
+    document.body.append(anchor, panel);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { initialFocus: field, flip: false, clamp: false });
+    c.show();
+    expect(document.activeElement).toBe(field);
+  });
+
+  it("leaves focus alone on show when initialFocus is omitted", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    const before = document.createElement("button");
+    document.body.append(before, anchor, panel);
+    before.focus();
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { flip: false, clamp: false });
+    c.show();
+    expect(document.activeElement).toBe(before); // unchanged — caller owns focus
+  });
+
+  it("a detached initialFocus target is a safe no-op", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    const before = document.createElement("button");
+    const detached = document.createElement("input"); // never connected
+    document.body.append(before, anchor, panel);
+    before.focus();
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { initialFocus: detached, flip: false, clamp: false });
+    c.show();
+    expect(document.activeElement).toBe(before); // detached target ignored
+  });
+
+  it("returnFocus:true restores the pre-show active element on hide", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    const trigger = document.createElement("button");
+    document.body.append(trigger, anchor, panel);
+    trigger.focus(); // focused at open time
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { returnFocus: true, flip: false, clamp: false });
+    c.show();
+    anchor.focus(); // focus moves elsewhere while open
+    expect(document.activeElement).toBe(anchor);
+    c.hide();
+    expect(document.activeElement).toBe(trigger); // restored to the pre-show element
+  });
+
+  it("returnFocus as an element focuses that element on hide", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    const target = document.createElement("button");
+    document.body.append(anchor, panel, target);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { returnFocus: target, flip: false, clamp: false });
+    c.show();
+    c.hide();
+    expect(document.activeElement).toBe(target);
+  });
+
+  it("leaves focus alone on hide when returnFocus is unset", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    const trigger = document.createElement("button");
+    document.body.append(trigger, anchor, panel);
+    trigger.focus();
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { flip: false, clamp: false });
+    c.show();
+    anchor.focus(); // focus moved while open
+    c.hide();
+    expect(document.activeElement).toBe(anchor); // hide did NOT restore to trigger
+  });
+
+  it("a detached returnFocus target is a safe no-op on hide", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    const detached = document.createElement("button"); // never connected
+    document.body.append(anchor, panel);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { returnFocus: detached, flip: false, clamp: false });
+    c.show();
+    c.hide();
+    expect(document.activeElement).not.toBe(detached); // never focused the detached node
+  });
+});
+
+// ===== createPopover: Escape isolation ====================================
+
+describe("createPopover — Escape isolation", () => {
+  it("stops propagation so an outer (window-level) Escape handler does not also fire", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.appendChild(anchor);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    // An outer handler above the popover's document listener in the propagation
+    // path — e.g. a modal's own Escape-to-close handler.
+    const outer = vi.fn();
+    window.addEventListener("keydown", outer);
+    const c = createPopover(anchor, panel);
+    c.show();
+    vi.advanceTimersByTime(1); // install the deferred keydown listener
+    const ev = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+    const stopSpy = vi.spyOn(ev, "stopPropagation");
+    document.dispatchEvent(ev);
+    // Snapshot before assertions so cleanup always runs even if one fails.
+    const outerCalls = outer.mock.calls.length;
+    const stopCalls = stopSpy.mock.calls.length;
+    window.removeEventListener("keydown", outer);
+    expect(c.isOpen).toBe(false); // popover handled Escape and closed
+    expect(stopCalls).toBeGreaterThanOrEqual(1); // it called stopPropagation
+    expect(outerCalls).toBe(0); // the outer handler was isolated from this Escape
+  });
+
+  it("does not stop propagation for non-Escape keys", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.appendChild(anchor);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel);
+    c.show();
+    vi.advanceTimersByTime(1);
+    const ev = new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true });
+    const stopSpy = vi.spyOn(ev, "stopPropagation");
+    document.dispatchEvent(ev);
+    expect(stopSpy).not.toHaveBeenCalled();
+    expect(c.isOpen).toBe(true); // still open — only Escape closes
+  });
+});
+
+// ===== createPopover: rAF-throttled reposition tracking ===================
+
+describe("createPopover — rAF-throttled reposition tracking", () => {
+  it("coalesces a burst of scroll events into one placeAnchored per frame", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.appendChild(anchor);
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, {
+      placement: "bottom",
+      align: "start",
+      flip: false,
+      clamp: false,
+    });
+    c.show();
+    vi.advanceTimersByTime(1); // install the deferred tracking listeners
+    // placeAnchored reads anchor.getBoundingClientRect() exactly once per call,
+    // so its call count is the reposition count. Spy after show() so we measure
+    // only tracking-driven repositions.
+    const rectSpy = vi.spyOn(anchor, "getBoundingClientRect");
+    document.dispatchEvent(new Event("scroll"));
+    document.dispatchEvent(new Event("scroll"));
+    document.dispatchEvent(new Event("scroll"));
+    expect(rectSpy).not.toHaveBeenCalled(); // coalesced — nothing until the frame
+    vi.advanceTimersToNextFrame(); // run the single pending frame
+    expect(rectSpy).toHaveBeenCalledOnce(); // ONE reposition for the whole burst
+    // A later burst in a new frame repositions again — the frame id resets.
+    document.dispatchEvent(new Event("scroll"));
+    document.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersToNextFrame();
+    expect(rectSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("public reposition() stays synchronous (not throttled)", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.appendChild(anchor);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { flip: false, clamp: false });
+    c.show();
+    const rectSpy = vi.spyOn(anchor, "getBoundingClientRect");
+    c.reposition();
+    expect(rectSpy).toHaveBeenCalledOnce(); // immediate — no frame flush needed
+  });
+
+  it("cancels a pending tracking frame on hide (no reposition after close)", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.appendChild(anchor);
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { flip: false, clamp: false });
+    c.show();
+    vi.advanceTimersByTime(1);
+    const rectSpy = vi.spyOn(anchor, "getBoundingClientRect");
+    document.dispatchEvent(new Event("scroll")); // schedule a frame
+    c.hide(); // cancels the pending frame
+    vi.advanceTimersToNextFrame();
+    expect(rectSpy).not.toHaveBeenCalled(); // the cancelled frame never ran
+  });
+});
+
+// ===== createPopover: dispose ARIA cleanup ================================
+
+describe("createPopover — dispose ARIA cleanup", () => {
+  it("dispose removes aria-haspopup and aria-expanded from the anchor", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.appendChild(anchor);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel);
+    c.show();
+    expect(anchor.getAttribute("aria-haspopup")).toBe("true");
+    expect(anchor.getAttribute("aria-expanded")).toBe("true");
+    c.dispose();
+    expect(anchor.hasAttribute("aria-haspopup")).toBe(false);
+    expect(anchor.hasAttribute("aria-expanded")).toBe(false);
   });
 });

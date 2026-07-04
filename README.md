@@ -424,21 +424,47 @@ Two exports, split by responsibility:
 - `matchAnchorWidth?: boolean | number` — set the panel's `min-width` to the anchor width (`true`) or to `max(anchorWidth, n)` (a number). Default `false`.
 - `margin?: number` — viewport edge margin used by flip + clamp, in px. Default `8`.
 
-`PopoverOptions extends PlacementOptions` adds `{ closeOnOutside?; closeOnEscape?; onOpen?; onClose? }` (dismissal defaults `true`).
+`PopoverOptions extends PlacementOptions` adds `{ closeOnOutside?; closeOnEscape?; initialFocus?; returnFocus?; onOpen?; onClose? }` (dismissal defaults `true`).
 
 The placement engine reads the viewport from `window.visualViewport` when
 present, so flipping and clamping stay correct above the mobile on-screen
 keyboard (it falls back to `window.innerWidth` / `innerHeight`). `reposition()`
 is the seam for async content: load the panel's contents, then call it to
 re-measure and re-clamp. An open popover also repositions on scroll (capture),
-window resize, and `visualViewport` resize / scroll.
+window resize, and `visualViewport` resize / scroll; those tracking events are
+throttled with `requestAnimationFrame`, so a burst coalesces to at most one
+reposition per frame. The public `reposition()` stays **synchronous** — it
+re-measures immediately, which is what you want right after a content change.
+
+**Focus is opt-in — by default the caller owns it.** Pass `initialFocus` (a
+connected element) to focus it right after the popover opens, and `returnFocus`
+to restore focus on close: `true` remembers whatever was focused when the
+popover opened and refocuses it, or pass an element to focus that element
+instead. Omit both and the controller never touches focus. This mirrors the
+common branch-popover pattern — focus the filter input on open, return focus to
+the anchor on close:
+
+```ts
+const filter = panelEl.querySelector("input")!;
+const pop = createPopover(anchorButton, panelEl, {
+  initialFocus: filter, // focus the filter when the panel opens
+  returnFocus: true, // restore focus to the anchor (whatever was focused) on close
+});
+```
+
+Escape is **isolated**: when an open popover handles Escape it calls
+`stopPropagation()`, so a popover opened inside a modal consumes that keystroke
+rather than letting the same Escape also close the modal underneath. Deeper
+Escape coordination (e.g. nested document-level handlers) remains the caller's
+concern.
 
 The controller does **not** build the panel — you pass it in, so `dispose()`
 hides + unlistens but leaves your element in the DOM. It manages only
-`aria-expanded` / `aria-haspopup` on the anchor and forces no `role` on the
-panel — set `role="menu"` / `"listbox"` / `"dialog"` yourself to fit. Dismissal
-is instant (no leave animation); the optional `.uip-popover.is-open` enter fade
-is skinnable.
+`aria-expanded` / `aria-haspopup` on the anchor (`dispose()` removes both, since
+the anchor no longer owns a popover) and forces no `role` on the panel — set
+`role="menu"` / `"listbox"` / `"dialog"` yourself to fit. Dismissal is instant
+(no leave animation); the optional `.uip-popover.is-open` enter fade is
+skinnable.
 
 `--uip-z-popover` (`1100`) sits deliberately above `--uip-z-modal` (`1000`) so a
 popover opened from within a modal shows over it, and below toast (`9999`) /

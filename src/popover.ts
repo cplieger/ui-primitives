@@ -49,6 +49,14 @@ export interface PopoverOptions extends PlacementOptions {
   closeOnOutside?: boolean;
   /** Escape closes the popover. Default `true`. */
   closeOnEscape?: boolean;
+  /** Focus this element after the popover opens, if it is a connected element.
+   *  Omit (or pass `null`) to leave focus alone — by default the caller owns
+   *  focus. Opt-in. */
+  initialFocus?: HTMLElement | null;
+  /** Restore focus when the popover closes. `true` captures whatever was
+   *  focused at open time and refocuses it on close; an element refocuses that
+   *  element; `false`/omitted leaves focus alone. Opt-in. */
+  returnFocus?: boolean | HTMLElement;
   /** Invoked after the popover opens. */
   onOpen?: () => void;
   /** Invoked after the popover closes. */
@@ -234,10 +242,35 @@ export function createPopover(
   let open = false;
   let listening = false;
   let installTimer: ReturnType<typeof setTimeout> | null = null;
+  let trackingFrame: number | null = null;
+  // Focus-restore target, captured at show() time when `returnFocus` is set.
+  let restoreFocus: HTMLElement | null = null;
 
+  // Public reposition: synchronous. Callers invoke it after a content change
+  // and expect an immediate re-measure + re-clamp.
   const reposition = (): void => {
     if (open) {
       placeAnchored(panel, anchor, opts);
+    }
+  };
+
+  // Internal tracking reposition: rAF-throttled. Scroll/resize/visualViewport
+  // bursts coalesce into one placeAnchored per frame — if a frame is already
+  // pending, don't schedule another.
+  const scheduleReposition = (): void => {
+    if (trackingFrame !== null) {
+      return;
+    }
+    trackingFrame = requestAnimationFrame(() => {
+      trackingFrame = null;
+      reposition();
+    });
+  };
+
+  const cancelTrackingFrame = (): void => {
+    if (trackingFrame !== null) {
+      cancelAnimationFrame(trackingFrame);
+      trackingFrame = null;
     }
   };
 
@@ -251,6 +284,11 @@ export function createPopover(
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === "Escape") {
+      // Isolate Escape: a popover opened inside a modal consumes the key so the
+      // same keystroke doesn't also close the modal underneath. Deeper Escape
+      // coordination (nested document-level handlers) stays the caller's
+      // concern.
+      e.stopPropagation();
       hide();
     }
   };
@@ -269,13 +307,14 @@ export function createPopover(
     }
     // Track the anchor: capture-phase scroll catches scrolling in any ancestor,
     // resize covers layout changes, and visualViewport events cover pinch-zoom
-    // and the mobile keyboard.
-    document.addEventListener("scroll", reposition, true);
-    window.addEventListener("resize", reposition);
+    // and the mobile keyboard. All route through the rAF throttle so a burst of
+    // events coalesces into one reposition per frame.
+    document.addEventListener("scroll", scheduleReposition, true);
+    window.addEventListener("resize", scheduleReposition);
     const vv = window.visualViewport;
     if (vv != null) {
-      vv.addEventListener("resize", reposition);
-      vv.addEventListener("scroll", reposition);
+      vv.addEventListener("resize", scheduleReposition);
+      vv.addEventListener("scroll", scheduleReposition);
     }
   };
 
@@ -284,18 +323,20 @@ export function createPopover(
       clearTimeout(installTimer);
       installTimer = null;
     }
+    // Drop any pending tracking frame regardless of listener state.
+    cancelTrackingFrame();
     if (!listening) {
       return;
     }
     listening = false;
     document.removeEventListener("click", onDocClick);
     document.removeEventListener("keydown", onKeyDown);
-    document.removeEventListener("scroll", reposition, true);
-    window.removeEventListener("resize", reposition);
+    document.removeEventListener("scroll", scheduleReposition, true);
+    window.removeEventListener("resize", scheduleReposition);
     const vv = window.visualViewport;
     if (vv != null) {
-      vv.removeEventListener("resize", reposition);
-      vv.removeEventListener("scroll", reposition);
+      vv.removeEventListener("resize", scheduleReposition);
+      vv.removeEventListener("scroll", scheduleReposition);
     }
   };
 
@@ -315,6 +356,20 @@ export function createPopover(
     placeAnchored(panel, anchor, opts);
     anchor.setAttribute("aria-expanded", "true");
     anchor.setAttribute("aria-haspopup", "true");
+    // Focus management is opt-in — by default the caller owns focus. Capture the
+    // restore target BEFORE moving initial focus, so `returnFocus: true` records
+    // whatever was focused when we opened rather than the initialFocus element.
+    const returnFocus = opts?.returnFocus;
+    if (returnFocus === true) {
+      const active = document.activeElement;
+      restoreFocus = active instanceof HTMLElement ? active : null;
+    } else if (returnFocus instanceof HTMLElement) {
+      restoreFocus = returnFocus;
+    }
+    const initialFocus = opts?.initialFocus;
+    if (initialFocus?.isConnected) {
+      initialFocus.focus();
+    }
     // Defer listener install one tick so the click that opened us doesn't
     // immediately trip the outside-click handler and self-close.
     installTimer = setTimeout(addListeners, 0);
@@ -330,6 +385,13 @@ export function createPopover(
     panel.hidden = true;
     panel.classList.remove("is-open");
     anchor.setAttribute("aria-expanded", "false");
+    // Restore focus only if a target was captured/supplied at show() time and it
+    // is still in the document; otherwise leave focus alone.
+    const target = restoreFocus;
+    restoreFocus = null;
+    if (target?.isConnected) {
+      target.focus();
+    }
     opts?.onClose?.();
   };
 
@@ -355,6 +417,10 @@ export function createPopover(
       // Defensive: drop any listeners / pending install even if already hidden.
       // The panel is the caller's — never removed from the DOM here.
       removeListeners();
+      // The controller is gone: the anchor no longer owns a popover, so drop the
+      // ARIA it advertised (hide() only flips aria-expanded to "false").
+      anchor.removeAttribute("aria-haspopup");
+      anchor.removeAttribute("aria-expanded");
     },
   };
 }
