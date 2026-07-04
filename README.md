@@ -2,6 +2,8 @@
 
 [![npm](https://img.shields.io/npm/v/@cplieger/ui-primitives)](https://www.npmjs.com/package/@cplieger/ui-primitives)
 [![JSR](https://jsr.io/badges/@cplieger/ui-primitives)](https://jsr.io/@cplieger/ui-primitives)
+[![Test coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/ui-primitives/badges/coverage.json)](https://github.com/cplieger/ui-primitives/actions/workflows/coverage.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cplieger/ui-primitives/badge)](https://scorecard.dev/viewer/?uri=github.com/cplieger/ui-primitives)
 
 > Headless browser UI primitives — behavior, accessibility, DOM, and a documented CSS contract. You bring the skin.
 
