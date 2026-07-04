@@ -24,6 +24,16 @@
   --uip-tooltip-fade-duration: 100ms;
   --uip-dialog-leave-duration: 150ms;
   --uip-backdrop: oklch(0% 0 0deg / 50%);
+
+  /* Modal (overlay-div). z-index sits DELIBERATELY below toast/tooltip so those
+   * overlay a modal. Backdrop reuses --uip-backdrop by default. */
+  --uip-z-modal: 1000;
+  --uip-modal-backdrop: var(--uip-backdrop);
+  --uip-modal-enter-duration: 200ms;
+  --uip-modal-leave-duration: 150ms;
+
+  /* Disclosure (animated collapsible). */
+  --uip-disclosure-duration: 200ms;
 }
 
 /* ===== Toast ============================================================= */
@@ -134,6 +144,75 @@
   opacity: 0;
 }
 
+/* ===== Modal (overlay-div) =============================================== */
+
+/* The overlay is both the backdrop and the centering context. Grid-centering
+ * (not flex + max-height) sidesteps the Safari <dialog> height bug. Hidden while
+ * closed so it never intercepts clicks. */
+.uip-modal {
+  position: fixed;
+  z-index: var(--uip-z-modal, 1000);
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--uip-modal-backdrop, oklch(0% 0 0deg / 50%));
+  opacity: 0;
+  transition: opacity var(--uip-modal-enter-duration, 200ms) ease;
+}
+
+.uip-modal[hidden] {
+  display: none;
+}
+
+.uip-modal.is-open {
+  opacity: 1;
+}
+
+.uip-modal.is-leaving {
+  opacity: 0;
+  transition: opacity var(--uip-modal-leave-duration, 150ms) ease;
+}
+
+/* The panel. Enters from a slight offset; the library toggles is-open/is-leaving
+ * on the overlay. */
+.uip-modal-dialog {
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity var(--uip-modal-enter-duration, 200ms) ease,
+    transform var(--uip-modal-enter-duration, 200ms) ease;
+}
+
+.uip-modal.is-open .uip-modal-dialog {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.uip-modal.is-leaving .uip-modal-dialog {
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity var(--uip-modal-leave-duration, 150ms) ease,
+    transform var(--uip-modal-leave-duration, 150ms) ease;
+}
+
+/* ===== Disclosure (animated collapsible) ================================= */
+
+/* interpolate-size lets height transition to/from the `auto` keyword on modern
+ * engines; the library falls back to a measured scrollHeight px target where it
+ * is unsupported. The library drives the height inline; this owns the clip and
+ * the transition. */
+.uip-disclosure-region {
+  overflow: hidden;
+  interpolate-size: allow-keywords;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .uip-disclosure-region {
+    transition: height var(--uip-disclosure-duration, 200ms) ease;
+  }
+}
+
 /* ===== Announce (screen-reader live regions) ============================= */
 
 /* Standard visually-hidden ("sr-only"): removed from the visual layout but
@@ -163,7 +242,11 @@
   .uip-confirm,
   .uip-dialog,
   .uip-confirm::backdrop,
-  .uip-dialog::backdrop {
+  .uip-dialog::backdrop,
+  .uip-modal,
+  .uip-modal.is-leaving,
+  .uip-modal-dialog,
+  .uip-modal.is-leaving .uip-modal-dialog {
     /* stylelint-disable-next-line time-min-milliseconds -- sub-10ms keeps transitionend firing so JS leave-lifecycles still complete under reduced motion */
     transition-duration: 0.01ms;
   }
