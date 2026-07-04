@@ -1,0 +1,69 @@
+{
+  "name": "@cplieger/ui-primitives",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Headless browser UI primitives (toast, tooltip, dialog, confirm, focus-trap, theme, view-transition, announce) with behavior + accessibility + a documented CSS class/custom-property contract. Consuming apps supply only skin CSS. Built on @cplieger/reactive.",
+  "license": "GPL-3.0-or-later",
+  "exports": {
+    ".": "./src/index.ts",
+    "./toast": "./src/toast/index.ts",
+    "./tooltip": "./src/tooltip.ts",
+    "./dialog": "./src/dialog.ts",
+    "./confirm": "./src/confirm.ts",
+    "./focus-trap": "./src/focus-trap.ts",
+    "./theme": "./src/theme.ts",
+    "./view-transition": "./src/view-transition.ts",
+    "./announce": "./src/announce.ts",
+    "./css": "./css/ui-primitives.css"
+  },
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "types": "./src/index.ts",
+  "scripts": {
+    "typecheck": "tsgo -p tsconfig.json",
+    "typecheck:tests": "tsgo -p tsconfig.test.json",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest --run --coverage",
+    "lint:eslint": "eslint .",
+    "lint:prettier": "prettier --check .",
+    "lint:stylelint": "stylelint \"css/**/*.css\"",
+    "lint:fix": "eslint . --fix && prettier --write .",
+    "lint:knip": "knip"
+  },
+  "dependencies": {
+    "@cplieger/reactive": "^1.2.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "25.9.4",
+    "@vitest/coverage-v8": "4.1.9",
+    "eslint": "10.6.0",
+    "fast-check": "4.8.0",
+    "happy-dom": "20.10.6",
+    "html-validate": "11.5.4",
+    "knip": "6.23.0",
+    "prettier": "3.9.4",
+    "stylelint": "17.14.0",
+    "stylelint-config-standard": "40.0.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.62.1",
+    "vitest": "4.1.9"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cplieger/ui-primitives.git"
+  },
+  "files": [
+    "src/",
+    "css/",
+    "LICENSE",
+    "README.md",
+    "!src/**/*.test.ts",
+    "!src/**/fc-strict-setup.ts"
+  ]
+}

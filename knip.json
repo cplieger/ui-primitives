@@ -1,0 +1,4 @@
+{
+  "ignoreDependencies": ["html-validate"],
+  "ignoreBinaries": ["tsgo"]
+}

@@ -1,0 +1,95 @@
+// toast/index.ts — Public toast surface: the `Toaster` factory + a default
+// module singleton for convenience, with `info` / `success` / `error` free
+// functions bound to it.
+
+import { ToastEngine } from "./engine.js";
+import type { ToastLevel, ToastOptions, ToastRetry } from "./engine.js";
+import { createToastView } from "./view.js";
+import type { ToastHandle } from "./view.js";
+
+export type { ToastLevel, ToastOptions, ToastRetry };
+
+export interface Toaster {
+  /** Show a toast; returns a function that dismisses it. */
+  show(message: string, opts?: ToastOptions): () => void;
+  info(message: string): () => void;
+  success(message: string): () => void;
+  error(message: string, retry?: ToastRetry): () => void;
+  /** Dismiss all visible toasts and clear the queue. */
+  clear(): void;
+}
+
+interface ResettableToaster extends Toaster {
+  /** Clear state + remove the container (kept internal; the ESC handler stays). */
+  reset(): void;
+}
+
+function build(opts?: {
+  maxVisible?: number;
+  maxQueue?: number;
+  defaultDuration?: number;
+}): ResettableToaster {
+  const view = createToastView();
+  const engine = new ToastEngine<ToastHandle>({
+    view,
+    ...(opts?.maxVisible !== undefined ? { maxVisible: opts.maxVisible } : {}),
+    ...(opts?.maxQueue !== undefined ? { maxQueue: opts.maxQueue } : {}),
+    ...(opts?.defaultDuration !== undefined ? { defaultDuration: opts.defaultDuration } : {}),
+  });
+
+  const onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key === "Escape") {
+      engine.dismissNewest();
+    }
+  };
+  document.addEventListener("keydown", onKeyDown);
+
+  return {
+    show: (message, showOpts) => engine.show(message, showOpts),
+    info: (message) => engine.show(message, { level: "info" }),
+    success: (message) => engine.show(message, { level: "success" }),
+    error: (message, retry) =>
+      engine.show(message, retry !== undefined ? { level: "error", retry } : { level: "error" }),
+    clear: () => {
+      engine.clear();
+    },
+    reset: () => {
+      engine.clear();
+      view.dispose();
+    },
+  };
+}
+
+/** Create an isolated toaster with its own stack container and queue. */
+export function createToaster(opts?: {
+  maxVisible?: number;
+  maxQueue?: number;
+  defaultDuration?: number;
+}): Toaster {
+  return build(opts);
+}
+
+const singleton = build();
+
+/** Default shared toaster. */
+export const toast: Toaster = singleton;
+
+/** Show an info toast on the default toaster. */
+export function info(message: string): () => void {
+  return singleton.info(message);
+}
+
+/** Show a success toast on the default toaster. */
+export function success(message: string): () => void {
+  return singleton.success(message);
+}
+
+/** Show an error toast on the default toaster. */
+export function error(message: string, retry?: ToastRetry): () => void {
+  return singleton.error(message, retry);
+}
+
+/** Test-only: clear the default toaster and remove its container. */
+export function _resetForTest(): void {
+  singleton.reset();
+}
