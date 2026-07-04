@@ -74,6 +74,12 @@ interface ModalEntry {
   readonly onClose: (() => void) | undefined;
   /** Focus-restore target computed at open time from `returnFocus`. */
   readonly opener: HTMLElement | null;
+  /** True when `openModal` hoisted a caller-supplied overlay to `<body>`; its
+   *  original location (below) is restored on teardown. `createModal` overlays
+   *  originate in `<body>`, so they are never hoisted. */
+  readonly hoisted: boolean;
+  readonly originalParent: ParentNode | null;
+  readonly originalNextSibling: ChildNode | null;
   /** Active focus-trap release fn; `null` while the trap is paused. */
   releaseTrap: (() => void) | null;
   readonly onMouseDown: (e: MouseEvent) => void;
@@ -111,6 +117,13 @@ function resolvePanel(overlay: HTMLElement): HTMLElement {
 function autoLabelId(panel: HTMLElement): string | null {
   const titled = panel.querySelector<HTMLElement>("[id$='-title']");
   return titled !== null && titled.id !== "" ? titled.id : null;
+}
+
+/** Auto-detect a description target: a descendant whose id ends `-desc` or
+ *  `-description`. Mirrors `autoLabelId` for `aria-describedby`. */
+function autoDescribeId(panel: HTMLElement): string | null {
+  const described = panel.querySelector<HTMLElement>("[id$='-desc'], [id$='-description']");
+  return described !== null && described.id !== "" ? described.id : null;
 }
 
 function applyScrollLock(): void {
@@ -226,13 +239,20 @@ export function openModal(overlay: HTMLElement, opts?: ModalOptions): void {
   if (labelledBy !== null) {
     panel.setAttribute("aria-labelledby", labelledBy);
   }
-  if (opts?.describedBy !== undefined) {
-    panel.setAttribute("aria-describedby", opts.describedBy);
+  const describedBy = opts?.describedBy ?? autoDescribeId(panel);
+  if (describedBy !== null) {
+    panel.setAttribute("aria-describedby", describedBy);
   }
 
   // Hoist to <body> so background inerting (siblings of the overlay) and
-  // stacking behave like a real top layer.
-  if (overlay.parentNode !== document.body) {
+  // stacking behave like a real top layer. Record the original location first
+  // so teardown can put a caller-supplied overlay back where it came from
+  // instead of leaving it a permanent hidden <body> child. createModal overlays
+  // already live in <body>, so they are never hoisted (restore is a no-op).
+  const hoisted = overlay.parentNode !== document.body;
+  const originalParent = hoisted ? overlay.parentNode : null;
+  const originalNextSibling = hoisted ? overlay.nextSibling : null;
+  if (hoisted) {
     document.body.appendChild(overlay);
   }
 
@@ -289,6 +309,9 @@ export function openModal(overlay: HTMLElement, opts?: ModalOptions): void {
     inertBackground,
     onClose: opts?.onClose,
     opener,
+    hoisted,
+    originalParent,
+    originalNextSibling,
     releaseTrap,
     onMouseDown,
     onMouseUp,
@@ -306,6 +329,10 @@ export function openModal(overlay: HTMLElement, opts?: ModalOptions): void {
 
   entry.enterRaf = requestAnimationFrame(() => {
     entry.enterRaf = null;
+    // Force a reflow so `is-entering` is a committed style state before the
+    // swap to `is-open`, making the enter transition deterministic rather than
+    // depending on `trapFocus` having incidentally flushed layout.
+    entry.panel.getBoundingClientRect();
     overlay.classList.remove("is-entering");
     overlay.classList.add("is-open");
   });
@@ -386,12 +413,25 @@ function teardown(entry: ModalEntry): void {
   overlay.removeEventListener("mousedown", entry.onMouseDown);
   overlay.removeEventListener("mouseup", entry.onMouseUp);
 
+  // Restore a hoisted (caller-supplied) overlay to its original location so we
+  // never leave it a permanent hidden <body> child. If its original next
+  // sibling has since moved, fall back to appending to the original parent.
+  if (entry.hoisted && entry.originalParent !== null) {
+    const { originalParent, originalNextSibling } = entry;
+    if (originalNextSibling !== null && originalNextSibling.parentNode === originalParent) {
+      originalNextSibling.before(overlay);
+    } else {
+      originalParent.append(overlay);
+    }
+  }
+
   if (entry.releaseTrap !== null) {
     entry.releaseTrap();
     entry.releaseTrap = null;
   }
 
   const i = stack.indexOf(entry);
+  const wasTop = i === stack.length - 1;
   if (i !== -1) {
     stack.splice(i, 1);
   }
@@ -400,6 +440,17 @@ function teardown(entry: ModalEntry): void {
     releaseScrollLock();
   }
   syncInert();
+
+  // Non-top close (a modal below the current top closed out of LIFO order):
+  // leave the top's live trap and focus exactly as they are. Re-trapping the
+  // top here would orphan its capture-phase keydown listener (a permanent
+  // leak), and refocusing would yank focus to the closed modal's opener —
+  // outside the still-open top, so focus would escape the modal. The stack is
+  // still non-empty, so the document Escape keydown stays installed.
+  if (!wasTop) {
+    entry.onClose?.();
+    return;
+  }
 
   const newTop = stack[stack.length - 1];
   if (newTop !== undefined) {

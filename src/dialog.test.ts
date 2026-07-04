@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { createDialog, openModal, closeModal } from "./dialog.js";
+import { createDialog, openDialog, closeDialog } from "./dialog.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -18,18 +18,18 @@ function makeDialog(): HTMLDialogElement {
   return d;
 }
 
-describe("openModal / closeModal", () => {
-  it("openModal opens the dialog", () => {
+describe("openDialog / closeDialog", () => {
+  it("openDialog opens the dialog", () => {
     const d = makeDialog();
-    openModal(d);
+    openDialog(d);
     expect(d.open).toBe(true);
   });
 
-  it("closeModal adds is-leaving, then closes + fires onClosed via the fallback", () => {
+  it("closeDialog adds is-leaving, then closes + fires onClosed via the fallback", () => {
     const d = makeDialog();
-    openModal(d);
+    openDialog(d);
     const onClosed = vi.fn();
-    closeModal(d, onClosed);
+    closeDialog(d, onClosed);
     expect(d.classList.contains("is-leaving")).toBe(true);
     expect(d.open).toBe(true);
     vi.advanceTimersByTime(400);
@@ -38,20 +38,20 @@ describe("openModal / closeModal", () => {
     expect(onClosed).toHaveBeenCalledOnce();
   });
 
-  it("closeModal completes on transitionend before the fallback fires", () => {
+  it("closeDialog completes on transitionend before the fallback fires", () => {
     const d = makeDialog();
-    openModal(d);
+    openDialog(d);
     const onClosed = vi.fn();
-    closeModal(d, onClosed);
+    closeDialog(d, onClosed);
     d.dispatchEvent(new Event("transitionend"));
     expect(d.open).toBe(false);
     expect(onClosed).toHaveBeenCalledOnce();
   });
 
-  it("closeModal on an already-closed dialog fires onClosed immediately", () => {
+  it("closeDialog on an already-closed dialog fires onClosed immediately", () => {
     const d = makeDialog();
     const onClosed = vi.fn();
-    closeModal(d, onClosed);
+    closeDialog(d, onClosed);
     expect(onClosed).toHaveBeenCalledOnce();
   });
 });

@@ -225,4 +225,22 @@ describe("dispose", () => {
     trigger.dispatchEvent(enter);
     expect(d.isOpen).toBe(false);
   });
+
+  it("settles the height on dispose so a mid-animation dispose does not freeze an inline px height", () => {
+    const { trigger, region } = mount();
+    const d = createDisclosure(trigger, region);
+    d.open(); // animated open sets an inline height mid-transition
+    expect(region.style.height).not.toBe("");
+    d.dispose(); // dispose while the open tween is still pending
+    // Open state settles to auto (cleared inline height), not a frozen value.
+    expect(region.style.height).toBe("");
+  });
+
+  it("settles the height to 0 on dispose while collapsed", () => {
+    const { trigger, region } = mount();
+    const d = createDisclosure(trigger, region, { open: true });
+    d.close(); // collapsing
+    d.dispose();
+    expect(region.style.height).toBe("0px");
+  });
 });

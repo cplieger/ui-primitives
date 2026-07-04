@@ -103,6 +103,26 @@ describe("modal ARIA wiring", () => {
     expect(content.getAttribute("aria-labelledby")).toBe("settings-title");
   });
 
+  it("auto-detects an [id$='-desc'] descendant for aria-describedby", () => {
+    const { content } = makeContent(1);
+    const desc = document.createElement("p");
+    desc.id = "settings-desc";
+    content.append(desc);
+    const m = createModal(content);
+    m.open();
+    expect(content.getAttribute("aria-describedby")).toBe("settings-desc");
+  });
+
+  it("auto-detects an [id$='-description'] descendant for aria-describedby", () => {
+    const { content } = makeContent(1);
+    const desc = document.createElement("p");
+    desc.id = "dialog-description";
+    content.append(desc);
+    const m = createModal(content);
+    m.open();
+    expect(content.getAttribute("aria-describedby")).toBe("dialog-description");
+  });
+
   it("honors explicit labelledBy / describedBy and does not auto-detect over them", () => {
     const { content } = makeContent(1);
     const title = document.createElement("h2");
@@ -439,5 +459,172 @@ describe("standalone openModal / closeModal", () => {
     const onClosed = vi.fn();
     closeModal(overlay, onClosed);
     expect(onClosed).toHaveBeenCalledOnce();
+  });
+});
+
+describe("non-LIFO close keeps the top trap intact (F1)", () => {
+  it("closing the BOTTOM modal while the top stays open leaks no trap and does not move focus", () => {
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+
+    const opener1 = document.createElement("button");
+    document.body.appendChild(opener1);
+    opener1.focus();
+
+    const m1 = createModal(makeContent(2, "a").content);
+    m1.open();
+
+    const { content: c2, buttons: b2 } = makeContent(2, "z");
+    const m2 = createModal(c2);
+    m2.open();
+    expect(document.activeElement).toBe(b2[0]);
+    // Exactly one active capture-phase keydown (m2's trap; m1's was paused).
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(1);
+
+    // Close the bottom modal out of LIFO order while m2 is still open.
+    m1.close();
+    vi.advanceTimersByTime(400);
+
+    // m2's trap is untouched: still exactly one active capture keydown listener.
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(1);
+    // Focus did NOT jump to m1's opener; it stays inside m2.
+    expect(document.activeElement).toBe(b2[0]);
+    expect(document.activeElement).not.toBe(opener1);
+    // m2 is still trapped: Tab cycles at its edge instead of escaping.
+    b2[1]!.focus();
+    const tab = tabEvent();
+    document.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(b2[0]);
+
+    m2.close();
+    vi.advanceTimersByTime(400);
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(0);
+  });
+
+  it("closing the MIDDLE modal in a 3-deep stack keeps the top trap and leaks nothing", () => {
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+
+    const m1 = createModal(makeContent(2, "a").content);
+    m1.open();
+    const m2 = createModal(makeContent(2, "b").content);
+    m2.open();
+    const { content: c3, buttons: b3 } = makeContent(2, "c");
+    const m3 = createModal(c3);
+    m3.open();
+    expect(document.activeElement).toBe(b3[0]);
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(1);
+
+    // Close the middle modal (out of LIFO order).
+    m2.close();
+    vi.advanceTimersByTime(400);
+
+    // The top (m3) keeps its trap; no listener leak, focus unmoved.
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(1);
+    expect(document.activeElement).toBe(b3[0]);
+    b3[1]!.focus();
+    const tab = tabEvent();
+    document.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(b3[0]);
+  });
+
+  it("dispose() of a non-top modal keeps the top trap and does not move focus", () => {
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+
+    const m1 = createModal(makeContent(2, "a").content);
+    m1.open();
+    const { content: c2, buttons: b2 } = makeContent(2, "z");
+    const m2 = createModal(c2);
+    m2.open();
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(1);
+
+    // Dispose the bottom modal while m2 is open (dispose tears down at once).
+    m1.dispose();
+
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(1);
+    expect(document.activeElement).toBe(b2[0]);
+    expect(m1.el.parentElement).toBeNull();
+  });
+
+  it("closing the rest LIFO after a non-LIFO close ends with zero trap listeners", () => {
+    const addSpy = vi.spyOn(document, "addEventListener");
+    const removeSpy = vi.spyOn(document, "removeEventListener");
+
+    const m1 = createModal(makeContent(2, "a").content);
+    m1.open();
+    const m2 = createModal(makeContent(2, "b").content);
+    m2.open();
+    const m3 = createModal(makeContent(2, "c").content);
+    m3.open();
+
+    // Non-LIFO: close the middle first.
+    m2.close();
+    vi.advanceTimersByTime(400);
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(1);
+
+    // Then close the remaining two LIFO (top m3, then m1).
+    m3.close();
+    vi.advanceTimersByTime(400);
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(1);
+
+    m1.close();
+    vi.advanceTimersByTime(400);
+    expect(captureKeydowns(addSpy) - captureKeydowns(removeSpy)).toBe(0);
+  });
+});
+
+describe("hoisted overlay restore (F3)", () => {
+  it("restores a caller overlay to its original parent on close", () => {
+    const container = document.createElement("section");
+    document.body.appendChild(container);
+    const { content } = makeContent(1);
+    content.classList.add("uip-modal-dialog");
+    const overlay = document.createElement("div");
+    overlay.appendChild(content);
+    container.appendChild(overlay); // lives inside container, not <body>
+
+    openModal(overlay);
+    // Hoisted to <body> while open (for stacking + background inerting).
+    expect(overlay.parentElement).toBe(document.body);
+
+    closeModal(overlay);
+    vi.advanceTimersByTime(400);
+    // Restored to the original parent, not left as a hidden <body> child.
+    expect(overlay.parentElement).toBe(container);
+    expect(overlay.hidden).toBe(true);
+  });
+
+  it("restores the overlay to its original sibling position", () => {
+    const container = document.createElement("section");
+    const before = document.createElement("span");
+    const after = document.createElement("span");
+    const { content } = makeContent(1);
+    content.classList.add("uip-modal-dialog");
+    const overlay = document.createElement("div");
+    overlay.appendChild(content);
+    container.append(before, overlay, after);
+    document.body.appendChild(container);
+
+    openModal(overlay);
+    expect(overlay.parentElement).toBe(document.body);
+
+    closeModal(overlay);
+    vi.advanceTimersByTime(400);
+    expect(overlay.previousElementSibling).toBe(before);
+    expect(overlay.nextElementSibling).toBe(after);
+  });
+
+  it("does not move a createModal overlay (it originates in <body>)", () => {
+    const { content } = makeContent(1);
+    const m = createModal(content);
+    m.open();
+    expect(m.el.parentElement).toBe(document.body);
+    m.close();
+    vi.advanceTimersByTime(400);
+    // Still a <body> child (never hoisted, so restore is a no-op).
+    expect(m.el.parentElement).toBe(document.body);
   });
 });

@@ -198,6 +198,9 @@ export function createDisclosure(
     },
     dispose(): void {
       clearPending();
+      // Settle the height so a dispose mid-animation doesn't freeze an inline
+      // px height: open clears to auto, collapsed pins to 0.
+      region.style.height = open ? "" : "0px";
       trigger.removeEventListener("click", onClick);
       if (!isNativeButton) {
         trigger.removeEventListener("keydown", onKeyDown);
