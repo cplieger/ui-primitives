@@ -33,5 +33,17 @@ export type { ConfirmOptions } from "./confirm.js";
 export { initTooltips } from "./tooltip.js";
 export type { TooltipOptions } from "./tooltip.js";
 
+// popover is the interactive superset of tooltip: an anchored floating panel
+// (placeAnchored positioner + createPopover controller) and the substrate a
+// menu/listbox/picker sits on.
+export { createPopover, placeAnchored } from "./popover.js";
+export type {
+  PopoverController,
+  PopoverOptions,
+  PlacementOptions,
+  PopoverPlacement,
+  PopoverAlign,
+} from "./popover.js";
+
 export { createToaster, toast, info, success, error } from "./toast/index.js";
 export type { Toaster, ToastLevel, ToastOptions, ToastRetry } from "./toast/index.js";

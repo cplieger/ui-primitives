@@ -18,6 +18,8 @@ describe("public surface", () => {
     expect(typeof api.createDisclosure).toBe("function");
     expect(typeof api.confirm).toBe("function");
     expect(typeof api.initTooltips).toBe("function");
+    expect(typeof api.createPopover).toBe("function");
+    expect(typeof api.placeAnchored).toBe("function");
     expect(typeof api.createToaster).toBe("function");
     expect(typeof api.info).toBe("function");
     expect(typeof api.success).toBe("function");
