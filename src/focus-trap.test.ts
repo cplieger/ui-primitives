@@ -159,4 +159,16 @@ describe("trapFocus", () => {
     }).not.toThrow();
     expect(document.activeElement).not.toBe(detached); // focus not moved to it
   });
+
+  it("initialFocus that is detached is a safe no-op (does not throw or focus it)", () => {
+    const detached = makeButton("detached"); // never appended → not connected
+    const { container } = mount("a", "b");
+    let release: () => void = () => undefined;
+    expect(() => {
+      release = trapFocus(container, { initialFocus: detached });
+    }).not.toThrow();
+    // The detached target is never focused (would throw in some engines).
+    expect(document.activeElement).not.toBe(detached);
+    release();
+  });
 });

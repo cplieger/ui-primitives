@@ -5,7 +5,7 @@
 
 import { el } from "@cplieger/reactive";
 
-import { closeModal, openModal } from "./dialog.js";
+import { closeDialog, openDialog } from "./dialog.js";
 
 export interface ConfirmOptions {
   title?: string;
@@ -104,7 +104,7 @@ export function confirm(message: string, opts?: ConfirmOptions): Promise<boolean
     const { signal } = controller;
     let settled = false;
 
-    openModal(r.dialog);
+    openDialog(r.dialog);
     // Native <dialog>.showModal() already traps Tab and restores focus to the
     // opener on close, so we don't add a focus-trap (two would fight over Tab).
     // We only place the initial focus: Cancel for destructive prompts, so a
@@ -138,7 +138,7 @@ export function confirm(message: string, opts?: ConfirmOptions): Promise<boolean
         pending = null;
       }
       teardown();
-      closeModal(r.dialog);
+      closeDialog(r.dialog);
       resolve(value);
     };
 

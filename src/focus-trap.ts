@@ -49,7 +49,17 @@ export function trapFocus(container: HTMLElement, opts?: FocusTrapOptions): () =
     container.tabIndex = -1;
     container.focus();
   } else {
-    (opts?.initialFocus ?? initialFocusables[0] ?? null)?.focus();
+    const initialFocus = opts?.initialFocus ?? null;
+    if (initialFocus !== null) {
+      // Only focus an explicit initialFocus target that is still in the
+      // document. A detached node (e.g. a returnFocus opener chained from a
+      // modal that has since been removed) is a safe no-op, not a throw.
+      if (initialFocus.isConnected) {
+        initialFocus.focus();
+      }
+    } else {
+      initialFocusables[0]?.focus();
+    }
   }
 
   const onKeyDown = (e: KeyboardEvent): void => {

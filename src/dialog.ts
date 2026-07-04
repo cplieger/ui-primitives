@@ -25,7 +25,7 @@ export interface DialogController {
 
 /** Open a native <dialog> as a modal. happy-dom / older engines may lack
  *  `showModal()`; fall back to the `open` property so behavior degrades. */
-export function openModal(dialog: HTMLDialogElement): void {
+export function openDialog(dialog: HTMLDialogElement): void {
   if (dialog.open) {
     return;
   }
@@ -50,7 +50,7 @@ function closeNative(dialog: HTMLDialogElement): void {
 
 /** Close a native <dialog> after a fade-out: add `is-leaving`, wait for
  *  `transitionend` (or the fallback), then close and invoke `onClosed`. */
-export function closeModal(dialog: HTMLDialogElement, onClosed?: () => void): void {
+export function closeDialog(dialog: HTMLDialogElement, onClosed?: () => void): void {
   if (!dialog.open) {
     onClosed?.();
     return;
@@ -96,7 +96,7 @@ export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): D
   let downOnDialog = false;
 
   const doClose = (): void => {
-    closeModal(dialog, onClose);
+    closeDialog(dialog, onClose);
   };
 
   const onMouseDown = (e: MouseEvent): void => {
@@ -128,7 +128,7 @@ export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): D
   return {
     el: dialog,
     open: () => {
-      openModal(dialog);
+      openDialog(dialog);
     },
     close: doClose,
     dispose: () => {

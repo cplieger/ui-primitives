@@ -234,21 +234,21 @@ containment, the top layer, and Escape for free; these add backdrop dismissal
 and a fade-out close lifecycle.
 
 ```ts
-import { createDialog, openModal, closeModal } from "@cplieger/ui-primitives/dialog";
+import { createDialog, openDialog, closeDialog } from "@cplieger/ui-primitives/dialog";
 
 const controller = createDialog(myDialog, { closeOnBackdrop: true, onClose: () => {} });
 controller.open();
 controller.close();
 
 // or manage a <dialog> yourself:
-openModal(myDialog);
-closeModal(myDialog, () => console.log("closed"));
+openDialog(myDialog);
+closeDialog(myDialog, () => console.log("closed"));
 ```
 
 - `createDialog(dialog, opts?)` → `{ open(); close(); readonly el; dispose() }`. Adds the `uip-dialog` class for the base skin.
 - `DialogOptions` = `{ closeOnBackdrop?; closeOnEscape?; onClose? }`.
-- `openModal(dialog)` — `showModal()` with a graceful fallback.
-- `closeModal(dialog, onClosed?)` — fade out via `is-leaving`, then close.
+- `openDialog(dialog)` — `showModal()` with a graceful fallback.
+- `closeDialog(dialog, onClosed?)` — fade out via `is-leaving`, then close.
 
 The backdrop-click guard only closes when a press **starts and ends** on the
 dialog element itself, so a drag-select that escapes the dialog does not dismiss
@@ -292,23 +292,30 @@ Behavior the native `<dialog>` gives for free, reimplemented here:
 - **Drag-safe backdrop dismiss** — closes only when a press starts and ends on the overlay itself, so a drag-select escaping the panel doesn't dismiss.
 - **Escape** closes the topmost modal only.
 - **Leave lifecycle** mirrors dialog/confirm/toast: `is-leaving`, wait for the panel's `transitionend` (or a fallback), then tear down.
-- **ARIA**: the panel gets `role` (`dialog` or `alertdialog`), `aria-modal="true"`, and `aria-labelledby`/`aria-describedby` from the options (a descendant whose `id` ends in `-title` is auto-detected when `labelledBy` is omitted).
+- **ARIA**: the panel gets `role` (`dialog` or `alertdialog`), `aria-modal="true"`, and `aria-labelledby`/`aria-describedby` from the options. When `labelledBy` is omitted a descendant whose `id` ends in `-title` is auto-detected; likewise, when `describedBy` is omitted a descendant whose `id` ends in `-desc` or `-description` is auto-detected.
 
 The overlay is grid-centered (`display: grid; place-items: center`) rather than
 flex + `max-height`, which sidesteps the Safari `<dialog>` height bug.
 `--uip-z-modal` (`1000`) sits deliberately below `--uip-z-toast` and
 `--uip-z-tooltip` so toasts and tooltips overlay a modal.
 
+Two limitations to keep in mind: background inerting is computed when a modal
+opens or closes, so `<body>` children added _while_ a modal is open are not
+retroactively inerted — add them before opening the modal (or close and re-open
+to re-sync). And scroll-lock uses `overflow: hidden` on `<html>`/`<body>`, which
+does not fully stop touch-scroll on iOS Safari.
+
 #### modal vs dialog — which one?
 
 - Use **dialog** for platform-simple prompts where the native `<dialog>` is enough. The browser gives you focus containment, the top layer, and Escape for free; `dialog` just adds drag-safe backdrop dismissal and a fade-out.
 - Use **modal** when your modal is an overlay div (`.modal-overlay`-style), when you need custom stacking or transitions the top layer can't express, or when you want grid-centering to dodge the Safari `<dialog>` height bug. `modal` does the containment, stacking, scroll-lock, and lifecycle work by hand.
 
-Both ship, and both intentionally expose `openModal` / `closeModal`. From the
-barrel `@cplieger/ui-primitives`, those two names resolve to the **dialog**
-versions; import from `@cplieger/ui-primitives/modal` for the overlay-div
-versions. `createModal` and `closeTopModal` are unique to modal and are on the
-barrel too.
+The two use distinct verbs, so there is no name collision: **dialog** exposes
+`createDialog` / `openDialog` / `closeDialog`, and **modal** exposes
+`createModal` / `openModal` / `closeModal` / `closeTopModal`. The barrel
+`@cplieger/ui-primitives` re-exports both sets directly — import `openModal` /
+`closeModal` for the overlay-div versions and `openDialog` / `closeDialog` for
+the native-`<dialog>` versions (or reach for either primitive's own subpath).
 
 ### disclosure — `@cplieger/ui-primitives/disclosure`
 
@@ -449,20 +456,20 @@ lifecycles complete).
 
 ## Subpath exports
 
-| Import                                    | Contents                                                                                           |
-| ----------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| `@cplieger/ui-primitives`                 | barrel — everything below (barrel `openModal`/`closeModal` are dialog's; modal's are on `./modal`) |
-| `@cplieger/ui-primitives/toast`           | `toast`, `createToaster`, `info`, `success`, `error`, types                                        |
-| `@cplieger/ui-primitives/tooltip`         | `initTooltips`                                                                                     |
-| `@cplieger/ui-primitives/dialog`          | `createDialog`, `openModal`, `closeModal`                                                          |
-| `@cplieger/ui-primitives/modal`           | `createModal`, `openModal`, `closeModal`, `closeTopModal`                                          |
-| `@cplieger/ui-primitives/confirm`         | `confirm`                                                                                          |
-| `@cplieger/ui-primitives/disclosure`      | `createDisclosure`                                                                                 |
-| `@cplieger/ui-primitives/focus-trap`      | `trapFocus`                                                                                        |
-| `@cplieger/ui-primitives/theme`           | `createTheme`, `themeInitSnippet`                                                                  |
-| `@cplieger/ui-primitives/view-transition` | `viewTransition`                                                                                   |
-| `@cplieger/ui-primitives/announce`        | `announce`                                                                                         |
-| `@cplieger/ui-primitives/css`             | the base stylesheet                                                                                |
+| Import                                    | Contents                                                                                                                  |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `@cplieger/ui-primitives`                 | barrel — everything below (dialog's `openDialog`/`closeDialog` and modal's `openModal`/`closeModal`, no longer colliding) |
+| `@cplieger/ui-primitives/toast`           | `toast`, `createToaster`, `info`, `success`, `error`, types                                                               |
+| `@cplieger/ui-primitives/tooltip`         | `initTooltips`                                                                                                            |
+| `@cplieger/ui-primitives/dialog`          | `createDialog`, `openDialog`, `closeDialog`                                                                               |
+| `@cplieger/ui-primitives/modal`           | `createModal`, `openModal`, `closeModal`, `closeTopModal`                                                                 |
+| `@cplieger/ui-primitives/confirm`         | `confirm`                                                                                                                 |
+| `@cplieger/ui-primitives/disclosure`      | `createDisclosure`                                                                                                        |
+| `@cplieger/ui-primitives/focus-trap`      | `trapFocus`                                                                                                               |
+| `@cplieger/ui-primitives/theme`           | `createTheme`, `themeInitSnippet`                                                                                         |
+| `@cplieger/ui-primitives/view-transition` | `viewTransition`                                                                                                          |
+| `@cplieger/ui-primitives/announce`        | `announce`                                                                                                                |
+| `@cplieger/ui-primitives/css`             | the base stylesheet                                                                                                       |
 
 ## Disclaimer
 
