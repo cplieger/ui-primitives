@@ -15,8 +15,9 @@ directly) and the primitive looks like your app.
 Built on [`@cplieger/reactive`](https://github.com/cplieger/reactive) (uses its
 `el` DOM factory). ESM-only, published as TypeScript source to npm and JSR.
 
-Primitives: **toast**, **tooltip**, **dialog**, **modal**, **confirm**,
-**disclosure**, **focus-trap**, **theme**, **view-transition**, **announce**.
+Primitives: **toast**, **tooltip**, **popover**, **dialog**, **modal**,
+**confirm**, **disclosure**, **focus-trap**, **theme**, **view-transition**,
+**announce**.
 
 ## Install
 
@@ -376,6 +377,79 @@ to the viewport. When the anchor sits inside an open modal `<dialog>`, the
 tooltip is appended into that dialog so it shares the dialog's top layer instead
 of rendering behind it.
 
+### popover — `@cplieger/ui-primitives/popover`
+
+An anchored floating panel with a real placement engine. It's the interactive
+superset of tooltip and the substrate a menu / listbox / picker sits on — reach
+for it for dropdowns, filter panels, and pickers.
+
+```ts
+import { createPopover, placeAnchored } from "@cplieger/ui-primitives/popover";
+
+// (a) The controller — for an interactive popover you open and dismiss:
+const pop = createPopover(anchorButton, panelEl, {
+  placement: "bottom",
+  align: "start",
+  matchAnchorWidth: 220, // min-width = max(anchorWidth, 220)
+});
+anchorButton.addEventListener("click", () => pop.toggle());
+// Load content async, then re-measure + re-clamp:
+async function openFiltered() {
+  pop.show();
+  panelEl.replaceChildren(await loadRows());
+  pop.reposition();
+}
+
+// (b) The pure positioner — position any position:fixed panel yourself:
+placeAnchored(panelEl, anchorEl, { placement: "top", align: "center", flip: true });
+```
+
+Two exports, split by responsibility:
+
+- `placeAnchored(panel, anchor, opts?)` — the **pure positioner**. It reads
+  `anchor.getBoundingClientRect()` and the panel's measured size, then writes
+  `panel.style.left` / `top` (and `position: fixed`). Idempotent: safe to call on
+  every scroll / resize or after the panel's content changes size.
+- `createPopover(anchor, panel, opts?)` → `PopoverController` — the **controller**
+  that reveals + positions the caller's panel, tracks the anchor, and dismisses
+  on outside-click / Escape. `{ show(); hide(); toggle(); reposition(); readonly isOpen; readonly el; dispose() }`.
+
+`PlacementOptions` (shared by both):
+
+- `placement?: "top" | "bottom" | "left" | "right"` — side of the anchor. Default `"bottom"`.
+- `align?: "start" | "center" | "end"` — cross-axis edge alignment. Default `"start"`.
+- `offset?: number` — main-axis gap in px. Default `4`.
+- `flip?: boolean` — flip to the opposite side when the chosen side would overflow and the opposite has more room. Default `true`.
+- `clamp?: boolean` — clamp the cross-axis coordinate into the viewport. Default `true`.
+- `matchAnchorWidth?: boolean | number` — set the panel's `min-width` to the anchor width (`true`) or to `max(anchorWidth, n)` (a number). Default `false`.
+- `margin?: number` — viewport edge margin used by flip + clamp, in px. Default `8`.
+
+`PopoverOptions extends PlacementOptions` adds `{ closeOnOutside?; closeOnEscape?; onOpen?; onClose? }` (dismissal defaults `true`).
+
+The placement engine reads the viewport from `window.visualViewport` when
+present, so flipping and clamping stay correct above the mobile on-screen
+keyboard (it falls back to `window.innerWidth` / `innerHeight`). `reposition()`
+is the seam for async content: load the panel's contents, then call it to
+re-measure and re-clamp. An open popover also repositions on scroll (capture),
+window resize, and `visualViewport` resize / scroll.
+
+The controller does **not** build the panel — you pass it in, so `dispose()`
+hides + unlistens but leaves your element in the DOM. It manages only
+`aria-expanded` / `aria-haspopup` on the anchor and forces no `role` on the
+panel — set `role="menu"` / `"listbox"` / `"dialog"` yourself to fit. Dismissal
+is instant (no leave animation); the optional `.uip-popover.is-open` enter fade
+is skinnable.
+
+`--uip-z-popover` (`1100`) sits deliberately above `--uip-z-modal` (`1000`) so a
+popover opened from within a modal shows over it, and below toast (`9999`) /
+tooltip (`10000`).
+
+Like tooltip, popover positions with JS (`getBoundingClientRect` + `position: fixed`)
+rather than the native [Popover API](https://developer.mozilla.org/en-US/docs/Web/API/Popover_API)
+or CSS anchor positioning — for testability and consistency with tooltip.
+Adopting the native Popover API (top-layer, no z-index juggling) is a possible
+future enhancement.
+
 ### announce — `@cplieger/ui-primitives/announce`
 
 ```ts
@@ -398,26 +472,28 @@ scoped) to tune behavior, and style the classes for your skin.
 
 ### Custom properties
 
-| Property                      | Default                  | Used by                                                         |
-| ----------------------------- | ------------------------ | --------------------------------------------------------------- |
-| `--uip-z-toast`               | `9999`                   | toast stack z-index                                             |
-| `--uip-z-tooltip`             | `10000`                  | tooltip z-index                                                 |
-| `--uip-toast-offset`          | `1rem`                   | toast stack inset from the viewport edge                        |
-| `--uip-toast-gap`             | `0.5rem`                 | gap between stacked toasts                                      |
-| `--uip-toast-max-width`       | `24rem`                  | toast stack max inline size                                     |
-| `--uip-toast-enter-duration`  | `250ms`                  | toast enter transition                                          |
-| `--uip-toast-leave-duration`  | `150ms`                  | toast leave transition                                          |
-| `--uip-toast-duration`        | `4000ms`                 | progress-bar duration — **set inline per toast by the library** |
-| `--uip-toast-progress-size`   | `2px`                    | progress-bar thickness                                          |
-| `--uip-toast-progress-color`  | `currentcolor`           | progress-bar color                                              |
-| `--uip-tooltip-fade-duration` | `100ms`                  | tooltip fade                                                    |
-| `--uip-dialog-leave-duration` | `150ms`                  | dialog / confirm / backdrop fade                                |
-| `--uip-backdrop`              | `oklch(0% 0 0deg / 50%)` | dialog / confirm backdrop dim                                   |
-| `--uip-z-modal`               | `1000`                   | modal overlay z-index (below toast / tooltip on purpose)        |
-| `--uip-modal-backdrop`        | `var(--uip-backdrop)`    | modal backdrop dim                                              |
-| `--uip-modal-enter-duration`  | `200ms`                  | modal enter transition                                          |
-| `--uip-modal-leave-duration`  | `150ms`                  | modal leave transition                                          |
-| `--uip-disclosure-duration`   | `200ms`                  | disclosure height transition                                    |
+| Property                       | Default                  | Used by                                                         |
+| ------------------------------ | ------------------------ | --------------------------------------------------------------- |
+| `--uip-z-toast`                | `9999`                   | toast stack z-index                                             |
+| `--uip-z-tooltip`              | `10000`                  | tooltip z-index                                                 |
+| `--uip-toast-offset`           | `1rem`                   | toast stack inset from the viewport edge                        |
+| `--uip-toast-gap`              | `0.5rem`                 | gap between stacked toasts                                      |
+| `--uip-toast-max-width`        | `24rem`                  | toast stack max inline size                                     |
+| `--uip-toast-enter-duration`   | `250ms`                  | toast enter transition                                          |
+| `--uip-toast-leave-duration`   | `150ms`                  | toast leave transition                                          |
+| `--uip-toast-duration`         | `4000ms`                 | progress-bar duration — **set inline per toast by the library** |
+| `--uip-toast-progress-size`    | `2px`                    | progress-bar thickness                                          |
+| `--uip-toast-progress-color`   | `currentcolor`           | progress-bar color                                              |
+| `--uip-tooltip-fade-duration`  | `100ms`                  | tooltip fade                                                    |
+| `--uip-dialog-leave-duration`  | `150ms`                  | dialog / confirm / backdrop fade                                |
+| `--uip-backdrop`               | `oklch(0% 0 0deg / 50%)` | dialog / confirm backdrop dim                                   |
+| `--uip-z-modal`                | `1000`                   | modal overlay z-index (below toast / tooltip on purpose)        |
+| `--uip-modal-backdrop`         | `var(--uip-backdrop)`    | modal backdrop dim                                              |
+| `--uip-modal-enter-duration`   | `200ms`                  | modal enter transition                                          |
+| `--uip-modal-leave-duration`   | `150ms`                  | modal leave transition                                          |
+| `--uip-disclosure-duration`    | `200ms`                  | disclosure height transition                                    |
+| `--uip-z-popover`              | `1100`                   | popover z-index (above modal, below toast / tooltip)            |
+| `--uip-popover-enter-duration` | `100ms`                  | popover enter-fade animation                                    |
 
 **Countdown contract:** the toast progress bar animates from the
 `--uip-toast-duration` custom property, which the library writes inline on each
@@ -427,27 +503,29 @@ duration in code, and style the bar's color/size via the properties above.
 
 ### Classes and state classes
 
-| Class                                                          | Element                                                   |
-| -------------------------------------------------------------- | --------------------------------------------------------- |
-| `.uip-toast-stack`                                             | toast container (`role="status"`, `aria-live="polite"`)   |
-| `.uip-toast`, `.uip-toast--info` / `--success` / `--error`     | a toast (level modifier)                                  |
-| `.uip-toast-msg`                                               | toast message text                                        |
-| `.uip-toast-retry`                                             | toast retry button                                        |
-| `.uip-toast-progress`                                          | toast countdown bar (`aria-hidden`)                       |
-| `.uip-tooltip`                                                 | a tooltip (`role="tooltip"`)                              |
-| `.uip-confirm`                                                 | the confirm `<dialog>`                                    |
-| `.uip-confirm-title` / `-msg` / `-actions` / `-ok` / `-cancel` | confirm parts                                             |
-| `.uip-dialog`                                                  | a `<dialog>` wrapped by `createDialog`                    |
-| `.uip-modal`, `.uip-modal--alert`                              | modal overlay (backdrop + grid centering; alert modifier) |
-| `.uip-modal-dialog`                                            | modal panel                                               |
-| `.uip-disclosure-region`                                       | disclosure collapsible region (`aria-hidden` when closed) |
-| `.uip-visually-hidden`                                         | the announce live regions (sr-only)                       |
+| Class                                                          | Element                                                    |
+| -------------------------------------------------------------- | ---------------------------------------------------------- |
+| `.uip-toast-stack`                                             | toast container (`role="status"`, `aria-live="polite"`)    |
+| `.uip-toast`, `.uip-toast--info` / `--success` / `--error`     | a toast (level modifier)                                   |
+| `.uip-toast-msg`                                               | toast message text                                         |
+| `.uip-toast-retry`                                             | toast retry button                                         |
+| `.uip-toast-progress`                                          | toast countdown bar (`aria-hidden`)                        |
+| `.uip-tooltip`                                                 | a tooltip (`role="tooltip"`)                               |
+| `.uip-confirm`                                                 | the confirm `<dialog>`                                     |
+| `.uip-confirm-title` / `-msg` / `-actions` / `-ok` / `-cancel` | confirm parts                                              |
+| `.uip-dialog`                                                  | a `<dialog>` wrapped by `createDialog`                     |
+| `.uip-modal`, `.uip-modal--alert`                              | modal overlay (backdrop + grid centering; alert modifier)  |
+| `.uip-modal-dialog`                                            | modal panel                                                |
+| `.uip-disclosure-region`                                       | disclosure collapsible region (`aria-hidden` when closed)  |
+| `.uip-popover`                                                 | anchored floating panel (`position: fixed`, JS-positioned) |
+| `.uip-visually-hidden`                                         | the announce live regions (sr-only)                        |
 
 State classes toggled at runtime (style these for motion/emphasis):
 
 - `.uip-toast` lifecycle: `is-entering` → `is-shown` → `is-leaving`
 - `.uip-modal` lifecycle: `is-entering` → `is-open` → `is-leaving` (drives both the backdrop and the panel)
 - `.uip-tooltip.is-leaving`, `.uip-confirm.is-leaving`, `.uip-dialog.is-leaving` (fade-out)
+- `.uip-popover.is-open` (optional enter fade; dismissal is instant, so there is no leave state)
 - `.uip-confirm-ok.is-destructive` (destructive emphasis)
 
 A `@media (prefers-reduced-motion: reduce)` block neutralizes the animations to
@@ -461,6 +539,7 @@ lifecycles complete).
 | `@cplieger/ui-primitives`                 | barrel — everything below (dialog's `openDialog`/`closeDialog` and modal's `openModal`/`closeModal`, no longer colliding) |
 | `@cplieger/ui-primitives/toast`           | `toast`, `createToaster`, `info`, `success`, `error`, types                                                               |
 | `@cplieger/ui-primitives/tooltip`         | `initTooltips`                                                                                                            |
+| `@cplieger/ui-primitives/popover`         | `createPopover`, `placeAnchored`, types                                                                                   |
 | `@cplieger/ui-primitives/dialog`          | `createDialog`, `openDialog`, `closeDialog`                                                                               |
 | `@cplieger/ui-primitives/modal`           | `createModal`, `openModal`, `closeModal`, `closeTopModal`                                                                 |
 | `@cplieger/ui-primitives/confirm`         | `confirm`                                                                                                                 |

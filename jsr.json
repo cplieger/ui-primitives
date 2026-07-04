@@ -5,6 +5,7 @@
     ".": "./src/index.ts",
     "./toast": "./src/toast/index.ts",
     "./tooltip": "./src/tooltip.ts",
+    "./popover": "./src/popover.ts",
     "./dialog": "./src/dialog.ts",
     "./modal": "./src/modal.ts",
     "./confirm": "./src/confirm.ts",

@@ -34,6 +34,12 @@
 
   /* Disclosure (animated collapsible). */
   --uip-disclosure-duration: 200ms;
+
+  /* Popover (anchored floating panel). z-index sits DELIBERATELY above modal
+   * (1000) so a popover opened from within a modal shows over it, and below
+   * toast (9999) / tooltip (10000). */
+  --uip-z-popover: 1100;
+  --uip-popover-enter-duration: 100ms;
 }
 
 /* ===== Toast ============================================================= */
@@ -213,6 +219,37 @@
   }
 }
 
+/* ===== Popover (anchored floating panel) ================================= */
+
+/* position:fixed; the library sets left / top inline from placeAnchored's
+ * measured, flipped, clamped position. Structural only — the app skins
+ * background / border / radius / shadow by targeting .uip-popover. */
+.uip-popover {
+  position: fixed;
+  z-index: var(--uip-z-popover, 1100);
+}
+
+.uip-popover[hidden] {
+  display: none;
+}
+
+/* Optional skinnable enter fade — plays once when the panel opens. Enter only:
+ * the controller dismisses instantly (sets [hidden]), so there is no leave
+ * animation. */
+.uip-popover.is-open {
+  animation: uip-popover-enter var(--uip-popover-enter-duration, 100ms) ease;
+}
+
+@keyframes uip-popover-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
 /* ===== Announce (screen-reader live regions) ============================= */
 
 /* Standard visually-hidden ("sr-only"): removed from the visual layout but
@@ -251,7 +288,8 @@
     transition-duration: 0.01ms;
   }
 
-  .uip-toast-progress {
+  .uip-toast-progress,
+  .uip-popover.is-open {
     /* stylelint-disable-next-line time-min-milliseconds -- sub-10ms keeps animationend firing under reduced motion */
     animation-duration: 0.01ms;
   }
