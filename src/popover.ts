@@ -26,6 +26,38 @@
 export type PopoverPlacement = "top" | "bottom" | "left" | "right";
 export type PopoverAlign = "start" | "center" | "end";
 
+/** A virtual anchor: anything that can report a bounding rect. Lets a popover
+ *  be positioned against a coordinate/right-click point (see pointAnchor) or
+ *  any non-DOM rect source, not just an element. */
+export interface VirtualAnchor {
+  getBoundingClientRect(): DOMRect;
+}
+
+/** What a popover can be anchored to: a real element, or a virtual rect source
+ *  (e.g. a coordinate via pointAnchor). */
+export type PopoverAnchor = HTMLElement | VirtualAnchor;
+
+/** Build a virtual anchor at a viewport coordinate — for positioning a popover
+ *  at a right-click / pointer point. The rect is zero-size at (x, y), so the
+ *  popover opens from that point (bottom/start places it just below-right of the
+ *  cursor). Read fresh each placement, so pass a function-free fixed point; for a
+ *  moving point, build a new pointAnchor and call reposition/placeAnchored again. */
+export function pointAnchor(x: number, y: number): VirtualAnchor {
+  return {
+    getBoundingClientRect: (): DOMRect => ({
+      x,
+      y,
+      left: x,
+      top: y,
+      right: x,
+      bottom: y,
+      width: 0,
+      height: 0,
+      toJSON: () => ({}),
+    }),
+  };
+}
+
 export interface PlacementOptions {
   /** Side of the anchor the panel sits on. Default `"bottom"`. */
   placement?: PopoverPlacement;
@@ -182,7 +214,7 @@ function clampCoord(
  */
 export function placeAnchored(
   panel: HTMLElement,
-  anchor: HTMLElement,
+  anchor: PopoverAnchor,
   opts?: PlacementOptions,
 ): void {
   const placement = opts?.placement ?? "bottom";
@@ -232,12 +264,18 @@ export function placeAnchored(
  * panel and never removes it from the DOM — the caller owns that element.
  */
 export function createPopover(
-  anchor: HTMLElement,
+  anchor: PopoverAnchor,
   panel: HTMLElement,
   opts?: PopoverOptions,
 ): PopoverController {
   const closeOnOutside = opts?.closeOnOutside ?? true;
   const closeOnEscape = opts?.closeOnEscape ?? true;
+  // Element-only operations (ARIA on the trigger, anchor-contains for the
+  // outside-click guard) are gated on this: a virtual/point anchor has no
+  // element to annotate or hit-test, so they no-op for it. Positioning via
+  // placeAnchored works for both anchor kinds — it only reads
+  // getBoundingClientRect(), which both HTMLElement and VirtualAnchor provide.
+  const anchorEl = anchor instanceof HTMLElement ? anchor : null;
 
   let open = false;
   let listening = false;
@@ -276,7 +314,11 @@ export function createPopover(
 
   const onDocClick = (e: MouseEvent): void => {
     const target = e.target;
-    if (target instanceof Node && (panel.contains(target) || anchor.contains(target))) {
+    // A click on the anchor keeps the popover open only when the anchor is a
+    // real element. For a virtual/point anchor (anchorEl === null) there is no
+    // anchor element, so only a click inside the panel keeps it open — a click
+    // anywhere else (including where the right-click happened) closes it.
+    if (target instanceof Node && (panel.contains(target) || anchorEl?.contains(target) === true)) {
       return;
     }
     hide();
@@ -354,8 +396,9 @@ export function createPopover(
       document.body.appendChild(panel);
     }
     placeAnchored(panel, anchor, opts);
-    anchor.setAttribute("aria-expanded", "true");
-    anchor.setAttribute("aria-haspopup", "true");
+    // ARIA is set only on a real element; a virtual/point anchor has none.
+    anchorEl?.setAttribute("aria-expanded", "true");
+    anchorEl?.setAttribute("aria-haspopup", "true");
     // Focus management is opt-in — by default the caller owns focus. Capture the
     // restore target BEFORE moving initial focus, so `returnFocus: true` records
     // whatever was focused when we opened rather than the initialFocus element.
@@ -384,7 +427,7 @@ export function createPopover(
     removeListeners();
     panel.hidden = true;
     panel.classList.remove("is-open");
-    anchor.setAttribute("aria-expanded", "false");
+    anchorEl?.setAttribute("aria-expanded", "false");
     // Restore focus only if a target was captured/supplied at show() time and it
     // is still in the document; otherwise leave focus alone.
     const target = restoreFocus;
@@ -418,9 +461,10 @@ export function createPopover(
       // The panel is the caller's — never removed from the DOM here.
       removeListeners();
       // The controller is gone: the anchor no longer owns a popover, so drop the
-      // ARIA it advertised (hide() only flips aria-expanded to "false").
-      anchor.removeAttribute("aria-haspopup");
-      anchor.removeAttribute("aria-expanded");
+      // ARIA it advertised (hide() only flips aria-expanded to "false"). No-op
+      // for a virtual/point anchor, which never had ARIA set.
+      anchorEl?.removeAttribute("aria-haspopup");
+      anchorEl?.removeAttribute("aria-expanded");
     },
   };
 }

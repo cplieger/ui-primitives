@@ -5,6 +5,7 @@ import fc from "fast-check";
 import {
   placeAnchored,
   createPopover,
+  pointAnchor,
   type PopoverAlign,
   type PopoverPlacement,
 } from "./popover.js";
@@ -1007,5 +1008,149 @@ describe("createPopover — dispose ARIA cleanup", () => {
     c.dispose();
     expect(anchor.hasAttribute("aria-haspopup")).toBe(false);
     expect(anchor.hasAttribute("aria-expanded")).toBe(false);
+  });
+});
+
+// ===== pointAnchor ========================================================
+
+describe("pointAnchor", () => {
+  it("returns a zero-size rect with left/top/right/bottom = x/y and width/height 0", () => {
+    const rect = pointAnchor(300, 200).getBoundingClientRect();
+    expect(rect.left).toBe(300);
+    expect(rect.right).toBe(300);
+    expect(rect.top).toBe(200);
+    expect(rect.bottom).toBe(200);
+    expect(rect.x).toBe(300);
+    expect(rect.y).toBe(200);
+    expect(rect.width).toBe(0);
+    expect(rect.height).toBe(0);
+    expect(rect.toJSON()).toEqual({}); // DOMRect shape completeness
+  });
+});
+
+// ===== placeAnchored: virtual anchor ======================================
+
+describe("placeAnchored — virtual anchor", () => {
+  it("positions at a point (bottom/start): left = x, top = y + offset", () => {
+    const panel = document.createElement("div");
+    document.body.appendChild(panel);
+    stubSize(panel, 80, 40);
+    placeAnchored(panel, pointAnchor(300, 200), {
+      placement: "bottom",
+      align: "start",
+      flip: false,
+      clamp: false,
+    });
+    expect(leftOf(panel)).toBe(300);
+    expect(topOf(panel)).toBe(204); // 200 + default offset 4
+  });
+
+  it("a virtual anchor with a non-zero rect positions like an element rect", () => {
+    const panel = document.createElement("div");
+    document.body.appendChild(panel);
+    stubSize(panel, 80, 40);
+    // Same rect an element test uses (left 100, top 100, w 50, h 20).
+    const virtual = { getBoundingClientRect: (): DOMRect => rectOf(100, 100, 50, 20) };
+    placeAnchored(panel, virtual, {
+      placement: "bottom",
+      align: "start",
+      flip: false,
+      clamp: false,
+    });
+    expect(leftOf(panel)).toBe(100); // rect.left
+    expect(topOf(panel)).toBe(124); // rect.bottom 120 + 4
+  });
+});
+
+// ===== createPopover: point (virtual) anchor ==============================
+
+describe("createPopover — point (virtual) anchor", () => {
+  it("show() does not throw and sets NO aria on any element", () => {
+    const panel = document.createElement("div");
+    // A nearby real element that must stay untouched — there is no trigger
+    // element for a point anchor, so nothing should be annotated.
+    const probe = document.createElement("button");
+    document.body.appendChild(probe);
+    stubSize(panel, 80, 40);
+    const c = createPopover(pointAnchor(300, 200), panel, { flip: false, clamp: false });
+    expect(() => {
+      c.show();
+    }).not.toThrow();
+    expect(c.isOpen).toBe(true);
+    expect(probe.hasAttribute("aria-expanded")).toBe(false);
+    expect(probe.hasAttribute("aria-haspopup")).toBe(false);
+    expect(panel.hasAttribute("aria-expanded")).toBe(false);
+    expect(panel.hasAttribute("aria-haspopup")).toBe(false);
+    c.dispose();
+  });
+
+  it("positions the panel at the point (bottom/start opens just below-right)", () => {
+    const panel = document.createElement("div");
+    stubSize(panel, 80, 40);
+    const c = createPopover(pointAnchor(300, 200), panel, {
+      placement: "bottom",
+      align: "start",
+      flip: false,
+      clamp: false,
+    });
+    c.show();
+    expect(panel.isConnected).toBe(true); // hoisted to body (was detached)
+    expect(leftOf(panel)).toBe(300);
+    expect(topOf(panel)).toBe(204);
+  });
+
+  it("a click inside the panel keeps it open; an outside click closes it", () => {
+    const panel = document.createElement("div");
+    const inner = document.createElement("button");
+    panel.appendChild(inner);
+    const outside = document.createElement("div");
+    document.body.append(panel, outside);
+    stubSize(panel, 80, 40);
+    const c = createPopover(pointAnchor(300, 200), panel, { flip: false, clamp: false });
+    c.show();
+    vi.advanceTimersByTime(1); // install the deferred listeners
+    inner.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(c.isOpen).toBe(true); // panel-internal click keeps it open
+    outside.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(c.isOpen).toBe(false); // no anchor to exempt — any outside click closes
+  });
+
+  it("Escape closes and dispose() does not throw", () => {
+    const panel = document.createElement("div");
+    document.body.appendChild(panel);
+    stubSize(panel, 80, 40);
+    const c = createPopover(pointAnchor(300, 200), panel, { flip: false, clamp: false });
+    c.show();
+    vi.advanceTimersByTime(1);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(c.isOpen).toBe(false);
+    expect(() => {
+      c.dispose();
+    }).not.toThrow();
+  });
+
+  it("a non-point virtual anchor positions and tracks on scroll", () => {
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+    const panel = document.createElement("div");
+    document.body.appendChild(panel);
+    stubSize(panel, 80, 40);
+    // A movable virtual rect source (not a point): re-read fresh each placement.
+    let top = 100;
+    const virtual = { getBoundingClientRect: (): DOMRect => rectOf(100, top, 50, 20) };
+    const c = createPopover(virtual, panel, {
+      placement: "bottom",
+      align: "start",
+      flip: false,
+      clamp: false,
+    });
+    c.show();
+    vi.advanceTimersByTime(1);
+    expect(topOf(panel)).toBe(124); // bottom 120 + 4
+    top = 50; // the virtual rect moved up; bottom now 70
+    document.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersToNextFrame(); // tracking is rAF-throttled — flush the frame
+    expect(topOf(panel)).toBe(74);
+    c.dispose();
   });
 });
