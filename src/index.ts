@@ -16,6 +16,17 @@ export type { ThemeChoice, ThemeController, ThemeOptions } from "./theme.js";
 export { createDialog, openModal, closeModal } from "./dialog.js";
 export type { DialogController, DialogOptions } from "./dialog.js";
 
+// modal is the overlay-<div> sibling to the native-<dialog> `dialog` member and
+// deliberately shares its `openModal` / `closeModal` names. The flat barrel
+// keeps dialog's pair (backward compatibility); reach modal's own `openModal` /
+// `closeModal` via the `./modal` subpath. `createModal` / `closeTopModal` don't
+// collide, so they are re-exported here.
+export { createModal, closeTopModal } from "./modal.js";
+export type { ModalController, ModalOptions } from "./modal.js";
+
+export { createDisclosure } from "./disclosure.js";
+export type { DisclosureController, DisclosureOptions } from "./disclosure.js";
+
 export { confirm } from "./confirm.js";
 export type { ConfirmOptions } from "./confirm.js";
 

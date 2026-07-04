@@ -13,6 +13,9 @@ describe("public surface", () => {
     expect(typeof api.createDialog).toBe("function");
     expect(typeof api.openModal).toBe("function");
     expect(typeof api.closeModal).toBe("function");
+    expect(typeof api.createModal).toBe("function");
+    expect(typeof api.closeTopModal).toBe("function");
+    expect(typeof api.createDisclosure).toBe("function");
     expect(typeof api.confirm).toBe("function");
     expect(typeof api.initTooltips).toBe("function");
     expect(typeof api.createToaster).toBe("function");
