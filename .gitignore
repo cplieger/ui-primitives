@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vitest-cache/
+coverage/
+
+# Local reactive overlay for dev/test when the published dep isn't resolvable
+node_modules/@cplieger/reactive/
+
+# Kiro skill artifacts (code-review, refactor, steering-maintenance, judgement)
+**/.code-review/
+**/.judgement/
+**/.refactor/
+**/.steering-maintenance/

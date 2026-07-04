@@ -1,0 +1,19 @@
+{
+  "name": "@cplieger/ui-primitives",
+  "version": "1.0.0",
+  "exports": {
+    ".": "./src/index.ts",
+    "./toast": "./src/toast/index.ts",
+    "./tooltip": "./src/tooltip.ts",
+    "./dialog": "./src/dialog.ts",
+    "./confirm": "./src/confirm.ts",
+    "./focus-trap": "./src/focus-trap.ts",
+    "./theme": "./src/theme.ts",
+    "./view-transition": "./src/view-transition.ts",
+    "./announce": "./src/announce.ts"
+  },
+  "publish": {
+    "include": ["LICENSE", "README.md", "src/**/*.ts", "css/**/*.css"],
+    "exclude": ["src/**/*.test.ts", "src/fc-strict-setup.ts"]
+  }
+}
