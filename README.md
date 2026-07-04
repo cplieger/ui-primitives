@@ -409,10 +409,13 @@ Two exports, split by responsibility:
 - `placeAnchored(panel, anchor, opts?)` — the **pure positioner**. It reads
   `anchor.getBoundingClientRect()` and the panel's measured size, then writes
   `panel.style.left` / `top` (and `position: fixed`). Idempotent: safe to call on
-  every scroll / resize or after the panel's content changes size.
+  every scroll / resize or after the panel's content changes size. `anchor` is a
+  `PopoverAnchor` — an element or a virtual rect source (see _Anchor against a
+  coordinate_ below).
 - `createPopover(anchor, panel, opts?)` → `PopoverController` — the **controller**
   that reveals + positions the caller's panel, tracks the anchor, and dismisses
   on outside-click / Escape. `{ show(); hide(); toggle(); reposition(); readonly isOpen; readonly el; dispose() }`.
+  `anchor` is a `PopoverAnchor` (element or virtual).
 
 `PlacementOptions` (shared by both):
 
@@ -425,6 +428,33 @@ Two exports, split by responsibility:
 - `margin?: number` — viewport edge margin used by flip + clamp, in px. Default `8`.
 
 `PopoverOptions extends PlacementOptions` adds `{ closeOnOutside?; closeOnEscape?; initialFocus?; returnFocus?; onOpen?; onClose? }` (dismissal defaults `true`).
+
+**Anchor against a coordinate, not just an element.** Both `placeAnchored` and
+`createPopover` take a `PopoverAnchor` — a real `HTMLElement` or a
+`VirtualAnchor`, any object exposing `getBoundingClientRect()`. `pointAnchor(x, y)`
+builds a zero-size virtual anchor at a viewport coordinate, which is what makes a
+right-click context menu expressible — the popover opens from the pointer point:
+
+```ts
+import { createPopover, pointAnchor } from "@cplieger/ui-primitives/popover";
+
+el.addEventListener("contextmenu", (e) => {
+  e.preventDefault();
+  const pop = createPopover(pointAnchor(e.clientX, e.clientY), menuPanel, {
+    placement: "bottom",
+    align: "start",
+  });
+  pop.show();
+});
+```
+
+With a virtual / point anchor there is no trigger element, so **no ARIA is set on
+any element** (an `HTMLElement` anchor still gets `aria-expanded` /
+`aria-haspopup`), and outside-click dismissal closes on **any** click outside the
+panel — including where the right-click happened, which is exactly right for a
+context menu. The rect is read fresh on every placement, so `pointAnchor` takes a
+fixed point; for a moving point, build a new `pointAnchor` and call `reposition()`
+/ `placeAnchored()` again.
 
 The placement engine reads the viewport from `window.visualViewport` when
 present, so flipping and clamping stay correct above the mobile on-screen
@@ -565,7 +595,7 @@ lifecycles complete).
 | `@cplieger/ui-primitives`                 | barrel — everything below (dialog's `openDialog`/`closeDialog` and modal's `openModal`/`closeModal`, no longer colliding) |
 | `@cplieger/ui-primitives/toast`           | `toast`, `createToaster`, `info`, `success`, `error`, types                                                               |
 | `@cplieger/ui-primitives/tooltip`         | `initTooltips`                                                                                                            |
-| `@cplieger/ui-primitives/popover`         | `createPopover`, `placeAnchored`, types                                                                                   |
+| `@cplieger/ui-primitives/popover`         | `createPopover`, `placeAnchored`, `pointAnchor`, types                                                                    |
 | `@cplieger/ui-primitives/dialog`          | `createDialog`, `openDialog`, `closeDialog`                                                                               |
 | `@cplieger/ui-primitives/modal`           | `createModal`, `openModal`, `closeModal`, `closeTopModal`                                                                 |
 | `@cplieger/ui-primitives/confirm`         | `confirm`                                                                                                                 |
