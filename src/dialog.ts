@@ -3,6 +3,8 @@
 // free; this module adds backdrop-click dismissal (drag-safe) and a fade-out
 // lifecycle via a namespaced `is-leaving` class before the element is closed.
 
+import { afterTransition } from "./transition.js";
+
 /** Fallback timeout (ms) if `transitionend` never fires (no CSS transition,
  *  reduced motion, or an interrupted animation). */
 const LEAVE_FALLBACK_MS = 400;
@@ -55,32 +57,19 @@ export function closeDialog(dialog: HTMLDialogElement, onClosed?: () => void): v
     onClosed?.();
     return;
   }
-  let done = false;
-  let fallback: ReturnType<typeof setTimeout> | null = null;
-  const finish = (): void => {
-    if (done) {
-      return;
-    }
-    done = true;
-    if (fallback !== null) {
-      clearTimeout(fallback);
-    }
-    dialog.removeEventListener("transitionend", onEnd);
-    // If the leaving state was reset (e.g. the element was reused by a newer
-    // caller), don't yank it closed out from under the new owner.
-    if (dialog.classList.contains("is-leaving")) {
-      dialog.classList.remove("is-leaving");
-      closeNative(dialog);
-      onClosed?.();
-    }
-  };
-  const onEnd = (e: TransitionEvent): void => {
-    if (e.target === dialog) {
-      finish();
-    }
-  };
-  dialog.addEventListener("transitionend", onEnd);
-  fallback = setTimeout(finish, LEAVE_FALLBACK_MS);
+  afterTransition(
+    dialog,
+    () => {
+      // If the leaving state was reset (e.g. the element was reused by a newer
+      // caller), don't yank it closed out from under the new owner.
+      if (dialog.classList.contains("is-leaving")) {
+        dialog.classList.remove("is-leaving");
+        closeNative(dialog);
+        onClosed?.();
+      }
+    },
+    LEAVE_FALLBACK_MS,
+  );
   dialog.classList.add("is-leaving");
 }
 
