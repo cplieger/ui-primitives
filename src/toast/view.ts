@@ -1,12 +1,17 @@
-// view.ts — DOM implementation of the toast `ToastView` port. Builds the stack
-// container + per-toast nodes with `el`, wires interaction to the engine's
-// callbacks, and manages the enter/leave lifecycle via `is-entering` →
-// `is-shown` → `is-leaving` state classes. The countdown is driven by the
-// `--uip-toast-duration` custom property (the CSS animates the progress bar
-// from it); pause/resume freeze the progress animation via play-state.
+// view.ts — DOM implementation of the toast `ToastView` port. Builds a
+// purely-visual `.uip-toast-stack` container + per-toast nodes with `el`, wires
+// interaction to the engine's callbacks, and manages the enter/leave lifecycle
+// via `is-entering` → `is-shown` → `is-leaving` state classes. The countdown is
+// driven by the `--uip-toast-duration` custom property (the CSS animates the
+// progress bar from it); pause/resume freeze the progress animation via
+// play-state. Screen-reader announcement is delegated to `announce()`: neither
+// the stack nor the toast nodes are live regions, so no live region ever nests
+// inside another, and importing this module mutates no DOM (the stack is
+// created lazily, on the first toast shown).
 
 import { el } from "@cplieger/reactive";
 
+import { announce } from "../announce.js";
 import { afterTransition } from "../transition.js";
 import type { ToastCallbacks, ToastRenderData, ToastView } from "./engine.js";
 
@@ -20,9 +25,17 @@ export interface ToastHandle {
    *  run (or been cancelled). Cancelled on leave/remove so a late enter frame
    *  can't re-apply `is-shown` mid-leave. */
   enterRaf: number | null;
+  /** afterTransition cancel for the pending leave, or null when idle. */
+  leaveCancel: (() => void) | null;
 }
 
-/** Create a DOM-backed toast view. Owns a lazily-created `.uip-toast-stack`. */
+/**
+ * Create a DOM-backed toast view. Owns a lazily-created `.uip-toast-stack` — a
+ * purely VISUAL container (no `role` / `aria-live`), created on the first
+ * `mount`, so importing this module appends nothing to the DOM. Screen-reader
+ * announcement is handled separately by `announce()` in `mount`, which keeps
+ * the visual stack and the SR live region from ever nesting.
+ */
 export function createToastView(): ToastView<ToastHandle> {
   let container: HTMLElement | null = null;
 
@@ -30,12 +43,11 @@ export function createToastView(): ToastView<ToastHandle> {
     if (container !== null) {
       return container;
     }
-    const stack = el("div", {
-      className: "uip-toast-stack",
-      role: "status",
-      "aria-live": "polite",
-      "aria-atomic": "false",
-    });
+    // Visual-only container: deliberately NOT a live region. Announcement goes
+    // through announce() (see `mount`), so an error node's live region can
+    // never nest inside a polite stack, and nothing is appended to the DOM
+    // until a toast is actually shown.
+    const stack = el("div", { className: "uip-toast-stack" });
     document.body.appendChild(stack);
     container = stack;
     return stack;
@@ -44,19 +56,29 @@ export function createToastView(): ToastView<ToastHandle> {
   return {
     mount(data: ToastRenderData, ctx: ToastCallbacks): ToastHandle {
       const stack = ensureContainer();
+
+      // Announce the message to screen readers through the shared live region
+      // (announce()), NOT through the toast node. The node stays a plain,
+      // non-live element, so no live region nests inside another and there is
+      // no double-announce. announce()'s region pre-exists its text and
+      // clears-then-sets, so even the first toast announces reliably. Errors
+      // interrupt (assertive); info / success are polite.
+      announce(data.message, data.level === "error" ? "assertive" : "polite");
+
       const node = el("div", {
         className: `uip-toast uip-toast--${data.level} is-entering`,
         tabindex: "0",
-        // The message is announced by the visible `.uip-toast-msg` text (inside
-        // the polite live region), so the label carries only the affordance
-        // hint — repeating the message here would double-announce it.
-        "aria-label": `${data.level} notification. Click to dismiss.`,
       });
-      if (data.level === "error") {
-        node.setAttribute("role", "alert");
-      }
 
+      // The visible message, then the dismiss hint as a visually-hidden (NOT
+      // aria-hidden) span. The node is not a live region, so this subtree is not
+      // auto-announced; the hint is here so the FOCUSABLE node is
+      // self-describing — the toast is `tabindex=0`, so a keyboard /
+      // screen-reader user who tabs to it hears the message plus how to dismiss
+      // it. (The transient "a toast appeared: <message>" announcement is
+      // announce()'s job, above.)
       node.appendChild(el("span", { className: "uip-toast-msg" }, data.message));
+      node.appendChild(el("span", { className: "uip-visually-hidden" }, "Click to dismiss."));
 
       const retry = data.retry;
       if (retry !== undefined) {
@@ -85,6 +107,18 @@ export function createToastView(): ToastView<ToastHandle> {
       node.addEventListener("click", () => {
         ctx.dismiss();
       });
+      // tabindex=0 is for pause-on-focus; make the FOCUSED toast dismissable by
+      // keyboard too (Escape only targets the newest toast, not the focused one).
+      // Guard to the node itself so it doesn't swallow the retry button's Enter.
+      node.addEventListener("keydown", (e) => {
+        if (e.target !== node) {
+          return;
+        }
+        if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+          e.preventDefault();
+          ctx.dismiss();
+        }
+      });
 
       // Two independent pause sources (hover and focus) share one engine timer,
       // so ref-count them: pause on the first (0 -> 1) and resume only on the
@@ -111,7 +145,7 @@ export function createToastView(): ToastView<ToastHandle> {
       node.addEventListener("focusin", addPause);
       node.addEventListener("focusout", removePause);
 
-      const handle: ToastHandle = { el: node, progressEl, enterRaf: null };
+      const handle: ToastHandle = { el: node, progressEl, enterRaf: null, leaveCancel: null };
       stack.appendChild(node);
       handle.enterRaf = requestAnimationFrame(() => {
         handle.enterRaf = null;
@@ -134,9 +168,10 @@ export function createToastView(): ToastView<ToastHandle> {
         node.classList.remove("is-entering");
         node.classList.add("is-shown");
       }
-      afterTransition(
+      handle.leaveCancel = afterTransition(
         node,
         () => {
+          handle.leaveCancel = null;
           node.remove();
           done();
         },
@@ -150,6 +185,10 @@ export function createToastView(): ToastView<ToastHandle> {
       if (handle.enterRaf !== null) {
         cancelAnimationFrame(handle.enterRaf);
         handle.enterRaf = null;
+      }
+      if (handle.leaveCancel !== null) {
+        handle.leaveCancel();
+        handle.leaveCancel = null;
       }
       handle.el.remove();
     },

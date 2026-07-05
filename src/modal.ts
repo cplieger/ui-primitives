@@ -18,7 +18,7 @@
 
 import { el } from "@cplieger/reactive";
 
-import { closeDialog, openDialog } from "./dialog.js";
+import { closeDialog, openDialog, wireBackdropDismiss } from "./dialog.js";
 
 export interface ModalOptions {
   /** Close when the backdrop is clicked (drag-safe). Default `true`. */
@@ -174,20 +174,7 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
     });
   };
 
-  let downOnDialog = false;
-  const onMouseDown = (e: MouseEvent): void => {
-    // A backdrop press targets the <dialog> itself; content presses target a
-    // descendant. Recorded so a drag-select ending on the backdrop doesn't
-    // count as a backdrop click.
-    downOnDialog = e.target === dialog;
-  };
-  const onMouseUp = (e: MouseEvent): void => {
-    const onBackdrop = e.target === dialog && downOnDialog;
-    downOnDialog = false;
-    if (closeOnBackdrop && onBackdrop) {
-      doClose();
-    }
-  };
+  const cleanupBackdrop = closeOnBackdrop ? wireBackdropDismiss(dialog, doClose) : null;
   const onCancel = (e: Event): void => {
     // The platform fires `cancel` on Escape then closes instantly. Intercept it
     // so the fade-out lifecycle runs (or so Escape is ignored entirely).
@@ -196,8 +183,6 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
       doClose();
     }
   };
-  dialog.addEventListener("mousedown", onMouseDown);
-  dialog.addEventListener("mouseup", onMouseUp);
   dialog.addEventListener("cancel", onCancel);
 
   return {
@@ -225,8 +210,7 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
     },
     close: doClose,
     dispose(): void {
-      dialog.removeEventListener("mousedown", onMouseDown);
-      dialog.removeEventListener("mouseup", onMouseUp);
+      cleanupBackdrop?.();
       dialog.removeEventListener("cancel", onCancel);
       // Cancel any in-flight leave so its pending finish() no-ops, release the
       // lock, close the native dialog (so `open` clears), then remove it.
@@ -240,6 +224,7 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
           dialog.open = false;
         }
       }
+      content.classList.remove("uip-modal-dialog");
       dialog.remove();
     },
   };

@@ -498,6 +498,18 @@ describe("createPopover — show / hide / toggle + ARIA", () => {
     vi.advanceTimersByTime(1);
     expect(netListeners(add, remove, "click")).toBe(1);
   });
+
+  it("advertises a custom aria-haspopup value from the haspopup option", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.appendChild(anchor);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { haspopup: "listbox" });
+    c.show();
+    expect(anchor.getAttribute("aria-haspopup")).toBe("listbox");
+    c.dispose();
+  });
 });
 
 // ===== createPopover: dismissal ===========================================
@@ -863,6 +875,48 @@ describe("createPopover — focus management", () => {
     anchor.focus(); // focus moved while open
     c.hide();
     expect(document.activeElement).toBe(anchor); // hide did NOT restore to trigger
+  });
+
+  it("moves focus back out on hide when initialFocus moved it in but returnFocus was omitted", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    const field = document.createElement("input");
+    const opener = document.createElement("button");
+    panel.appendChild(field);
+    document.body.append(opener, anchor, panel);
+    opener.focus(); // the user's place before the popover opens
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    // initialFocus set, returnFocus deliberately OMITTED — the focus-loss trap.
+    const c = createPopover(anchor, panel, { initialFocus: field, flip: false, clamp: false });
+    c.show();
+    expect(document.activeElement).toBe(field); // controller moved focus into the panel
+    c.hide();
+    // Focus is NOT stranded on the now-hidden panel field and NOT dropped to
+    // <body> — it returns to the opener so the user keeps their place (WCAG 2.4.3).
+    expect(document.activeElement).toBe(opener);
+    expect(document.activeElement).not.toBe(field);
+  });
+
+  it("blurs focus off the hidden panel on hide when initialFocus moved it in and the restore target is gone", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    const field = document.createElement("input");
+    const opener = document.createElement("button");
+    panel.appendChild(field);
+    document.body.append(opener, anchor, panel);
+    opener.focus(); // captured as the restore target when focus moves into the panel
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, { initialFocus: field, flip: false, clamp: false });
+    c.show();
+    expect(document.activeElement).toBe(field); // controller moved focus into the panel
+    opener.remove(); // the restore target is removed while the popover is open
+    c.hide();
+    // Restore target gone: focus can't return to it, so the controller must move
+    // focus OUT of the now-hidden panel (WCAG 2.4.3) rather than strand it on the field.
+    expect(document.activeElement).not.toBe(field);
+    expect(panel.contains(document.activeElement)).toBe(false);
   });
 
   it("a detached returnFocus target is a safe no-op on hide", () => {

@@ -1,10 +1,19 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from "vitest";
 
-import { toast, info, error, createToaster, _resetForTest } from "./index.js";
+import { _resetForTest as resetAnnounce } from "../announce.js";
 
+import { toast, info, error, createToaster, _resetForTest } from "./index.js";
+import { createToastView } from "./view.js";
+
+// The toast view delegates screen-reader announcement to the shared announce()
+// live region (see view.ts); the visual stack and toast nodes are NOT live
+// regions. announce() is used for real here (isolate:false makes vi.mock leak
+// across files), so the announcement is asserted through its actual region,
+// which is a stronger, end-to-end check.
 afterEach(() => {
-  _resetForTest();
+  _resetForTest(); // clear toasts + remove the visual stack
+  resetAnnounce(); // clear announce timers + remove its live regions
   document.body.innerHTML = "";
 });
 
@@ -16,29 +25,116 @@ function toasts(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>(".uip-toast")];
 }
 
+function liveRegion(politeness: "polite" | "assertive"): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`.uip-visually-hidden[aria-live="${politeness}"]`);
+}
+
 function endTransition(node: HTMLElement): void {
   node.dispatchEvent(new Event("transitionend"));
 }
 
 describe("toast", () => {
-  it("mounts a toast into a polite status stack with message, aria-label, tabindex", () => {
+  it("renders a non-live visual stack and node (no nested live regions, no aria-label)", () => {
     info("Saved");
+
+    // The stack is a purely visual container — NOT a live region, so nothing
+    // nests a live region inside another.
     const s = stack();
     expect(s).not.toBeNull();
-    expect(s!.getAttribute("role")).toBe("status");
-    expect(s!.getAttribute("aria-live")).toBe("polite");
-    expect(s!.getAttribute("aria-atomic")).toBe("false");
+    expect(s!.hasAttribute("role")).toBe(false);
+    expect(s!.hasAttribute("aria-live")).toBe(false);
 
     const nodes = toasts();
     expect(nodes).toHaveLength(1);
     const node = nodes[0]!;
+
+    // The visual node carries no live-region semantics and no aria-label.
+    expect(node.hasAttribute("role")).toBe(false);
+    expect(node.hasAttribute("aria-live")).toBe(false);
+    expect(node.hasAttribute("aria-label")).toBe(false);
+
+    // The message renders; the dismiss hint stays a visually-hidden (NOT
+    // aria-hidden) child so the focusable node is self-describing.
     expect(node.querySelector(".uip-toast-msg")!.textContent).toBe("Saved");
-    // The label carries only the affordance hint; the message is announced by
-    // the visible `.uip-toast-msg` text, so it must not be duplicated here.
-    expect(node.getAttribute("aria-label")).toBe("info notification. Click to dismiss.");
-    expect(node.getAttribute("aria-label")).not.toContain("Saved");
+    const hint = node.querySelector<HTMLElement>(".uip-visually-hidden");
+    expect(hint).not.toBeNull();
+    expect(hint!.textContent).toBe("Click to dismiss.");
+    expect(hint!.hasAttribute("aria-hidden")).toBe(false);
+
     expect(node.getAttribute("tabindex")).toBe("0");
     expect(node.classList.contains("uip-toast--info")).toBe(true);
+  });
+
+  it("announces an info message through the polite live region (not via the node)", () => {
+    vi.useFakeTimers();
+    try {
+      info("Saved");
+      // announce() creates its polite region synchronously; the text lands
+      // after its short delay (empty -> text is what re-announces reliably).
+      const region = liveRegion("polite");
+      expect(region).not.toBeNull();
+      expect(region!.getAttribute("role")).toBe("status");
+      vi.advanceTimersByTime(100);
+      expect(region!.textContent).toBe("Saved");
+      // A non-error toast does not touch the assertive region.
+      expect(liveRegion("assertive")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("announces a success message politely", () => {
+    vi.useFakeTimers();
+    try {
+      toast.success("Profile updated");
+      vi.advanceTimersByTime(100);
+      expect(liveRegion("polite")?.textContent).toBe("Profile updated");
+      expect(liveRegion("assertive")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("announces an error assertively through a role=alert live region", () => {
+    vi.useFakeTimers();
+    try {
+      error("boom");
+      const region = liveRegion("assertive");
+      expect(region).not.toBeNull();
+      expect(region!.getAttribute("role")).toBe("alert");
+      vi.advanceTimersByTime(100);
+      expect(region!.textContent).toBe("boom");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not append the stack at import time — createToastView() is side-effect-free until mount", () => {
+    // Constructing the view must not touch the DOM; the stack appears only on
+    // the first mount. The ./index.js singleton builds a view at module-eval
+    // time, so a side-effect-free factory means importing the module appends
+    // nothing.
+    const view = createToastView();
+    expect(stack()).toBeNull();
+    expect(document.body.childElementCount).toBe(0);
+
+    view.mount(
+      { id: 1, message: "hi", level: "info", duration: 0 },
+      { dismiss: vi.fn(), pause: vi.fn(), resume: vi.fn() },
+    );
+    expect(stack()).not.toBeNull();
+    view.dispose();
+  });
+
+  it("importing the toast module does not append anything to document.body", async () => {
+    vi.resetModules();
+    document.body.innerHTML = "";
+    const fresh = await import("./index.js");
+    // No import-time DOM mutation: the stack is lazy, created on the first show.
+    expect(document.querySelector(".uip-toast-stack")).toBeNull();
+    expect(document.body.childElementCount).toBe(0);
+    // Clean up the fresh singleton's document Escape listener (no stack exists).
+    fresh.toast.dispose();
   });
 
   it("sets --uip-toast-duration and renders a progress bar for timed toasts", () => {
@@ -48,10 +144,10 @@ describe("toast", () => {
     expect(node.querySelector(".uip-toast-progress")).not.toBeNull();
   });
 
-  it("gives error toasts role=alert and makes them sticky (no progress bar)", () => {
+  it("makes error toasts sticky (no progress bar) and gives them no role", () => {
     error("boom");
     const node = toasts()[0]!;
-    expect(node.getAttribute("role")).toBe("alert");
+    expect(node.hasAttribute("role")).toBe(false);
     expect(node.style.getPropertyValue("--uip-toast-duration")).toBe("");
     expect(node.querySelector(".uip-toast-progress")).toBeNull();
   });
@@ -189,5 +285,27 @@ describe("toast", () => {
     const removes = removeSpy.mock.calls.filter((c) => c[0] === "keydown").length;
     expect(adds).toBe(5);
     expect(removes).toBe(5);
+  });
+
+  it("dismisses a focused toast when Enter is pressed on the toast node", () => {
+    info("enter me");
+    const node = toasts()[0]!;
+    node.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(node.classList.contains("is-leaving")).toBe(true);
+  });
+
+  it("dismisses a focused toast when Space is pressed on the toast node", () => {
+    info("space me");
+    const node = toasts()[0]!;
+    node.dispatchEvent(new KeyboardEvent("keydown", { key: " ", bubbles: true }));
+    expect(node.classList.contains("is-leaving")).toBe(true);
+  });
+
+  it("ignores a keydown bubbling up from the retry button (does not dismiss the toast)", () => {
+    error("with retry", { onClick: vi.fn() });
+    const node = toasts()[0]!;
+    const btn = node.querySelector<HTMLButtonElement>(".uip-toast-retry")!;
+    btn.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(node.classList.contains("is-leaving")).toBe(false);
   });
 });

@@ -9,7 +9,10 @@
  * toggled by the library at runtime; style them to define your skin's motion
  * and emphasis. */
 
-/* Structural + behavioral defaults. Override any of these in your own :root. */
+/* Structural + behavioral defaults. Override any of these in your own :root.
+ * Motion is fully parameterized: every transition/animation exposes BOTH a
+ * -duration and a paired -easing (timing function) custom property, each used
+ * with an inline fallback. Defaults reproduce the built-in motion exactly. */
 :root {
   --uip-z-toast: 9999;
   --uip-z-tooltip: 10000;
@@ -17,12 +20,17 @@
   --uip-toast-gap: 0.5rem;
   --uip-toast-max-width: 24rem;
   --uip-toast-enter-duration: 250ms;
+  --uip-toast-enter-easing: ease;
   --uip-toast-leave-duration: 150ms;
+  --uip-toast-leave-easing: ease;
   --uip-toast-duration: 4000ms;
+  --uip-toast-easing: linear;
   --uip-toast-progress-size: 2px;
   --uip-toast-progress-color: currentcolor;
   --uip-tooltip-fade-duration: 100ms;
+  --uip-tooltip-fade-easing: ease;
   --uip-dialog-leave-duration: 150ms;
+  --uip-dialog-leave-easing: ease;
   --uip-backdrop: oklch(0% 0 0deg / 50%);
 
   /* Modal (native <dialog>). The platform top layer owns stacking (no z-index)
@@ -30,9 +38,11 @@
    * out on leave like dialog/confirm; enter is instant (matching the family). */
   --uip-modal-backdrop: var(--uip-backdrop);
   --uip-modal-leave-duration: 150ms;
+  --uip-modal-leave-easing: ease;
 
   /* Disclosure (animated collapsible). */
   --uip-disclosure-duration: 200ms;
+  --uip-disclosure-easing: ease;
 
   /* Popover (anchored floating panel). z-index orders it below toast (9999) /
    * tooltip (10000) in the base layer. A modal is a native <dialog> in the top
@@ -41,6 +51,7 @@
    * open dialog) to sit over it. */
   --uip-z-popover: 1100;
   --uip-popover-enter-duration: 100ms;
+  --uip-popover-enter-easing: ease;
 }
 
 /* ===== Toast ============================================================= */
@@ -67,8 +78,8 @@
   opacity: 0;
   transform: translateY(-8px);
   transition:
-    opacity var(--uip-toast-enter-duration, 250ms) ease,
-    transform var(--uip-toast-enter-duration, 250ms) ease;
+    opacity var(--uip-toast-enter-duration, 250ms) var(--uip-toast-enter-easing, ease),
+    transform var(--uip-toast-enter-duration, 250ms) var(--uip-toast-enter-easing, ease);
 }
 
 .uip-toast.is-shown {
@@ -80,8 +91,8 @@
   opacity: 0;
   transform: translateY(-8px);
   transition:
-    opacity var(--uip-toast-leave-duration, 150ms) ease,
-    transform var(--uip-toast-leave-duration, 150ms) ease;
+    opacity var(--uip-toast-leave-duration, 150ms) var(--uip-toast-leave-easing, ease),
+    transform var(--uip-toast-leave-duration, 150ms) var(--uip-toast-leave-easing, ease);
 }
 
 /* Countdown bar. Its duration comes from the --uip-toast-duration custom
@@ -94,7 +105,8 @@
   block-size: var(--uip-toast-progress-size, 2px);
   background: var(--uip-toast-progress-color, currentcolor);
   transform-origin: left center;
-  animation: uip-toast-progress var(--uip-toast-duration, 4000ms) linear both;
+  animation: uip-toast-progress var(--uip-toast-duration, 4000ms) var(--uip-toast-easing, linear)
+    both;
 }
 
 @keyframes uip-toast-progress {
@@ -119,7 +131,7 @@
   inset-inline-start: 0;
   pointer-events: none;
   opacity: 1;
-  transition: opacity var(--uip-tooltip-fade-duration, 100ms) ease;
+  transition: opacity var(--uip-tooltip-fade-duration, 100ms) var(--uip-tooltip-fade-easing, ease);
 }
 
 .uip-tooltip.is-leaving {
@@ -131,7 +143,7 @@
 .uip-confirm,
 .uip-dialog {
   opacity: 1;
-  transition: opacity var(--uip-dialog-leave-duration, 150ms) ease;
+  transition: opacity var(--uip-dialog-leave-duration, 150ms) var(--uip-dialog-leave-easing, ease);
 }
 
 .uip-confirm.is-leaving,
@@ -143,7 +155,7 @@
 .uip-dialog::backdrop {
   background: var(--uip-backdrop, oklch(0% 0 0deg / 50%));
   opacity: 1;
-  transition: opacity var(--uip-dialog-leave-duration, 150ms) ease;
+  transition: opacity var(--uip-dialog-leave-duration, 150ms) var(--uip-dialog-leave-easing, ease);
 }
 
 .uip-confirm.is-leaving::backdrop,
@@ -164,7 +176,7 @@
 .uip-modal {
   margin: auto;
   opacity: 1;
-  transition: opacity var(--uip-modal-leave-duration, 150ms) ease;
+  transition: opacity var(--uip-modal-leave-duration, 150ms) var(--uip-modal-leave-easing, ease);
 }
 
 .uip-modal.is-leaving {
@@ -174,7 +186,7 @@
 .uip-modal::backdrop {
   background: var(--uip-modal-backdrop, oklch(0% 0 0deg / 50%));
   opacity: 1;
-  transition: opacity var(--uip-modal-leave-duration, 150ms) ease;
+  transition: opacity var(--uip-modal-leave-duration, 150ms) var(--uip-modal-leave-easing, ease);
 }
 
 .uip-modal.is-leaving::backdrop {
@@ -194,7 +206,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .uip-disclosure-region {
-    transition: height var(--uip-disclosure-duration, 200ms) ease;
+    transition: height var(--uip-disclosure-duration, 200ms) var(--uip-disclosure-easing, ease);
   }
 }
 
@@ -216,7 +228,8 @@
  * the controller dismisses instantly (sets [hidden]), so there is no leave
  * animation. */
 .uip-popover.is-open {
-  animation: uip-popover-enter var(--uip-popover-enter-duration, 100ms) ease;
+  animation: uip-popover-enter var(--uip-popover-enter-duration, 100ms)
+    var(--uip-popover-enter-easing, ease);
 }
 
 @keyframes uip-popover-enter {

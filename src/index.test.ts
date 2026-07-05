@@ -11,12 +11,15 @@ describe("public surface", () => {
     expect(typeof api.createTheme).toBe("function");
     expect(typeof api.themeInitSnippet).toBe("function");
     expect(typeof api.createDialog).toBe("function");
+    expect(typeof api.openDialog).toBe("function");
+    expect(typeof api.closeDialog).toBe("function");
     expect(typeof api.createModal).toBe("function");
     expect(typeof api.createDisclosure).toBe("function");
     expect(typeof api.confirm).toBe("function");
     expect(typeof api.initTooltips).toBe("function");
     expect(typeof api.createPopover).toBe("function");
     expect(typeof api.placeAnchored).toBe("function");
+    expect(typeof api.pointAnchor).toBe("function");
     expect(typeof api.createToaster).toBe("function");
     expect(typeof api.info).toBe("function");
     expect(typeof api.success).toBe("function");

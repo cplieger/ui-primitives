@@ -130,11 +130,20 @@ Behavior: up to `maxVisible` (default 3) show at once; the rest queue (cap
 `maxQueue`, default 20, dropping the oldest). `info`/`success` auto-dismiss after
 4s; `error` is sticky. Hover or focus pauses the countdown; it resumes only once
 both the hover and the focus have ended (so a focused toast never auto-dismisses
-under the cursor). Click or press **Escape** (newest first) to dismiss. Each
-toast is `role="status"` inside the stack (`aria-live="polite"`), `role="alert"`
-when it is an error, keyboard-focusable, and carries an affordance `aria-label`
-(`"<level> notification. Click to dismiss."`) — the message text is announced by
-the live region and is deliberately not duplicated in the label.
+under the cursor). Click or press **Escape** (newest first) to dismiss; each
+toast is keyboard-focusable (`tabindex="0"`), and a focused toast can also be
+dismissed with **Enter** or **Space**.
+
+Accessibility: announcement is decoupled from the visual stack. When a toast
+appears, its message is announced through the shared `announce()` live region
+(`error` interrupts with **assertive** urgency; `info`/`success` are
+**polite**), so the `.uip-toast-stack` and the toast nodes carry no
+`role`/`aria-live` and no live region is ever nested inside another (which is
+implementation-specific across screen readers). The toast node has no
+`aria-label`; the affordance hint (`"Click to dismiss."`) rides along as a
+visually-hidden child span so the focused node stays self-describing for
+keyboard and screen-reader users. Nothing is appended to the DOM at import
+time: the stack is created lazily on the first toast shown.
 
 Toasts mount on `document.body`. A toast raised while a modal `<dialog>` is open
 therefore renders behind the dialog's top layer; raise toasts before opening a
@@ -346,7 +355,7 @@ d.isOpen; // boolean
 The trigger gets button semantics — `aria-expanded` reflecting the state, and
 `role="button"` + `tabindex="0"` + Enter/Space handling when it isn't already a
 native `<button>` — and is linked to the region via `aria-controls`. The region
-gets a generated `id` (if it has none) and `aria-hidden` when collapsed.
+gets a generated `id` (if it has none), and is marked `aria-hidden` **and** `inert` when collapsed (so collapsed content leaves the tab order and the accessibility tree entirely; `height:0`/`overflow:hidden` alone would keep descendants keyboard-focusable).
 
 Height animates `0 ↔ auto`. Modern engines interpolate the `auto` keyword
 directly via `interpolate-size: allow-keywords` (set on the region in the base
@@ -428,7 +437,7 @@ Two exports, split by responsibility:
 - `matchAnchorWidth?: boolean | number` — set the panel's `min-width` to the anchor width (`true`) or to `max(anchorWidth, n)` (a number). Default `false`.
 - `margin?: number` — viewport edge margin used by flip + clamp, in px. Default `8`.
 
-`PopoverOptions extends PlacementOptions` adds `{ closeOnOutside?; closeOnEscape?; initialFocus?; returnFocus?; onOpen?; onClose? }` (dismissal defaults `true`).
+`PopoverOptions extends PlacementOptions` adds `{ closeOnOutside?; closeOnEscape?; initialFocus?; returnFocus?; haspopup?; onOpen?; onClose? }` (dismissal defaults `true`; `haspopup` sets the anchor's `aria-haspopup` value: `true` (default), `"menu"`, `"listbox"`, `"tree"`, `"grid"`, or `"dialog"`; ignored for a virtual/point anchor).
 
 **Anchor against a coordinate, not just an element.** Both `placeAnchored` and
 `createPopover` take a `PopoverAnchor` — a real `HTMLElement` or a
@@ -519,8 +528,8 @@ announce("Connection lost", "assertive");
 
 Updates a shared visually-hidden ARIA live region so screen readers announce
 the message. `polite` (default) and `assertive` use separate regions. The text
-is cleared then re-set on a microtask so repeated identical messages still
-announce.
+is cleared then re-set after a short (~100ms) delay so repeated identical
+messages still announce.
 
 ## CSS contract
 
@@ -538,18 +547,30 @@ scoped) to tune behavior, and style the classes for your skin.
 | `--uip-toast-gap`              | `0.5rem`                 | gap between stacked toasts                                      |
 | `--uip-toast-max-width`        | `24rem`                  | toast stack max inline size                                     |
 | `--uip-toast-enter-duration`   | `250ms`                  | toast enter transition                                          |
+| `--uip-toast-enter-easing`     | `ease`                   | toast enter easing (timing function)                            |
 | `--uip-toast-leave-duration`   | `150ms`                  | toast leave transition                                          |
+| `--uip-toast-leave-easing`     | `ease`                   | toast leave easing                                              |
 | `--uip-toast-duration`         | `4000ms`                 | progress-bar duration — **set inline per toast by the library** |
+| `--uip-toast-easing`           | `linear`                 | progress-bar easing (timing function)                           |
 | `--uip-toast-progress-size`    | `2px`                    | progress-bar thickness                                          |
 | `--uip-toast-progress-color`   | `currentcolor`           | progress-bar color                                              |
 | `--uip-tooltip-fade-duration`  | `100ms`                  | tooltip fade                                                    |
+| `--uip-tooltip-fade-easing`    | `ease`                   | tooltip fade easing                                             |
 | `--uip-dialog-leave-duration`  | `150ms`                  | dialog / confirm / backdrop fade                                |
+| `--uip-dialog-leave-easing`    | `ease`                   | dialog / confirm / backdrop fade easing                         |
 | `--uip-backdrop`               | `oklch(0% 0 0deg / 50%)` | dialog / confirm backdrop dim                                   |
 | `--uip-modal-backdrop`         | `var(--uip-backdrop)`    | modal `::backdrop` dim                                          |
 | `--uip-modal-leave-duration`   | `150ms`                  | modal + `::backdrop` leave fade                                 |
+| `--uip-modal-leave-easing`     | `ease`                   | modal + `::backdrop` leave-fade easing                          |
 | `--uip-disclosure-duration`    | `200ms`                  | disclosure height transition                                    |
+| `--uip-disclosure-easing`      | `ease`                   | disclosure height easing                                        |
 | `--uip-z-popover`              | `1100`                   | popover z-index (base layer: below toast / tooltip)             |
 | `--uip-popover-enter-duration` | `100ms`                  | popover enter-fade animation                                    |
+| `--uip-popover-enter-easing`   | `ease`                   | popover enter-fade easing                                       |
+
+Every motion property is a **duration + easing** pair: the `--uip-*-easing`
+timing functions default to `ease` (the toast progress bar to `linear`) and
+are overridable exactly like the durations above.
 
 **Countdown contract:** the toast progress bar animates from the
 `--uip-toast-duration` custom property, which the library writes inline on each
@@ -561,7 +582,7 @@ duration in code, and style the bar's color/size via the properties above.
 
 | Class                                                          | Element                                                         |
 | -------------------------------------------------------------- | --------------------------------------------------------------- |
-| `.uip-toast-stack`                                             | toast container (`role="status"`, `aria-live="polite"`)         |
+| `.uip-toast-stack`                                             | toast container (visual only, not a live region)                |
 | `.uip-toast`, `.uip-toast--info` / `--success` / `--error`     | a toast (level modifier)                                        |
 | `.uip-toast-msg`                                               | toast message text                                              |
 | `.uip-toast-retry`                                             | toast retry button                                              |

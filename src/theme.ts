@@ -46,7 +46,7 @@ function isChoice(value: string | null): value is ThemeChoice {
 export function createTheme(opts: ThemeOptions): ThemeController {
   const attribute = opts.attribute ?? DEFAULT_ATTRIBUTE;
   const storage = opts.storage ?? window.localStorage;
-  const mql = window.matchMedia(DARK_QUERY);
+  const mql = typeof window.matchMedia === "function" ? window.matchMedia(DARK_QUERY) : null;
 
   const readChoice = (): ThemeChoice => {
     let stored: string | null;
@@ -60,7 +60,7 @@ export function createTheme(opts: ThemeOptions): ThemeController {
 
   let choice: ThemeChoice = readChoice();
 
-  const getSystem = (): Resolved => (mql.matches ? "dark" : "light");
+  const getSystem = (): Resolved => (mql?.matches === true ? "dark" : "light");
   const resolved = (): Resolved => (choice === "system" ? getSystem() : choice);
 
   const apply = (): void => {
@@ -88,7 +88,7 @@ export function createTheme(opts: ThemeOptions): ThemeController {
       apply();
     }
   };
-  mql.addEventListener("change", onSystemChange);
+  mql?.addEventListener("change", onSystemChange);
 
   apply();
 
@@ -99,7 +99,7 @@ export function createTheme(opts: ThemeOptions): ThemeController {
     cycle,
     getSystem,
     dispose: () => {
-      mql.removeEventListener("change", onSystemChange);
+      mql?.removeEventListener("change", onSystemChange);
     },
   };
 }
