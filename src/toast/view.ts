@@ -7,6 +7,7 @@
 
 import { el } from "@cplieger/reactive";
 
+import { afterTransition } from "../transition.js";
 import type { ToastCallbacks, ToastRenderData, ToastView } from "./engine.js";
 
 /** Fallback (ms) if `transitionend` never fires so a toast is always removed. */
@@ -133,27 +134,14 @@ export function createToastView(): ToastView<ToastHandle> {
         node.classList.remove("is-entering");
         node.classList.add("is-shown");
       }
-      let finished = false;
-      let fallback: ReturnType<typeof setTimeout> | null = null;
-      const finish = (): void => {
-        if (finished) {
-          return;
-        }
-        finished = true;
-        if (fallback !== null) {
-          clearTimeout(fallback);
-        }
-        node.removeEventListener("transitionend", onEnd);
-        node.remove();
-        done();
-      };
-      const onEnd = (e: TransitionEvent): void => {
-        if (e.target === node) {
-          finish();
-        }
-      };
-      node.addEventListener("transitionend", onEnd);
-      fallback = setTimeout(finish, LEAVE_FALLBACK_MS);
+      afterTransition(
+        node,
+        () => {
+          node.remove();
+          done();
+        },
+        LEAVE_FALLBACK_MS,
+      );
       node.classList.remove("is-shown");
       node.classList.add("is-leaving");
     },

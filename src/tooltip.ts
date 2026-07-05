@@ -11,6 +11,8 @@
 
 import { el } from "@cplieger/reactive";
 
+import { placeAnchored } from "./popover.js";
+
 export interface TooltipOptions {
   /** Trigger attribute holding the tooltip text. Default `data-uip-tooltip`. */
   attribute?: string;
@@ -176,24 +178,12 @@ class TooltipController {
   }
 
   private position(anchor: HTMLElement, tip: HTMLElement): void {
-    const rect = anchor.getBoundingClientRect();
-    const tipRect = tip.getBoundingClientRect();
-    const margin = 4;
-    const offset = 6;
-    let left = rect.left + rect.width / 2 - tipRect.width / 2;
-    let top = rect.top - tipRect.height - offset;
-    if (left < margin) {
-      left = margin;
-    }
-    if (left + tipRect.width > window.innerWidth - margin) {
-      left = window.innerWidth - margin - tipRect.width;
-    }
-    if (top < margin) {
-      // No room above — flip below the anchor.
-      top = rect.bottom + offset;
-    }
-    tip.style.left = `${left}px`;
-    tip.style.top = `${top}px`;
+    // Reuse the shared anchored positioner instead of re-deriving the math:
+    // centered above the anchor, gap 6, viewport margin 4, flipping below when
+    // there is no room above and clamping horizontally. placeAnchored also
+    // reads window.visualViewport, so the tooltip stays correct above the
+    // mobile on-screen keyboard.
+    placeAnchored(tip, anchor, { placement: "top", align: "center", offset: 6, margin: 4 });
   }
 
   private hide(): void {

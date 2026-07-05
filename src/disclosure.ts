@@ -9,6 +9,8 @@
 // stylesheet); engines without it fall back to a measured `scrollHeight` px
 // target. Both honor `prefers-reduced-motion` by skipping the tween.
 
+import { afterTransition } from "./transition.js";
+
 /** Fallback (ms) if `transitionend` never fires on the region. */
 const OPEN_FALLBACK_MS = 400;
 
@@ -90,36 +92,19 @@ export function createDisclosure(
     }
   };
 
-  // Run `cb` after the region's height transition (or a fallback), cancelling
-  // any prior pending settle so rapid toggles don't clash.
-  const afterTransition = (cb: () => void): void => {
+  // Settle after the region's height transition (or a fallback), cancelling any
+  // prior pending settle so rapid toggles don't clash. Delegates the guarded
+  // "transitionend-or-fallback, run once" mechanics to the shared helper.
+  const settleAfterTransition = (cb: () => void): void => {
     clearPending();
-    let done = false;
-    const run = (): void => {
-      if (done) {
-        return;
-      }
-      done = true;
-      region.removeEventListener("transitionend", onEnd);
-      clearTimeout(timer);
-      cancelPending = null;
-      cb();
-    };
-    const onEnd = (e: TransitionEvent): void => {
-      if (e.target === region) {
-        run();
-      }
-    };
-    region.addEventListener("transitionend", onEnd);
-    const timer = setTimeout(run, OPEN_FALLBACK_MS);
-    cancelPending = (): void => {
-      if (done) {
-        return;
-      }
-      done = true;
-      region.removeEventListener("transitionend", onEnd);
-      clearTimeout(timer);
-    };
+    cancelPending = afterTransition(
+      region,
+      () => {
+        cancelPending = null;
+        cb();
+      },
+      OPEN_FALLBACK_MS,
+    );
   };
 
   const reflectAria = (): void => {
@@ -138,7 +123,7 @@ export function createDisclosure(
       region.style.height = "0px";
       forceReflow(region);
       region.style.height = supportsInterpolateSize() ? "auto" : `${region.scrollHeight}px`;
-      afterTransition(() => {
+      settleAfterTransition(() => {
         // Settle to auto so the content can reflow/grow later — but only if it
         // is still open (a fast close may have won).
         if (open) {
