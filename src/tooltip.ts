@@ -12,6 +12,7 @@
 import { el } from "@cplieger/reactive";
 
 import { placeAnchored } from "./popover.js";
+import { afterTransition } from "./transition.js";
 
 export interface TooltipOptions {
   /** Trigger attribute holding the tooltip text. Default `data-uip-tooltip`. */
@@ -202,19 +203,16 @@ class TooltipController {
     this.state = { kind: "fading", tip };
     this.warmUntil = Date.now() + this.cooldown;
 
-    let removed = false;
-    const remove = (): void => {
-      if (removed) {
-        return;
-      }
-      removed = true;
-      if (this.state.kind === "fading" && this.state.tip === tip) {
-        this.state = { kind: "idle" };
-      }
-      tip.remove();
-    };
-    tip.addEventListener("transitionend", remove, { once: true });
-    setTimeout(remove, HIDE_FALLBACK_MS);
+    afterTransition(
+      tip,
+      () => {
+        if (this.state.kind === "fading" && this.state.tip === tip) {
+          this.state = { kind: "idle" };
+        }
+        tip.remove();
+      },
+      HIDE_FALLBACK_MS,
+    );
   }
 
   private teardown(): void {

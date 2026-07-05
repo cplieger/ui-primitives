@@ -110,6 +110,11 @@ export function createDisclosure(
   const reflectAria = (): void => {
     trigger.setAttribute("aria-expanded", open ? "true" : "false");
     region.setAttribute("aria-hidden", open ? "false" : "true");
+    // Collapsed content must also leave the tab order + a11y tree. height:0 +
+    // overflow:hidden clips paint but keeps descendants keyboard-focusable, and
+    // aria-hidden on focusable content is itself invalid. `inert` removes focus,
+    // interaction, and a11y participation without touching layout/animation.
+    region.inert = !open;
   };
 
   const applyHeight = (targetOpen: boolean, animate: boolean): void => {

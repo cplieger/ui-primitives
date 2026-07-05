@@ -5,7 +5,7 @@
 
 import { el } from "@cplieger/reactive";
 
-import { closeDialog, openDialog } from "./dialog.js";
+import { closeDialog, openDialog, wireBackdropDismiss } from "./dialog.js";
 
 export interface ConfirmOptions {
   title?: string;
@@ -113,6 +113,7 @@ export function confirm(message: string, opts?: ConfirmOptions): Promise<boolean
 
     const teardown = (): void => {
       controller.abort();
+      cleanupBackdrop();
     };
 
     // Preemption: resolve false without animating closed — the newer confirm
@@ -165,25 +166,9 @@ export function confirm(message: string, opts?: ConfirmOptions): Promise<boolean
       { signal },
     );
 
-    let downOnDialog = false;
-    r.dialog.addEventListener(
-      "mousedown",
-      (e) => {
-        downOnDialog = e.target === r.dialog;
-      },
-      { signal },
-    );
-    r.dialog.addEventListener(
-      "mouseup",
-      (e) => {
-        const onBackdrop = e.target === r.dialog && downOnDialog;
-        downOnDialog = false;
-        if (onBackdrop) {
-          settle(false);
-        }
-      },
-      { signal },
-    );
+    const cleanupBackdrop = wireBackdropDismiss(r.dialog, () => {
+      settle(false);
+    });
   });
 }
 
