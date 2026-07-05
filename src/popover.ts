@@ -393,7 +393,14 @@ export function createPopover(
     panel.hidden = false;
     panel.classList.add("is-open");
     if (!panel.isConnected) {
-      document.body.appendChild(panel);
+      // Host the panel in the nearest open <dialog> ancestor of the anchor when
+      // there is one, so a popover opened from within a native-<dialog> modal
+      // renders in that dialog's top layer (above it) rather than the base layer
+      // (behind it). Mirrors the tooltip's dialog-hosting. A virtual/point
+      // anchor (anchorEl === null), or an anchor outside any dialog, falls back
+      // to <body>. A caller-connected panel is left where the caller put it.
+      const host = anchorEl?.closest("dialog[open]") ?? document.body;
+      host.appendChild(panel);
     }
     placeAnchored(panel, anchor, opts);
     // ARIA is set only on a real element; a virtual/point anchor has none.

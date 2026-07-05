@@ -16,12 +16,14 @@ export type { ThemeChoice, ThemeController, ThemeOptions } from "./theme.js";
 export { createDialog, openDialog, closeDialog } from "./dialog.js";
 export type { DialogController, DialogOptions } from "./dialog.js";
 
-// modal is the overlay-<div> sibling to the native-<dialog> `dialog` member.
-// With dialog's verbs renamed to openDialog / closeDialog, the names no longer
-// collide, so the barrel exposes modal's own openModal / closeModal directly
-// (alongside createModal / closeTopModal). dialog owns openDialog / closeDialog
-// above; modal owns openModal / closeModal here.
-export { createModal, openModal, closeModal, closeTopModal } from "./modal.js";
+// modal builds a native-<dialog> modal from caller content — the sibling to the
+// `dialog` member (which wraps an existing <dialog>). The platform provides
+// focus containment, the top layer, background inerting, Escape, nested
+// stacking, and focus-return-to-opener; modal adds ARIA wiring, drag-safe
+// backdrop dismissal, the shared fade-out lifecycle, and an iOS-safe background
+// scroll-lock. The overlay-<div> incarnation (openModal / closeModal /
+// closeTopModal on a raw div) was removed with the native rewrite.
+export { createModal } from "./modal.js";
 export type { ModalController, ModalOptions } from "./modal.js";
 
 export { createDisclosure } from "./disclosure.js";
