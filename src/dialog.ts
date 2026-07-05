@@ -73,21 +73,11 @@ export function closeDialog(dialog: HTMLDialogElement, onClosed?: () => void): v
   dialog.classList.add("is-leaving");
 }
 
-/** Wrap an existing native <dialog> with backdrop + Escape dismissal and the
- *  fade-out close lifecycle. Adds the `uip-dialog` class for the base skin. */
-export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): DialogController {
-  const closeOnBackdrop = opts?.closeOnBackdrop ?? true;
-  const closeOnEscape = opts?.closeOnEscape ?? true;
-  const onClose = opts?.onClose;
-
-  dialog.classList.add("uip-dialog");
-
+/** Wire drag-safe backdrop dismissal on a native <dialog>: `onDismiss` fires
+ *  only when a press both starts and ends on the dialog element itself.
+ *  Returns a cleanup fn that removes both listeners. */
+export function wireBackdropDismiss(dialog: HTMLDialogElement, onDismiss: () => void): () => void {
   let downOnDialog = false;
-
-  const doClose = (): void => {
-    closeDialog(dialog, onClose);
-  };
-
   const onMouseDown = (e: MouseEvent): void => {
     // A backdrop press targets the dialog element itself (content presses
     // target a descendant). Record it so a drag-select that ends on the
@@ -97,10 +87,33 @@ export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): D
   const onMouseUp = (e: MouseEvent): void => {
     const onBackdrop = e.target === dialog && downOnDialog;
     downOnDialog = false;
-    if (closeOnBackdrop && onBackdrop) {
-      doClose();
+    if (onBackdrop) {
+      onDismiss();
     }
   };
+  dialog.addEventListener("mousedown", onMouseDown);
+  dialog.addEventListener("mouseup", onMouseUp);
+  return (): void => {
+    dialog.removeEventListener("mousedown", onMouseDown);
+    dialog.removeEventListener("mouseup", onMouseUp);
+  };
+}
+
+/** Wrap an existing native <dialog> with backdrop + Escape dismissal and the
+ *  fade-out close lifecycle. Adds the `uip-dialog` class for the base skin. */
+export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): DialogController {
+  const closeOnBackdrop = opts?.closeOnBackdrop ?? true;
+  const closeOnEscape = opts?.closeOnEscape ?? true;
+  const onClose = opts?.onClose;
+
+  dialog.classList.add("uip-dialog");
+
+  const doClose = (): void => {
+    closeDialog(dialog, onClose);
+  };
+
+  const cleanupBackdrop = closeOnBackdrop ? wireBackdropDismiss(dialog, doClose) : null;
+
   const onCancel = (e: Event): void => {
     // The platform fires `cancel` on Escape then closes instantly. Intercept
     // it so the fade-out lifecycle runs (or so Escape is ignored entirely).
@@ -110,8 +123,6 @@ export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): D
     }
   };
 
-  dialog.addEventListener("mousedown", onMouseDown);
-  dialog.addEventListener("mouseup", onMouseUp);
   dialog.addEventListener("cancel", onCancel);
 
   return {
@@ -121,8 +132,7 @@ export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): D
     },
     close: doClose,
     dispose: () => {
-      dialog.removeEventListener("mousedown", onMouseDown);
-      dialog.removeEventListener("mouseup", onMouseUp);
+      cleanupBackdrop?.();
       dialog.removeEventListener("cancel", onCancel);
       dialog.classList.remove("uip-dialog");
     },

@@ -23,6 +23,9 @@ builds every DOM node (CSP-safe, no `innerHTML`).
 - `toast/` — the flagship, split three ways:
   - `engine.ts` — a **pure, DOM-free** timer/queue/promotion state machine driven by an injected `ToastView` port. Testable headless.
   - `view.ts` — the DOM implementation of `ToastView` (built with `el`).
+    Delegates screen-reader announcement to `announce()` and creates its visual
+    `.uip-toast-stack` lazily, so the module has no import-time DOM side effect
+    and no live region ever nests inside another.
   - `index.ts` — the public `Toaster` factory + a default singleton.
 - `index.ts` — the barrel that re-exports every primitive's public surface.
 - `css/ui-primitives.css` — the structural + behavioral base stylesheet.
@@ -61,6 +64,9 @@ stylelint-clean under `stylelint-config-standard`. Rules:
 
 - Every themeable value is a `--uip-*` custom property, defined in `:root` with
   a sane default and used with an inline fallback.
+- Motion is fully parameterized: each transition/animation exposes both a
+  `--uip-*-duration` and a paired `--uip-*-easing`, each with an inline
+  fallback; never hard-code a bare `ease` / `linear` in a shorthand.
 - No `!important`, no IDs, no named colors, no hex alpha (the config enforces
   all of these).
 - The `prefers-reduced-motion` block uses `0.01ms` (not `0`) so `transitionend`

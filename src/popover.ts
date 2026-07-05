@@ -93,6 +93,9 @@ export interface PopoverOptions extends PlacementOptions {
   onOpen?: () => void;
   /** Invoked after the popover closes. */
   onClose?: () => void;
+  /** aria-haspopup value advertised on an element anchor. Match the panel's role. Default `true`
+   *  (menu). Ignored for a virtual/point anchor. */
+  haspopup?: "menu" | "listbox" | "tree" | "grid" | "dialog" | true;
 }
 
 export interface PopoverController {
@@ -281,8 +284,13 @@ export function createPopover(
   let listening = false;
   let installTimer: ReturnType<typeof setTimeout> | null = null;
   let trackingFrame: number | null = null;
-  // Focus-restore target, captured at show() time when `returnFocus` is set.
+  // Focus-restore target, captured at show() time when `returnFocus` is set OR
+  // when the controller is about to move focus into the panel (initialFocus).
   let restoreFocus: HTMLElement | null = null;
+  // Whether show() moved focus INTO the panel (an initialFocus was applied). On
+  // hide() this forces focus back out even without returnFocus, so it is never
+  // stranded on the now-hidden panel (WCAG 2.4.3 focus-loss).
+  let movedFocusIn = false;
 
   // Public reposition: synchronous. Callers invoke it after a content change
   // and expect an immediate re-measure + re-clamp.
@@ -405,20 +413,28 @@ export function createPopover(
     placeAnchored(panel, anchor, opts);
     // ARIA is set only on a real element; a virtual/point anchor has none.
     anchorEl?.setAttribute("aria-expanded", "true");
-    anchorEl?.setAttribute("aria-haspopup", "true");
-    // Focus management is opt-in — by default the caller owns focus. Capture the
-    // restore target BEFORE moving initial focus, so `returnFocus: true` records
+    anchorEl?.setAttribute("aria-haspopup", String(opts?.haspopup ?? "true"));
+    // Focus management is opt-in — with neither initialFocus nor returnFocus the
+    // controller leaves focus untouched at both ends (the caller owns focus).
+    // Capture the restore target BEFORE moving initial focus, so it records
     // whatever was focused when we opened rather than the initialFocus element.
     const returnFocus = opts?.returnFocus;
-    if (returnFocus === true) {
+    const initialFocus = opts?.initialFocus;
+    const willMoveFocusIn = initialFocus?.isConnected === true;
+    if (returnFocus instanceof HTMLElement) {
+      restoreFocus = returnFocus;
+    } else if (returnFocus === true || willMoveFocusIn) {
+      // `returnFocus: true` records the pre-show active element to refocus on
+      // close. We ALSO capture it implicitly whenever the controller is about to
+      // move focus INTO the panel (initialFocus), so hide() can move focus back
+      // out — otherwise it strands on the now-hidden panel and the browser drops
+      // it to <body>. This branch never runs for the omit-both default.
       const active = document.activeElement;
       restoreFocus = active instanceof HTMLElement ? active : null;
-    } else if (returnFocus instanceof HTMLElement) {
-      restoreFocus = returnFocus;
     }
-    const initialFocus = opts?.initialFocus;
-    if (initialFocus?.isConnected) {
+    if (initialFocus?.isConnected === true) {
       initialFocus.focus();
+      movedFocusIn = true;
     }
     // Defer listener install one tick so the click that opened us doesn't
     // immediately trip the outside-click handler and self-close.
@@ -435,12 +451,22 @@ export function createPopover(
     panel.hidden = true;
     panel.classList.remove("is-open");
     anchorEl?.setAttribute("aria-expanded", "false");
-    // Restore focus only if a target was captured/supplied at show() time and it
-    // is still in the document; otherwise leave focus alone.
+    // Restore focus to the target captured/supplied at show() time if it is
+    // still connected. If the controller moved focus INTO the panel but that
+    // target is gone, blur the panel so focus is not stranded on the now-hidden
+    // node (falls to <body>). With neither initialFocus nor returnFocus both are
+    // null/false, so focus is left untouched.
     const target = restoreFocus;
+    const didMoveFocusIn = movedFocusIn;
     restoreFocus = null;
+    movedFocusIn = false;
     if (target?.isConnected) {
       target.focus();
+    } else if (didMoveFocusIn) {
+      const active = document.activeElement;
+      if (active instanceof HTMLElement && panel.contains(active)) {
+        active.blur();
+      }
     }
     opts?.onClose?.();
   };

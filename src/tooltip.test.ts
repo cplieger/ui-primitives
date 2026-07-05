@@ -65,6 +65,19 @@ describe("initTooltips", () => {
     expect(tip()).toBeNull();
   });
 
+  it("keeps the tooltip when the pointer moves within the anchor's own subtree", () => {
+    initTooltips();
+    const a = anchor("Hi");
+    const child = document.createElement("span");
+    a.appendChild(child);
+    pointerOver(a);
+    vi.advanceTimersByTime(1000);
+    expect(tip()).not.toBeNull();
+    pointerOut(a, child); // relatedTarget inside the anchor -> transition ignored
+    expect(tip()).not.toBeNull();
+    expect(tip()!.classList.contains("is-leaving")).toBe(false);
+  });
+
   it("uses the warm (instant) delay for a peer within the cooldown window", () => {
     initTooltips();
     const a = anchor("A");
@@ -124,6 +137,15 @@ describe("initTooltips", () => {
     const a = anchor("");
     pointerOver(a);
     vi.advanceTimersByTime(1000);
+    expect(tip()).toBeNull();
+  });
+
+  it("cancels a still-pending tooltip when the pointer leaves during the cold delay", () => {
+    initTooltips();
+    const a = anchor("Hi");
+    pointerOver(a); // schedules the cold-delay timer (state = pending)
+    pointerOut(a, null); // leaves before the delay elapses -> clears the pending timer
+    vi.advanceTimersByTime(1000); // the cancelled timer must not fire
     expect(tip()).toBeNull();
   });
 
