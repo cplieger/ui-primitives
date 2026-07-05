@@ -25,19 +25,20 @@
   --uip-dialog-leave-duration: 150ms;
   --uip-backdrop: oklch(0% 0 0deg / 50%);
 
-  /* Modal (overlay-div). z-index sits DELIBERATELY below toast/tooltip so those
-   * overlay a modal. Backdrop reuses --uip-backdrop by default. */
-  --uip-z-modal: 1000;
+  /* Modal (native <dialog>). The platform top layer owns stacking (no z-index)
+   * and ::backdrop is the dim overlay (reuses --uip-backdrop by default). Fades
+   * out on leave like dialog/confirm; enter is instant (matching the family). */
   --uip-modal-backdrop: var(--uip-backdrop);
-  --uip-modal-enter-duration: 200ms;
   --uip-modal-leave-duration: 150ms;
 
   /* Disclosure (animated collapsible). */
   --uip-disclosure-duration: 200ms;
 
-  /* Popover (anchored floating panel). z-index sits DELIBERATELY above modal
-   * (1000) so a popover opened from within a modal shows over it, and below
-   * toast (9999) / tooltip (10000). */
+  /* Popover (anchored floating panel). z-index orders it below toast (9999) /
+   * tooltip (10000) in the base layer. A modal is a native <dialog> in the top
+   * layer (above every base-layer z-index), so a popover opened from within a
+   * modal is rendered INTO that <dialog> (createPopover hosts it in the nearest
+   * open dialog) to sit over it. */
   --uip-z-popover: 1100;
   --uip-popover-enter-duration: 100ms;
 }
@@ -150,56 +151,34 @@
   opacity: 0;
 }
 
-/* ===== Modal (overlay-div) =============================================== */
+/* ===== Modal (native <dialog>) ========================================== */
 
-/* The overlay is both the backdrop and the centering context. Grid-centering
- * (not flex + max-height) sidesteps the Safari <dialog> height bug. Hidden while
- * closed so it never intercepts clicks. */
+/* Built on the platform <dialog>: the top layer, ::backdrop, focus containment,
+ * and background inerting all come from the browser (no z-index, no overlay
+ * div). Auto-margined to center in the viewport, which also sidesteps the Safari
+ * <dialog> height bug the old overlay grid-centering worked around. Like
+ * dialog/confirm it fades out on leave — the library adds `is-leaving` and waits
+ * for its transitionend before close() — so exit works without display/overlay
+ * allow-discrete; enter is instant, matching the rest of the <dialog> family.
+ * The inner content keeps the `.uip-modal-dialog` class as a skinning hook. */
 .uip-modal {
-  position: fixed;
-  z-index: var(--uip-z-modal, 1000);
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: var(--uip-modal-backdrop, oklch(0% 0 0deg / 50%));
-  opacity: 0;
-  transition: opacity var(--uip-modal-enter-duration, 200ms) ease;
-}
-
-.uip-modal[hidden] {
-  display: none;
-}
-
-.uip-modal.is-open {
+  margin: auto;
   opacity: 1;
+  transition: opacity var(--uip-modal-leave-duration, 150ms) ease;
 }
 
 .uip-modal.is-leaving {
   opacity: 0;
+}
+
+.uip-modal::backdrop {
+  background: var(--uip-modal-backdrop, oklch(0% 0 0deg / 50%));
+  opacity: 1;
   transition: opacity var(--uip-modal-leave-duration, 150ms) ease;
 }
 
-/* The panel. Enters from a slight offset; the library toggles is-open/is-leaving
- * on the overlay. */
-.uip-modal-dialog {
+.uip-modal.is-leaving::backdrop {
   opacity: 0;
-  transform: translateY(8px);
-  transition:
-    opacity var(--uip-modal-enter-duration, 200ms) ease,
-    transform var(--uip-modal-enter-duration, 200ms) ease;
-}
-
-.uip-modal.is-open .uip-modal-dialog {
-  opacity: 1;
-  transform: translateY(0);
-}
-
-.uip-modal.is-leaving .uip-modal-dialog {
-  opacity: 0;
-  transform: translateY(8px);
-  transition:
-    opacity var(--uip-modal-leave-duration, 150ms) ease,
-    transform var(--uip-modal-leave-duration, 150ms) ease;
 }
 
 /* ===== Disclosure (animated collapsible) ================================= */
@@ -278,12 +257,12 @@
   .uip-tooltip,
   .uip-confirm,
   .uip-dialog,
+  .uip-modal,
   .uip-confirm::backdrop,
   .uip-dialog::backdrop,
-  .uip-modal,
+  .uip-modal::backdrop,
   .uip-modal.is-leaving,
-  .uip-modal-dialog,
-  .uip-modal.is-leaving .uip-modal-dialog {
+  .uip-modal.is-leaving::backdrop {
     /* stylelint-disable-next-line time-min-milliseconds -- sub-10ms keeps transitionend firing so JS leave-lifecycles still complete under reduced motion */
     transition-duration: 0.01ms;
   }

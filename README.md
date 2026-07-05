@@ -260,13 +260,16 @@ it.
 
 ### modal — `@cplieger/ui-primitives/modal`
 
-An overlay-`<div>` modal: the sibling to `dialog`. Where `dialog` is a thin
-layer over the native `<dialog>` element, `modal` is for when your modal is an
-overlay div and the library has to manage containment, stacking, scroll-lock,
-and the enter/leave lifecycle by hand.
+A modal built from your content on a native `<dialog>` — the sibling to
+`dialog`. Where `dialog` wraps a `<dialog>` element you already have, `modal`
+builds one for you from arbitrary content. The platform gives focus containment,
+the top layer, background inerting, Escape, nested stacking, and
+focus-return-to-opener for free; `modal` adds the wrapping + ARIA, drag-safe
+backdrop dismissal, the shared fade-out lifecycle, and an iOS-safe background
+scroll-lock.
 
 ```ts
-import { createModal, openModal, closeModal, closeTopModal } from "@cplieger/ui-primitives/modal";
+import { createModal } from "@cplieger/ui-primitives/modal";
 
 const modal = createModal(panelContent, {
   role: "dialog",
@@ -275,51 +278,46 @@ const modal = createModal(panelContent, {
 });
 modal.open();
 modal.close();
-
-// or manage an overlay div yourself (it should contain a .uip-modal-dialog panel):
-openModal(myOverlay, { role: "alertdialog" });
-closeModal(myOverlay, () => console.log("closed"));
-
-closeTopModal(); // close whichever modal is on top
+modal.dispose(); // close + remove the <dialog> from the DOM
 ```
 
-- `createModal(content, opts?)` → `{ open(); close(); readonly el; readonly isOpen; dispose() }`. Wraps `content` in a `.uip-modal-dialog` panel inside a `.uip-modal` overlay appended to `<body>` (hidden until opened).
-- `openModal(overlay, opts?)` — reveal an overlay div as a modal (the `showModal()` equivalent): trap focus, inert the background, lock scroll, wire dismissal, transition in.
-- `closeModal(overlay, onClosed?)` — fade out via `is-leaving`, then tear everything down and restore focus.
-- `closeTopModal()` → `boolean` — close the topmost open modal; `true` if one closed.
-- `ModalOptions` = `{ closeOnBackdrop?; closeOnEscape?; role?: "dialog" | "alertdialog"; labelledBy?; describedBy?; initialFocus?; returnFocus?; scrollLock?; inertBackground?; onClose? }`.
+- `createModal(content, opts?)` → `{ open(); close(); readonly el; readonly isOpen; dispose() }`. Wraps `content` (which gets the `.uip-modal-dialog` skin hook) in a native `<dialog class="uip-modal">` appended to `<body>`; `el` is that `HTMLDialogElement`. `dispose()` closes and removes it.
+- `ModalOptions` = `{ closeOnBackdrop?; closeOnEscape?; role?: "dialog" | "alertdialog"; labelledBy?; describedBy?; initialFocus?; scrollLock?; onClose? }`.
 
-Behavior the native `<dialog>` gives for free, reimplemented here:
+What `modal` adds on top of the platform `<dialog>`:
 
-- **Stacked focus traps.** Built on `focus-trap`, but managed as a stack: the trap installs a document-capture keydown, so two live traps would fight over Tab. Only the topmost trap is active — opening a child modal pauses the parent's trap; closing the child re-traps it. `returnFocus` chains down the stack (each modal restores focus to the element that was focused when it opened).
-- **Inert background + scroll-lock**, both ref-counted across the stack so they release only when the last modal closes. Background inerting marks the overlay's siblings `inert` (including a lower modal's overlay); an app-set `inert` is never clobbered.
-- **Drag-safe backdrop dismiss** — closes only when a press starts and ends on the overlay itself, so a drag-select escaping the panel doesn't dismiss.
-- **Escape** closes the topmost modal only.
-- **Leave lifecycle** mirrors dialog/confirm/toast: `is-leaving`, wait for the panel's `transitionend` (or a fallback), then tear down.
-- **ARIA**: the panel gets `role` (`dialog` or `alertdialog`), `aria-modal="true"`, and `aria-labelledby`/`aria-describedby` from the options. When `labelledBy` is omitted a descendant whose `id` ends in `-title` is auto-detected; likewise, when `describedBy` is omitted a descendant whose `id` ends in `-desc` or `-description` is auto-detected.
+- **Drag-safe backdrop dismiss** — closes only when a press starts and ends on the `<dialog>` itself, so a drag-select escaping the panel doesn't dismiss (default `closeOnBackdrop: true`).
+- **Escape** — intercepts the platform `cancel` event so the fade-out lifecycle runs, or so Escape is ignored when `closeOnEscape: false` (the browser already closes the topmost dialog on Escape).
+- **Leave lifecycle** mirrors dialog/confirm: add `is-leaving`, wait for the dialog's `transitionend` (or a fallback), then `close()`.
+- **iOS-safe scroll-lock** (default `scrollLock: true`, ref-counted across nested modals) — a native `<dialog>` does not lock background scroll and `overflow:hidden` on the root is ignored by iOS Safari for touch-scroll, so the body is pinned with `position:fixed` at the negated scroll offset and restored + scrolled back on release.
+- **ARIA** — `role` defaults to the `<dialog>` implicit `dialog` (`aria-modal` is implicit under `showModal()`); `"alertdialog"` sets the role + the `.uip-modal--alert` modifier. `aria-labelledby`/`aria-describedby` come from the options, or, when omitted, from a descendant whose `id` ends in `-title` / `-desc` / `-description`.
 
-The overlay is grid-centered (`display: grid; place-items: center`) rather than
-flex + `max-height`, which sidesteps the Safari `<dialog>` height bug.
-`--uip-z-modal` (`1000`) sits deliberately below `--uip-z-toast` and
-`--uip-z-tooltip` so toasts and tooltips overlay a modal.
+Everything else — focus containment, the top layer, background inerting (dynamic:
+elements added while the modal is open are inerted too), nested-modal stacking,
+and returning focus to the opener on close — is provided by the browser's
+`showModal()`, so it is not reimplemented here.
 
-Two limitations to keep in mind: background inerting is computed when a modal
-opens or closes, so `<body>` children added _while_ a modal is open are not
-retroactively inerted — add them before opening the modal (or close and re-open
-to re-sync). And scroll-lock uses `overflow: hidden` on `<html>`/`<body>`, which
-does not fully stop touch-scroll on iOS Safari.
+The `<dialog>` is auto-margined to center in the viewport, which sidesteps the
+Safari `<dialog>` height bug. Because the modal lives in the browser's top layer
+it renders above every base-layer `z-index` (no `--uip-z-modal` needed), so
+toasts on `document.body` render _behind_ it (raise toasts before opening a
+modal). A popover or tooltip opened from a control inside the modal is rendered
+INTO the `<dialog>` so it stacks over the modal correctly (see popover/tooltip).
+
+Both caveats of the old overlay-`<div>` modal are gone: background inerting is
+now the platform's (dynamic — elements added while the modal is open are inerted
+too), and the scroll-lock is the iOS-safe `position:fixed` technique rather than
+`overflow:hidden`.
 
 #### modal vs dialog — which one?
 
-- Use **dialog** for platform-simple prompts where the native `<dialog>` is enough. The browser gives you focus containment, the top layer, and Escape for free; `dialog` just adds drag-safe backdrop dismissal and a fade-out.
-- Use **modal** when your modal is an overlay div (`.modal-overlay`-style), when you need custom stacking or transitions the top layer can't express, or when you want grid-centering to dodge the Safari `<dialog>` height bug. `modal` does the containment, stacking, scroll-lock, and lifecycle work by hand.
+Both are native `<dialog>` now; the split is about what you hand the library:
 
-The two use distinct verbs, so there is no name collision: **dialog** exposes
-`createDialog` / `openDialog` / `closeDialog`, and **modal** exposes
-`createModal` / `openModal` / `closeModal` / `closeTopModal`. The barrel
-`@cplieger/ui-primitives` re-exports both sets directly — import `openModal` /
-`closeModal` for the overlay-div versions and `openDialog` / `closeDialog` for
-the native-`<dialog>` versions (or reach for either primitive's own subpath).
+- Use **dialog** (`createDialog` / `openDialog` / `closeDialog`) to add behavior to a `<dialog>` element already in your markup.
+- Use **modal** (`createModal`) to build the `<dialog>` from a content element, with the ARIA wiring and the iOS-safe scroll-lock done for you.
+
+`dialog` exposes `createDialog` / `openDialog` / `closeDialog`; `modal` exposes
+`createModal`. The barrel `@cplieger/ui-primitives` re-exports both.
 
 ### disclosure — `@cplieger/ui-primitives/disclosure`
 
@@ -499,9 +497,10 @@ the anchor no longer owns a popover) and forces no `role` on the panel — set
 (no leave animation); the optional `.uip-popover.is-open` enter fade is
 skinnable.
 
-`--uip-z-popover` (`1100`) sits deliberately above `--uip-z-modal` (`1000`) so a
-popover opened from within a modal shows over it, and below toast (`9999`) /
-tooltip (`10000`).
+`--uip-z-popover` (`1100`) orders the popover below toast (`9999`) / tooltip
+(`10000`) in the base layer. A modal is a native `<dialog>` in the top layer
+(above every base-layer z-index), so a popover opened from within one is
+rendered INTO that `<dialog>` (not stacked by z-index) to show over it.
 
 Like tooltip, popover positions with JS (`getBoundingClientRect` + `position: fixed`)
 rather than the native [Popover API](https://developer.mozilla.org/en-US/docs/Web/API/Popover_API)
@@ -546,12 +545,10 @@ scoped) to tune behavior, and style the classes for your skin.
 | `--uip-tooltip-fade-duration`  | `100ms`                  | tooltip fade                                                    |
 | `--uip-dialog-leave-duration`  | `150ms`                  | dialog / confirm / backdrop fade                                |
 | `--uip-backdrop`               | `oklch(0% 0 0deg / 50%)` | dialog / confirm backdrop dim                                   |
-| `--uip-z-modal`                | `1000`                   | modal overlay z-index (below toast / tooltip on purpose)        |
-| `--uip-modal-backdrop`         | `var(--uip-backdrop)`    | modal backdrop dim                                              |
-| `--uip-modal-enter-duration`   | `200ms`                  | modal enter transition                                          |
-| `--uip-modal-leave-duration`   | `150ms`                  | modal leave transition                                          |
+| `--uip-modal-backdrop`         | `var(--uip-backdrop)`    | modal `::backdrop` dim                                          |
+| `--uip-modal-leave-duration`   | `150ms`                  | modal + `::backdrop` leave fade                                 |
 | `--uip-disclosure-duration`    | `200ms`                  | disclosure height transition                                    |
-| `--uip-z-popover`              | `1100`                   | popover z-index (above modal, below toast / tooltip)            |
+| `--uip-z-popover`              | `1100`                   | popover z-index (base layer: below toast / tooltip)             |
 | `--uip-popover-enter-duration` | `100ms`                  | popover enter-fade animation                                    |
 
 **Countdown contract:** the toast progress bar animates from the
@@ -562,28 +559,27 @@ duration in code, and style the bar's color/size via the properties above.
 
 ### Classes and state classes
 
-| Class                                                          | Element                                                    |
-| -------------------------------------------------------------- | ---------------------------------------------------------- |
-| `.uip-toast-stack`                                             | toast container (`role="status"`, `aria-live="polite"`)    |
-| `.uip-toast`, `.uip-toast--info` / `--success` / `--error`     | a toast (level modifier)                                   |
-| `.uip-toast-msg`                                               | toast message text                                         |
-| `.uip-toast-retry`                                             | toast retry button                                         |
-| `.uip-toast-progress`                                          | toast countdown bar (`aria-hidden`)                        |
-| `.uip-tooltip`                                                 | a tooltip (`role="tooltip"`)                               |
-| `.uip-confirm`                                                 | the confirm `<dialog>`                                     |
-| `.uip-confirm-title` / `-msg` / `-actions` / `-ok` / `-cancel` | confirm parts                                              |
-| `.uip-dialog`                                                  | a `<dialog>` wrapped by `createDialog`                     |
-| `.uip-modal`, `.uip-modal--alert`                              | modal overlay (backdrop + grid centering; alert modifier)  |
-| `.uip-modal-dialog`                                            | modal panel                                                |
-| `.uip-disclosure-region`                                       | disclosure collapsible region (`aria-hidden` when closed)  |
-| `.uip-popover`                                                 | anchored floating panel (`position: fixed`, JS-positioned) |
-| `.uip-visually-hidden`                                         | the announce live regions (sr-only)                        |
+| Class                                                          | Element                                                         |
+| -------------------------------------------------------------- | --------------------------------------------------------------- |
+| `.uip-toast-stack`                                             | toast container (`role="status"`, `aria-live="polite"`)         |
+| `.uip-toast`, `.uip-toast--info` / `--success` / `--error`     | a toast (level modifier)                                        |
+| `.uip-toast-msg`                                               | toast message text                                              |
+| `.uip-toast-retry`                                             | toast retry button                                              |
+| `.uip-toast-progress`                                          | toast countdown bar (`aria-hidden`)                             |
+| `.uip-tooltip`                                                 | a tooltip (`role="tooltip"`)                                    |
+| `.uip-confirm`                                                 | the confirm `<dialog>`                                          |
+| `.uip-confirm-title` / `-msg` / `-actions` / `-ok` / `-cancel` | confirm parts                                                   |
+| `.uip-dialog`                                                  | a `<dialog>` wrapped by `createDialog`                          |
+| `.uip-modal`, `.uip-modal--alert`                              | the modal `<dialog>` (top layer + `::backdrop`; alert modifier) |
+| `.uip-modal-dialog`                                            | modal content (skin hook inside the `<dialog>`)                 |
+| `.uip-disclosure-region`                                       | disclosure collapsible region (`aria-hidden` when closed)       |
+| `.uip-popover`                                                 | anchored floating panel (`position: fixed`, JS-positioned)      |
+| `.uip-visually-hidden`                                         | the announce live regions (sr-only)                             |
 
 State classes toggled at runtime (style these for motion/emphasis):
 
 - `.uip-toast` lifecycle: `is-entering` → `is-shown` → `is-leaving`
-- `.uip-modal` lifecycle: `is-entering` → `is-open` → `is-leaving` (drives both the backdrop and the panel)
-- `.uip-tooltip.is-leaving`, `.uip-confirm.is-leaving`, `.uip-dialog.is-leaving` (fade-out)
+- `.uip-tooltip.is-leaving`, `.uip-confirm.is-leaving`, `.uip-dialog.is-leaving`, `.uip-modal.is-leaving` (fade-out; the modal also fades its `::backdrop`)
 - `.uip-popover.is-open` (optional enter fade; dismissal is instant, so there is no leave state)
 - `.uip-confirm-ok.is-destructive` (destructive emphasis)
 
@@ -593,21 +589,21 @@ lifecycles complete).
 
 ## Subpath exports
 
-| Import                                    | Contents                                                                                                                  |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `@cplieger/ui-primitives`                 | barrel — everything below (dialog's `openDialog`/`closeDialog` and modal's `openModal`/`closeModal`, no longer colliding) |
-| `@cplieger/ui-primitives/toast`           | `toast`, `createToaster`, `info`, `success`, `error`, types                                                               |
-| `@cplieger/ui-primitives/tooltip`         | `initTooltips`                                                                                                            |
-| `@cplieger/ui-primitives/popover`         | `createPopover`, `placeAnchored`, `pointAnchor`, types                                                                    |
-| `@cplieger/ui-primitives/dialog`          | `createDialog`, `openDialog`, `closeDialog`                                                                               |
-| `@cplieger/ui-primitives/modal`           | `createModal`, `openModal`, `closeModal`, `closeTopModal`                                                                 |
-| `@cplieger/ui-primitives/confirm`         | `confirm`                                                                                                                 |
-| `@cplieger/ui-primitives/disclosure`      | `createDisclosure`                                                                                                        |
-| `@cplieger/ui-primitives/focus-trap`      | `trapFocus`                                                                                                               |
-| `@cplieger/ui-primitives/theme`           | `createTheme`, `themeInitSnippet`                                                                                         |
-| `@cplieger/ui-primitives/view-transition` | `viewTransition`                                                                                                          |
-| `@cplieger/ui-primitives/announce`        | `announce`                                                                                                                |
-| `@cplieger/ui-primitives/css`             | the base stylesheet                                                                                                       |
+| Import                                    | Contents                                                                                              |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `@cplieger/ui-primitives`                 | barrel — everything below (dialog's `createDialog`/`openDialog`/`closeDialog`; modal's `createModal`) |
+| `@cplieger/ui-primitives/toast`           | `toast`, `createToaster`, `info`, `success`, `error`, types                                           |
+| `@cplieger/ui-primitives/tooltip`         | `initTooltips`                                                                                        |
+| `@cplieger/ui-primitives/popover`         | `createPopover`, `placeAnchored`, `pointAnchor`, types                                                |
+| `@cplieger/ui-primitives/dialog`          | `createDialog`, `openDialog`, `closeDialog`                                                           |
+| `@cplieger/ui-primitives/modal`           | `createModal`                                                                                         |
+| `@cplieger/ui-primitives/confirm`         | `confirm`                                                                                             |
+| `@cplieger/ui-primitives/disclosure`      | `createDisclosure`                                                                                    |
+| `@cplieger/ui-primitives/focus-trap`      | `trapFocus`                                                                                           |
+| `@cplieger/ui-primitives/theme`           | `createTheme`, `themeInitSnippet`                                                                     |
+| `@cplieger/ui-primitives/view-transition` | `viewTransition`                                                                                      |
+| `@cplieger/ui-primitives/announce`        | `announce`                                                                                            |
+| `@cplieger/ui-primitives/css`             | the base stylesheet                                                                                   |
 
 ## Disclaimer
 
