@@ -427,7 +427,7 @@ describe("createPopover — show / hide / toggle + ARIA", () => {
     expect(c.el).toBe(panel);
   });
 
-  it("hide() conceals and resets aria-expanded (haspopup stays)", () => {
+  it("hide() begins the leave (aria reset immediately) then conceals after the transition", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.appendChild(anchor);
@@ -436,11 +436,17 @@ describe("createPopover — show / hide / toggle + ARIA", () => {
     const c = createPopover(anchor, panel);
     c.show();
     c.hide();
+    // Logically closed at once; the panel fades (is-leaving) before it hides.
     expect(c.isOpen).toBe(false);
-    expect(panel.hidden).toBe(true);
     expect(panel.classList.contains("is-open")).toBe(false);
+    expect(panel.classList.contains("is-leaving")).toBe(true);
+    expect(panel.hidden).toBe(false); // still in the DOM, mid-fade
     expect(anchor.getAttribute("aria-expanded")).toBe("false");
     expect(anchor.getAttribute("aria-haspopup")).toBe("true");
+    // Transition ends → panel is hidden and the leave state is dropped.
+    panel.dispatchEvent(new Event("transitionend"));
+    expect(panel.hidden).toBe(true);
+    expect(panel.classList.contains("is-leaving")).toBe(false);
   });
 
   it("toggle() flips between shown and hidden", () => {
@@ -1206,5 +1212,266 @@ describe("createPopover — point (virtual) anchor", () => {
     vi.advanceTimersToNextFrame(); // tracking is rAF-throttled — flush the frame
     expect(topOf(panel)).toBe(74);
     c.dispose();
+  });
+});
+
+// ===== placeAnchored: full-bleed (stretch: "viewport") ====================
+
+describe("placeAnchored — full-bleed (stretch: viewport)", () => {
+  it("bottom spans the viewport inline axis (left+right = margin) and drops below the anchor", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    vi.stubGlobal("innerWidth", 500);
+    vi.stubGlobal("innerHeight", 800);
+    stubRect(anchor, 100, 100, 50, 20); // bottom 120
+    stubSize(panel, 80, 40);
+    placeAnchored(panel, anchor, { placement: "bottom", stretch: "viewport", flip: false });
+    expect(panel.style.left).toBe("8px"); // default margin
+    expect(panel.style.right).toBe("8px");
+    expect(topOf(panel)).toBe(124); // rect.bottom 120 + default offset 4
+    expect(panel.style.minWidth).toBe(""); // full-bleed clears any min-width
+  });
+
+  it("respects a custom margin on both inline edges (margin 0 → flush edges)", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    placeAnchored(panel, anchor, {
+      placement: "bottom",
+      stretch: "viewport",
+      margin: 0,
+      flip: false,
+    });
+    expect(panel.style.left).toBe("0px");
+    expect(panel.style.right).toBe("0px");
+  });
+
+  it("top places the panel above the anchor, still full-width", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    stubRect(anchor, 100, 100, 50, 20); // top 100
+    stubSize(panel, 80, 40);
+    placeAnchored(panel, anchor, { placement: "top", stretch: "viewport", flip: false });
+    expect(panel.style.left).toBe("8px");
+    expect(panel.style.right).toBe("8px");
+    expect(topOf(panel)).toBe(56); // rect.top 100 - panelH 40 - offset 4
+  });
+
+  it("flips bottom → top on the main axis when there is no room below", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    vi.stubGlobal("innerWidth", 500);
+    vi.stubGlobal("innerHeight", 200);
+    stubRect(anchor, 100, 170, 50, 20); // bottom 190 near the viewport bottom
+    stubSize(panel, 80, 40);
+    placeAnchored(panel, anchor, { placement: "bottom", stretch: "viewport" });
+    expect(topOf(panel)).toBe(126); // flipped above: 170 - 40 - 4
+    expect(panel.style.left).toBe("8px"); // still full-width
+    expect(panel.style.right).toBe("8px");
+  });
+
+  it("is ignored for a left/right placement (content-sized; no inline-end pin)", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    vi.stubGlobal("innerWidth", 800);
+    vi.stubGlobal("innerHeight", 800);
+    stubRect(anchor, 100, 100, 50, 20); // right 150
+    stubSize(panel, 80, 40);
+    placeAnchored(panel, anchor, {
+      placement: "right",
+      stretch: "viewport",
+      flip: false,
+      clamp: false,
+    });
+    expect(leftOf(panel)).toBe(154); // content-sized right: rect.right 150 + offset 4
+    expect(panel.style.right).toBe(""); // no inline-end pin outside full-bleed
+  });
+
+  it("clears a stale inline-end pin when the same panel is re-placed content-sized", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    placeAnchored(panel, anchor, { placement: "bottom", stretch: "viewport", flip: false });
+    expect(panel.style.right).toBe("8px");
+    // Re-place without stretch → the inline-end pin must drop so the panel's own
+    // width is honored again (placeAnchored stays idempotent across modes).
+    placeAnchored(panel, anchor, { placement: "bottom", flip: false, clamp: false });
+    expect(panel.style.right).toBe("");
+    expect(leftOf(panel)).toBe(100); // start-aligned content-sized left
+  });
+
+  it("property: pins both inline edges to `margin` regardless of anchor x/width", () => {
+    vi.stubGlobal("visualViewport", undefined);
+    vi.stubGlobal("innerWidth", 500);
+    vi.stubGlobal("innerHeight", 800);
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    fc.assert(
+      fc.property(
+        fc.integer({ min: -500, max: 1500 }),
+        fc.integer({ min: -200, max: 700 }),
+        fc.integer({ min: 0, max: 400 }),
+        fc.integer({ min: 1, max: 400 }),
+        fc.integer({ min: 0, max: 40 }),
+        (ax, ay, aw, ph, margin) => {
+          stubRect(anchor, ax, ay, aw, 20);
+          stubSize(panel, 80, ph);
+          placeAnchored(panel, anchor, {
+            placement: "bottom",
+            stretch: "viewport",
+            margin,
+            flip: false,
+          });
+          // Full-bleed always pins to the margins, whatever the anchor's x/width.
+          expect(panel.style.left).toBe(`${margin.toString()}px`);
+          expect(panel.style.right).toBe(`${margin.toString()}px`);
+          // Main axis stays anchored below the trigger (bottom + default offset 4).
+          expect(topOf(panel)).toBe(ay + 20 + 4);
+        },
+      ),
+    );
+  });
+});
+
+// ===== createPopover: leave animation lifecycle ===========================
+
+/** A popover with a stubbed anchor rect + panel size, anchor mounted in the DOM.
+ *  Focused helper for the leave-lifecycle tests (placement math is covered
+ *  above); flip/clamp are off so positioning never interferes with the assertions. */
+function mountPopover(opts?: Parameters<typeof createPopover>[2]): {
+  c: ReturnType<typeof createPopover>;
+  anchor: HTMLButtonElement;
+  panel: HTMLDivElement;
+} {
+  const anchor = document.createElement("button");
+  const panel = document.createElement("div");
+  document.body.appendChild(anchor);
+  stubRect(anchor, 100, 100, 50, 20);
+  stubSize(panel, 80, 40);
+  const c = createPopover(anchor, panel, { flip: false, clamp: false, ...opts });
+  return { c, anchor, panel };
+}
+
+describe("createPopover — leave animation lifecycle", () => {
+  it("show enters clean: is-open set, is-leaving absent, visible", () => {
+    const { c, panel } = mountPopover();
+    c.show();
+    expect(panel.classList.contains("is-open")).toBe(true);
+    expect(panel.classList.contains("is-leaving")).toBe(false);
+    expect(panel.hidden).toBe(false);
+  });
+
+  it("hide swaps is-open → is-leaving and keeps the panel visible until transitionend", () => {
+    const { c, panel } = mountPopover();
+    c.show();
+    c.hide();
+    expect(c.isOpen).toBe(false);
+    expect(panel.classList.contains("is-open")).toBe(false);
+    expect(panel.classList.contains("is-leaving")).toBe(true);
+    expect(panel.hidden).toBe(false); // still in the DOM, mid-fade
+    panel.dispatchEvent(new Event("transitionend"));
+    expect(panel.classList.contains("is-leaving")).toBe(false);
+    expect(panel.hidden).toBe(true);
+  });
+
+  it("completes the leave via the fallback timeout when no transition fires", () => {
+    const { c, panel } = mountPopover();
+    c.show();
+    c.hide();
+    expect(panel.hidden).toBe(false);
+    vi.advanceTimersByTime(400); // LEAVE_FALLBACK_MS
+    expect(panel.hidden).toBe(true);
+    expect(panel.classList.contains("is-leaving")).toBe(false);
+  });
+
+  it("only the panel's own transitionend finalizes it (a descendant's is ignored)", () => {
+    const { c, panel } = mountPopover();
+    const child = document.createElement("span");
+    panel.appendChild(child);
+    c.show();
+    c.hide();
+    child.dispatchEvent(new Event("transitionend", { bubbles: true }));
+    expect(panel.hidden).toBe(false); // a child's transition is not the panel's
+    expect(panel.classList.contains("is-leaving")).toBe(true);
+    panel.dispatchEvent(new Event("transitionend"));
+    expect(panel.hidden).toBe(true);
+  });
+
+  it("hide() is idempotent: a second hide mid-fade does not restart the leave", () => {
+    const { c, panel } = mountPopover();
+    c.show();
+    c.hide();
+    c.hide(); // no-op: open is already false
+    expect(panel.classList.contains("is-leaving")).toBe(true);
+    panel.dispatchEvent(new Event("transitionend"));
+    expect(panel.hidden).toBe(true);
+  });
+
+  it("show() during the fade cancels the leave and re-reveals (no pending hide fires)", () => {
+    const { c, panel } = mountPopover();
+    c.show();
+    c.hide();
+    expect(panel.classList.contains("is-leaving")).toBe(true);
+    c.show(); // re-open mid-fade
+    expect(c.isOpen).toBe(true);
+    expect(panel.classList.contains("is-leaving")).toBe(false);
+    expect(panel.classList.contains("is-open")).toBe(true);
+    expect(panel.hidden).toBe(false);
+    // The cancelled leave must NOT later hide the re-shown panel.
+    vi.advanceTimersByTime(400);
+    panel.dispatchEvent(new Event("transitionend"));
+    expect(panel.hidden).toBe(false);
+    expect(c.isOpen).toBe(true);
+  });
+
+  it("leave still completes without a transition event (the reduced-motion path)", () => {
+    // Under prefers-reduced-motion the CSS neutralizes the transition to ~0ms;
+    // happy-dom fires no real transitionend, so the fallback timer is what
+    // guarantees the leave lifecycle still finishes promptly.
+    const { c, panel } = mountPopover();
+    c.show();
+    c.hide();
+    vi.advanceTimersByTime(400);
+    expect(panel.hidden).toBe(true);
+    expect(panel.classList.contains("is-leaving")).toBe(false);
+  });
+
+  it("threads stretch into positioning and toggles is-stretched around the leave", () => {
+    const { c, panel } = mountPopover({ stretch: "viewport", placement: "bottom" });
+    c.show();
+    expect(panel.classList.contains("is-stretched")).toBe(true);
+    expect(panel.style.left).toBe("8px"); // full-bleed inline pin from placeAnchored
+    expect(panel.style.right).toBe("8px");
+    c.hide();
+    expect(panel.classList.contains("is-stretched")).toBe(true); // kept during the fade
+    panel.dispatchEvent(new Event("transitionend"));
+    expect(panel.classList.contains("is-stretched")).toBe(false);
+  });
+
+  it("does not add is-stretched for a normal (content-sized) popover", () => {
+    const { c, panel } = mountPopover();
+    c.show();
+    expect(panel.classList.contains("is-stretched")).toBe(false);
+  });
+
+  it("dispose() runs the leave and leaves the caller's panel in the DOM", () => {
+    const { c, panel } = mountPopover();
+    c.show();
+    c.dispose();
+    // dispose triggers the fade rather than yanking the panel out instantly.
+    expect(panel.classList.contains("is-leaving")).toBe(true);
+    expect(panel.isConnected).toBe(true);
+    vi.advanceTimersByTime(400);
+    expect(panel.hidden).toBe(true);
+    expect(panel.isConnected).toBe(true); // the caller owns it; never removed
   });
 });

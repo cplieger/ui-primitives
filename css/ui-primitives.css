@@ -52,6 +52,8 @@
   --uip-z-popover: 1100;
   --uip-popover-enter-duration: 100ms;
   --uip-popover-enter-easing: ease;
+  --uip-popover-leave-duration: 100ms;
+  --uip-popover-leave-easing: ease;
 }
 
 /* ===== Toast ============================================================= */
@@ -212,9 +214,10 @@
 
 /* ===== Popover (anchored floating panel) ================================= */
 
-/* position:fixed; the library sets left / top inline from placeAnchored's
- * measured, flipped, clamped position. Structural only — the app skins
- * background / border / radius / shadow by targeting .uip-popover. */
+/* position:fixed; the library sets left / top (and, in full-bleed `stretch:
+ * "viewport"` mode, left + right) inline from placeAnchored's measured, flipped,
+ * clamped position. Structural only — the app skins background / border /
+ * radius / shadow by targeting .uip-popover. */
 .uip-popover {
   position: fixed;
   z-index: var(--uip-z-popover, 1100);
@@ -224,13 +227,23 @@
   display: none;
 }
 
-/* Optional skinnable enter fade — plays once when the panel opens. Enter only:
- * the controller dismisses instantly (sets [hidden]), so there is no leave
- * animation. */
+/* Optional skinnable enter fade — plays once when the panel opens. */
 .uip-popover.is-open {
   animation: uip-popover-enter var(--uip-popover-enter-duration, 100ms)
     var(--uip-popover-enter-easing, ease);
 }
+
+/* Leave fade — the controller adds is-leaving and waits for this transition (or
+ * a fallback timeout) before it sets [hidden], mirroring dialog/modal/toast so
+ * the panel animates out instead of vanishing on dismiss. */
+.uip-popover.is-leaving {
+  opacity: 0;
+  transition: opacity var(--uip-popover-leave-duration, 100ms) var(--uip-popover-leave-easing, ease);
+}
+
+/* is-stretched marks the full-bleed (stretch: "viewport") variant. The inset is
+ * applied inline, so this is purely a skin hook (e.g. square the top corners /
+ * drop side borders on the full-width panel); it needs no structural rule. */
 
 @keyframes uip-popover-enter {
   from {
@@ -275,7 +288,8 @@
   .uip-dialog::backdrop,
   .uip-modal::backdrop,
   .uip-modal.is-leaving,
-  .uip-modal.is-leaving::backdrop {
+  .uip-modal.is-leaving::backdrop,
+  .uip-popover.is-leaving {
     /* stylelint-disable-next-line time-min-milliseconds -- sub-10ms keeps transitionend firing so JS leave-lifecycles still complete under reduced motion */
     transition-duration: 0.01ms;
   }
