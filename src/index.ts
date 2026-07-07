@@ -10,8 +10,8 @@ export type { FocusTrapOptions } from "./focus-trap.js";
 
 export { announce } from "./announce.js";
 
-export { createTheme, themeInitSnippet } from "./theme.js";
-export type { ThemeChoice, ThemeController, ThemeOptions } from "./theme.js";
+export { createTheme, themeInitSnippet, themeInitSnippetFromJSON } from "./theme.js";
+export type { ThemeChoice, ThemeController, ThemeOptions, ThemeStorage } from "./theme.js";
 
 export { createDialog, openDialog, closeDialog } from "./dialog.js";
 export type { DialogController, DialogOptions } from "./dialog.js";

@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { createTheme, themeInitSnippet } from "./theme.js";
+import { createTheme, themeInitSnippet, themeInitSnippetFromJSON } from "./theme.js";
+import type { ThemeStorage } from "./theme.js";
 
 interface MediaState {
   matches: boolean;
@@ -37,12 +38,14 @@ function fireSystemChange(matches: boolean): void {
   }
 }
 
-function memoryStorage(): Pick<Storage, "getItem" | "setItem"> {
-  const map = new Map<string, string>();
+/** A single-slot in-memory ThemeStorage adapter (the value IS the preference;
+ *  the adapter owns where it lives, so there is no key). */
+function memoryStorage(): ThemeStorage {
+  let value: string | null = null;
   return {
-    getItem: (k) => map.get(k) ?? null,
-    setItem: (k, v) => {
-      map.set(k, v);
+    get: () => value,
+    set: (v) => {
+      value = v;
     },
   };
 }
@@ -77,7 +80,7 @@ describe("createTheme", () => {
     expect(t.get()).toBe("light");
     expect(t.resolved()).toBe("light");
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    expect(storage.getItem("k")).toBe("light");
+    expect(storage.get()).toBe("light");
     t.dispose();
   });
 
@@ -108,7 +111,7 @@ describe("createTheme", () => {
 
   it("reads a persisted preference on creation", () => {
     const storage = memoryStorage();
-    storage.setItem("k", "dark");
+    storage.set("dark");
     const t = createTheme({ storageKey: "k", storage });
     expect(t.get()).toBe("dark");
     expect(t.resolved()).toBe("dark");
@@ -178,5 +181,164 @@ describe("themeInitSnippet", () => {
     // Storage threw → catch runs → resolves system (dark), not a flash of light.
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     spy.mockRestore();
+  });
+});
+
+describe("createTheme — default localStorage adapter", () => {
+  it("reads and writes the bare localStorage key when no storage is supplied", () => {
+    localStorage.removeItem("dt");
+    const t = createTheme({ storageKey: "dt" });
+    t.set("dark");
+    expect(localStorage.getItem("dt")).toBe("dark"); // persisted to the bare key
+    // A fresh controller reads the same key back.
+    const t2 = createTheme({ storageKey: "dt" });
+    expect(t2.get()).toBe("dark");
+    t.dispose();
+    t2.dispose();
+    localStorage.removeItem("dt");
+  });
+});
+
+describe("createTheme — custom storage adapter", () => {
+  it("reads via adapter.get() on creation and writes via adapter.set() on set()", () => {
+    let stored: string | null = "dark";
+    let getCalls = 0;
+    const writes: string[] = [];
+    const storage: ThemeStorage = {
+      get: () => {
+        getCalls++;
+        return stored;
+      },
+      set: (v) => {
+        writes.push(v);
+        stored = v;
+      },
+    };
+    const t = createTheme({ storageKey: "unused", storage });
+    expect(getCalls).toBeGreaterThan(0); // read the stored preference on creation
+    expect(t.get()).toBe("dark");
+    t.set("light");
+    expect(writes).toEqual(["light"]); // wrote through the adapter
+    expect(stored).toBe("light");
+    t.dispose();
+  });
+
+  it("degrades to in-memory when the adapter throws on get and set", () => {
+    const t = createTheme({
+      storageKey: "k",
+      storage: {
+        get: () => {
+          throw new Error("blocked");
+        },
+        set: () => {
+          throw new Error("blocked");
+        },
+      },
+    });
+    // get() threw → falls back to the "system" default.
+    expect(t.get()).toBe("system");
+    // set() throws, but the choice still applies in memory.
+    expect(() => {
+      t.set("dark");
+    }).not.toThrow();
+    expect(t.get()).toBe("dark");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    t.dispose();
+  });
+
+  it("persists into a JSON blob field via a read-modify-write adapter (vibekit pattern)", () => {
+    const KEY = "app.ui-state";
+    localStorage.setItem(KEY, JSON.stringify({ sidebar: "open", theme: "dark" }));
+    const jsonAdapter: ThemeStorage = {
+      get: () => {
+        const raw = localStorage.getItem(KEY);
+        if (raw === null) {
+          return null;
+        }
+        const parsed = JSON.parse(raw) as { theme?: string };
+        return parsed.theme ?? null;
+      },
+      set: (value) => {
+        const raw = localStorage.getItem(KEY);
+        const blob = raw !== null ? (JSON.parse(raw) as Record<string, unknown>) : {};
+        blob["theme"] = value;
+        localStorage.setItem(KEY, JSON.stringify(blob));
+      },
+    };
+    const t = createTheme({ storageKey: KEY, storage: jsonAdapter });
+    expect(t.get()).toBe("dark"); // read the theme field out of the blob
+    t.set("light"); // read-modify-write the field, preserving siblings
+    const after = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Record<string, unknown>;
+    expect(after["theme"]).toBe("light");
+    expect(after["sidebar"]).toBe("open"); // sibling field untouched
+    t.dispose();
+    localStorage.removeItem(KEY);
+  });
+});
+
+describe("themeInitSnippetFromJSON", () => {
+  it("applies a theme read from a JSON blob field when evaluated", () => {
+    localStorage.setItem("st", JSON.stringify({ theme: "dark", sidebar: "open" }));
+    const snippet = themeInitSnippetFromJSON("st", "theme");
+    document.documentElement.removeAttribute("data-theme");
+    (0, eval)(snippet);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    localStorage.removeItem("st");
+  });
+
+  it("honors a custom field and attribute", () => {
+    localStorage.setItem("st", JSON.stringify({ mode: "light" }));
+    const snippet = themeInitSnippetFromJSON("st", "mode", "data-mode");
+    (0, eval)(snippet);
+    expect(document.documentElement.getAttribute("data-mode")).toBe("light");
+    localStorage.removeItem("st");
+  });
+
+  it("resolves the system preference when the field is absent (2-state first paint)", () => {
+    media.matches = true; // system = dark
+    localStorage.setItem("st", JSON.stringify({ sidebar: "open" })); // no theme field
+    const snippet = themeInitSnippetFromJSON("st", "theme");
+    document.documentElement.removeAttribute("data-theme");
+    (0, eval)(snippet);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    localStorage.removeItem("st");
+  });
+
+  it('resolves system when the field is exactly "system"', () => {
+    media.matches = false; // system = light
+    localStorage.setItem("st", JSON.stringify({ theme: "system" }));
+    const snippet = themeInitSnippetFromJSON("st", "theme");
+    (0, eval)(snippet);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    localStorage.removeItem("st");
+  });
+
+  it("escapes the key and field against the <script> context", () => {
+    const snippet = themeInitSnippetFromJSON("</script><x>\u2028", "the\u2029me");
+    expect(snippet).not.toContain("</script>");
+    expect(snippet).not.toContain("\u2028");
+    expect(snippet).not.toContain("\u2029");
+    expect(snippet).toContain("\\x3C"); // '<' escaped
+  });
+
+  it("falls back to the system preference when the blob is malformed JSON", () => {
+    media.matches = true; // system = dark
+    localStorage.setItem("st", "{not valid json");
+    const snippet = themeInitSnippetFromJSON("st", "theme");
+    document.documentElement.removeAttribute("data-theme");
+    (0, eval)(snippet);
+    // JSON.parse throws → catch → resolves system (dark), not a flash of light.
+    expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+    localStorage.removeItem("st");
+  });
+
+  it("resolves system when the stored value is not an object (bare number)", () => {
+    media.matches = false; // system = light
+    localStorage.setItem("st", "123");
+    const snippet = themeInitSnippetFromJSON("st", "theme");
+    document.documentElement.removeAttribute("data-theme");
+    (0, eval)(snippet);
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    localStorage.removeItem("st");
   });
 });

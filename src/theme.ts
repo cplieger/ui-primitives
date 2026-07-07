@@ -8,11 +8,27 @@
 export type ThemeChoice = "light" | "dark" | "system";
 type Resolved = "light" | "dark";
 
+/** Persistence adapter for the theme preference. Encapsulates WHERE and HOW the
+ *  value is stored, so an app can keep the theme inside its own structure (for
+ *  example a field of a larger JSON blob) rather than a bare localStorage key. */
+export interface ThemeStorage {
+  /** Read the persisted preference, or `null` when nothing is stored yet. */
+  get(): string | null;
+  /** Persist the preference value. */
+  set(value: string): void;
+}
+
 export interface ThemeOptions {
-  /** localStorage-style key the preference is persisted under. */
+  /** localStorage key the default adapter persists under. Unused when a custom
+   *  `storage` adapter is supplied (the adapter owns where the value lives). */
   storageKey: string;
-  /** Storage backend. Defaults to `window.localStorage`. */
-  storage?: Pick<Storage, "getItem" | "setItem">;
+  /** Persistence adapter. Defaults to bare `localStorage[storageKey]`. Supply a
+   *  custom adapter to read/write the theme inside your own structure — e.g. a
+   *  `theme` field of a JSON blob: `get` parses the blob and returns the field,
+   *  `set` does a read-modify-write of that field. Everything else (tri-state
+   *  resolution, following the OS while `system`, the applied attribute) is
+   *  unchanged; a 2-state app simply never calls `set("system")`. */
+  storage?: ThemeStorage;
   /** Attribute set on `<html>` with the resolved value. Default `data-theme`. */
   attribute?: string;
   /** Called with the resolved concrete theme whenever it changes/applies. */
@@ -45,13 +61,21 @@ function isChoice(value: string | null): value is ThemeChoice {
  *  resolved theme immediately and starts following the OS while in "system". */
 export function createTheme(opts: ThemeOptions): ThemeController {
   const attribute = opts.attribute ?? DEFAULT_ATTRIBUTE;
-  const storage = opts.storage ?? window.localStorage;
+  // Default adapter: a bare localStorage key. Access is lazy (only inside
+  // get/set) and every call is wrapped in try/catch below, so blocked or absent
+  // storage degrades to in-memory rather than throwing at construction.
+  const storage: ThemeStorage = opts.storage ?? {
+    get: () => window.localStorage.getItem(opts.storageKey),
+    set: (value) => {
+      window.localStorage.setItem(opts.storageKey, value);
+    },
+  };
   const mql = typeof window.matchMedia === "function" ? window.matchMedia(DARK_QUERY) : null;
 
   const readChoice = (): ThemeChoice => {
     let stored: string | null;
     try {
-      stored = storage.getItem(opts.storageKey);
+      stored = storage.get();
     } catch {
       stored = null;
     }
@@ -72,9 +96,10 @@ export function createTheme(opts: ThemeOptions): ThemeController {
   const set = (next: ThemeChoice): void => {
     choice = next;
     try {
-      storage.setItem(opts.storageKey, next);
+      storage.set(next);
     } catch {
-      // Storage denied (private mode / disabled) — apply in memory only.
+      // Storage denied (private mode / disabled), or a custom adapter threw —
+      // apply in memory only.
     }
     apply();
   };
@@ -123,6 +148,42 @@ export function themeInitSnippet(storageKey: string, attribute = DEFAULT_ATTRIBU
     // Fall back to the resolved system preference (matching createTheme's
     // runtime default) rather than a hardcoded "light" that would flash the
     // wrong theme for dark-mode users when storage is unavailable.
+    `}catch(e){document.documentElement.setAttribute(${attr},${system});}})();`
+  );
+}
+
+/** Like {@link themeInitSnippet}, but the preference lives in a **field of a
+ *  JSON object** stored under `storageKey` — the anti-FOUC companion to a custom
+ *  `storage` adapter that persists the theme inside a JSON blob. The inline
+ *  blocking-`<head>` IIFE reads `localStorage[storageKey]`, `JSON.parse`s it,
+ *  extracts `field`, and applies the resolved theme attribute before paint:
+ *
+ *      <script>{themeInitSnippetFromJSON("app.ui-state", "theme")}</script>
+ *
+ *  A missing / blank / non-object blob, or a `"system"` (or unrecognized) field,
+ *  resolves to the OS preference — so a 2-state app that only ever stores
+ *  `"light"` / `"dark"` still gets the correct first paint, and a dark-mode user
+ *  never flashes light. `storageKey`, `field`, and `attribute` are escaped for
+ *  the inline-`<script>` context exactly like {@link themeInitSnippet}. */
+export function themeInitSnippetFromJSON(
+  storageKey: string,
+  field: string,
+  attribute = DEFAULT_ATTRIBUTE,
+): string {
+  const key = jsonForScript(storageKey);
+  const fld = jsonForScript(field);
+  const attr = jsonForScript(attribute);
+  const system = `window.matchMedia("${DARK_QUERY}").matches?"dark":"light"`;
+  return (
+    `(function(){try{` +
+    `var raw=localStorage.getItem(${key});` +
+    `var o=raw?JSON.parse(raw):null;` +
+    `var c=o&&typeof o==="object"?o[${fld}]:null;` +
+    `if(c!=="light"&&c!=="dark"&&c!=="system"){c="system";}` +
+    `var r=c==="system"?(${system}):c;` +
+    `document.documentElement.setAttribute(${attr},r);` +
+    // Same system-preference fallback as themeInitSnippet: never flash a
+    // hardcoded light theme for dark-mode users when storage / JSON is unusable.
     `}catch(e){document.documentElement.setAttribute(${attr},${system});}})();`
   );
 }

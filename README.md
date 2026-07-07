@@ -209,13 +209,53 @@ theme.dispose();
 </script>
 ```
 
-The snippet reads `window.localStorage` directly — it runs before any module
-loads, so it **cannot** use a custom `storage` backend passed to `createTheme`.
-Use it only when the preference lives in `localStorage`. When storage is
-unavailable it falls back to the OS preference (`prefers-color-scheme`), matching
-`createTheme`'s runtime default, so dark-mode users don't get a flash of light.
-The `storageKey` and `attribute` are escaped for the inline-`<script>` context,
-so a key containing `</script>` (or other HTML-breaking characters) is safe.
+**Custom `storage` adapter.** By default the preference is a bare
+`localStorage[storageKey]` string. Pass a `storage` adapter to persist it
+anywhere else — most usefully inside a larger structure you already own, e.g. a
+`theme` field of a JSON blob:
+
+```ts
+const KEY = "app.ui-state";
+const theme = createTheme({
+  storageKey: KEY, // unused by a custom adapter, but still required
+  storage: {
+    get: () => JSON.parse(localStorage.getItem(KEY) ?? "{}").theme ?? null,
+    set: (value) => {
+      const blob = JSON.parse(localStorage.getItem(KEY) ?? "{}");
+      blob.theme = value; // read-modify-write; siblings untouched
+      localStorage.setItem(KEY, JSON.stringify(blob));
+    },
+  },
+});
+```
+
+`ThemeStorage` is `{ get(): string | null; set(value: string): void }`. Only
+persistence goes through it; tri-state resolution, following the OS while
+`system`, and the applied attribute are unchanged. A **2-state** app (light/dark,
+no "system") simply never calls `set("system")` — nothing forces tri-state. A
+throwing adapter (blocked storage, bad JSON) degrades to in-memory.
+
+- `themeInitSnippetFromJSON(storageKey, field, attribute?)` → the anti-FOUC
+  companion for the JSON-blob case: the inline IIFE reads
+  `localStorage[storageKey]`, `JSON.parse`s it, extracts `field`, and applies the
+  resolved theme before paint.
+
+```html
+<script>
+  /* server-render this: themeInitSnippetFromJSON("app.ui-state", "theme") */
+</script>
+```
+
+Both snippets read `window.localStorage` directly — they run before any module
+loads, so they **cannot** use a custom `storage` adapter (use the plain
+`themeInitSnippet` for a bare key, `themeInitSnippetFromJSON` for a JSON field).
+When storage is unavailable, the blob is missing/malformed, or the field is
+absent / `"system"`, they fall back to the OS preference
+(`prefers-color-scheme`), matching `createTheme`'s runtime default, so dark-mode
+users don't get a flash of light — including a 2-state app on first paint. The
+`storageKey`, `field`, and `attribute` are escaped for the inline-`<script>`
+context, so a value containing `</script>` (or other HTML-breaking characters)
+is safe.
 
 ### confirm — `@cplieger/ui-primitives/confirm`
 
@@ -434,8 +474,9 @@ Two exports, split by responsibility:
 - `offset?: number` — main-axis gap in px. Default `4`.
 - `flip?: boolean` — flip to the opposite side when the chosen side would overflow and the opposite has more room. Default `true`.
 - `clamp?: boolean` — clamp the cross-axis coordinate into the viewport. Default `true`.
-- `matchAnchorWidth?: boolean | number` — set the panel's `min-width` to the anchor width (`true`) or to `max(anchorWidth, n)` (a number). Default `false`.
-- `margin?: number` — viewport edge margin used by flip + clamp, in px. Default `8`.
+- `matchAnchorWidth?: boolean | number` — set the panel's `min-width` to the anchor width (`true`) or to `max(anchorWidth, n)` (a number). Default `false`. Ignored when `stretch: "viewport"` is set.
+- `margin?: number` — viewport edge margin used by flip + clamp — and, in `stretch: "viewport"` mode, the inline inset from each viewport edge — in px. Default `8`.
+- `stretch?: "viewport"` — **full-bleed / edge-pinned mode.** The panel spans the viewport's inline axis (pinned to both inline edges, respecting `margin`) instead of being content-sized and cross-aligned to the anchor. The main axis stays anchored to the trigger (below for `placement: "bottom"`, above for `"top"`) and still flips when there is no room — the mobile full-width dropdown / action-sheet pattern. Top/bottom placement only (ignored for left/right); `align`, cross-axis `clamp`, and `matchAnchorWidth` don't apply. See _Full-bleed_ below. Default unset (content-sized).
 
 `PopoverOptions extends PlacementOptions` adds `{ closeOnOutside?; closeOnEscape?; initialFocus?; returnFocus?; haspopup?; onOpen?; onClose? }` (dismissal defaults `true`; `haspopup` sets the anchor's `aria-haspopup` value: `true` (default), `"menu"`, `"listbox"`, `"tree"`, `"grid"`, or `"dialog"`; ignored for a virtual/point anchor).
 
@@ -502,9 +543,46 @@ The controller does **not** build the panel — you pass it in, so `dispose()`
 hides + unlistens but leaves your element in the DOM. It manages only
 `aria-expanded` / `aria-haspopup` on the anchor (`dispose()` removes both, since
 the anchor no longer owns a popover) and forces no `role` on the panel — set
-`role="menu"` / `"listbox"` / `"dialog"` yourself to fit. Dismissal is instant
-(no leave animation); the optional `.uip-popover.is-open` enter fade is
-skinnable.
+`role="menu"` / `"listbox"` / `"dialog"` yourself to fit.
+
+**Enter and leave animations.** Opening plays the optional, skinnable
+`.uip-popover.is-open` enter fade. Closing runs a leave lifecycle mirroring
+dialog / modal / toast: `hide()` (and `dispose()`) swap `is-open` → `is-leaving`
+and keep the panel in the DOM until its transition ends — or a fallback timeout
+fires (no transition, reduced motion, or an interruption) — then set `[hidden]`.
+So the panel animates out instead of vanishing. `hide()` stays idempotent, and
+`isOpen` flips to `false` the instant you call it (the fade is purely visual); a
+`show()` (or `toggle()`) during the fade cancels the leave and re-reveals. Tune
+the fade with `--uip-popover-leave-duration` / `--uip-popover-leave-easing`;
+`prefers-reduced-motion` neutralizes it to near-zero so the lifecycle still
+completes at once.
+
+**Full-bleed (`stretch: "viewport"`).** For a mobile full-width dropdown or
+action sheet, pass `stretch: "viewport"` (top/bottom placement). The panel spans
+the viewport's inline axis pinned to both edges (with `margin`), while the main
+axis stays anchored to the trigger and still flips. The inset is written as an
+**inline style**, so your skin never needs `!important` to express it (nor a
+media-query duplicate of the positioning). The controller also adds an
+`is-stretched` marker class you can target to skin the full-width variant (e.g.
+square the top corners, drop the side borders):
+
+```ts
+// Re-evaluate on a viewport-width media query; stretch only when narrow.
+const narrow = matchMedia("(width < 600px)");
+const pop = createPopover(headerButton, menuPanel, {
+  placement: "bottom",
+  stretch: narrow.matches ? "viewport" : undefined,
+  margin: 0, // flush to the viewport edges
+});
+```
+
+```css
+/* skin the full-bleed variant */
+.uip-popover.is-stretched {
+  border-radius: 0 0 8px 8px;
+  border-block-start: none;
+}
+```
 
 `--uip-z-popover` (`1100`) orders the popover below toast (`9999`) / tooltip
 (`10000`) in the base layer. A modal is a native `<dialog>` in the top layer
@@ -567,6 +645,8 @@ scoped) to tune behavior, and style the classes for your skin.
 | `--uip-z-popover`              | `1100`                   | popover z-index (base layer: below toast / tooltip)             |
 | `--uip-popover-enter-duration` | `100ms`                  | popover enter-fade animation                                    |
 | `--uip-popover-enter-easing`   | `ease`                   | popover enter-fade easing                                       |
+| `--uip-popover-leave-duration` | `100ms`                  | popover leave-fade transition                                   |
+| `--uip-popover-leave-easing`   | `ease`                   | popover leave-fade easing                                       |
 
 Every motion property is a **duration + easing** pair: the `--uip-*-easing`
 timing functions default to `ease` (the toast progress bar to `linear`) and
@@ -601,7 +681,7 @@ State classes toggled at runtime (style these for motion/emphasis):
 
 - `.uip-toast` lifecycle: `is-entering` → `is-shown` → `is-leaving`
 - `.uip-tooltip.is-leaving`, `.uip-confirm.is-leaving`, `.uip-dialog.is-leaving`, `.uip-modal.is-leaving` (fade-out; the modal also fades its `::backdrop`)
-- `.uip-popover.is-open` (optional enter fade; dismissal is instant, so there is no leave state)
+- `.uip-popover.is-open` (optional enter fade), `.uip-popover.is-leaving` (leave fade before `[hidden]`), `.uip-popover.is-stretched` (full-bleed skin hook — square edges / drop side borders on the full-width variant)
 - `.uip-confirm-ok.is-destructive` (destructive emphasis)
 
 A `@media (prefers-reduced-motion: reduce)` block neutralizes the animations to
@@ -621,7 +701,7 @@ lifecycles complete).
 | `@cplieger/ui-primitives/confirm`         | `confirm`                                                                                             |
 | `@cplieger/ui-primitives/disclosure`      | `createDisclosure`                                                                                    |
 | `@cplieger/ui-primitives/focus-trap`      | `trapFocus`                                                                                           |
-| `@cplieger/ui-primitives/theme`           | `createTheme`, `themeInitSnippet`                                                                     |
+| `@cplieger/ui-primitives/theme`           | `createTheme`, `themeInitSnippet`, `themeInitSnippetFromJSON`                                         |
 | `@cplieger/ui-primitives/view-transition` | `viewTransition`                                                                                      |
 | `@cplieger/ui-primitives/announce`        | `announce`                                                                                            |
 | `@cplieger/ui-primitives/css`             | the base stylesheet                                                                                   |

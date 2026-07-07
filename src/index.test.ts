@@ -10,6 +10,7 @@ describe("public surface", () => {
     expect(typeof api.announce).toBe("function");
     expect(typeof api.createTheme).toBe("function");
     expect(typeof api.themeInitSnippet).toBe("function");
+    expect(typeof api.themeInitSnippetFromJSON).toBe("function");
     expect(typeof api.createDialog).toBe("function");
     expect(typeof api.openDialog).toBe("function");
     expect(typeof api.closeDialog).toBe("function");

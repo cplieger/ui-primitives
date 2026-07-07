@@ -23,6 +23,13 @@
 // JS positioning (getBoundingClientRect + fixed) rather than the native Popover
 // API / CSS anchor positioning, for testability and consistency with tooltip.
 
+import { afterTransition } from "./transition.js";
+
+/** Fallback timeout (ms) for the leave animation if `transitionend` never fires
+ *  (no CSS transition, reduced motion, or an interrupted animation). Mirrors the
+ *  dialog / modal leave fallback. */
+const LEAVE_FALLBACK_MS = 400;
+
 export type PopoverPlacement = "top" | "bottom" | "left" | "right";
 export type PopoverAlign = "start" | "center" | "end";
 
@@ -70,10 +77,23 @@ export interface PlacementOptions {
   /** Clamp the cross-axis coordinate into the viewport. Default `true`. */
   clamp?: boolean;
   /** Set the panel's `min-width` to the anchor width (`true`) or to
-   *  `max(anchorWidth, n)` (a number). Default `false`. */
+   *  `max(anchorWidth, n)` (a number). Default `false`. Ignored when
+   *  `stretch: "viewport"` is set (the panel spans the full width instead). */
   matchAnchorWidth?: boolean | number;
-  /** Viewport edge margin used by flip + clamp, in px. Default `8`. */
+  /** Viewport edge margin used by flip + clamp — and, in `stretch: "viewport"`
+   *  mode, the inline inset from each viewport edge — in px. Default `8`. */
   margin?: number;
+  /** Full-bleed / edge-pinned mode. `"viewport"` makes the panel span the
+   *  viewport's inline axis (pinned to both inline edges, respecting `margin`)
+   *  instead of being sized to its content and cross-aligned to the anchor —
+   *  the mobile full-width dropdown / action-sheet pattern. The main axis stays
+   *  anchored to the trigger (below for `placement: "bottom"`, above for
+   *  `"top"`) and still flips when there is no room. Only meaningful for a
+   *  top/bottom `placement`; ignored for left/right. The inset is written as an
+   *  inline style, so a consumer never needs `!important` to express it in their
+   *  own CSS. `align`, cross-axis `clamp`, and `matchAnchorWidth` do not apply in
+   *  this mode. Default unset (content-sized). */
+  stretch?: "viewport";
 }
 
 export interface PopoverOptions extends PlacementOptions {
@@ -230,6 +250,38 @@ export function placeAnchored(
 
   const rect = anchor.getBoundingClientRect();
   panel.style.position = "fixed";
+  const vp = viewportBox();
+
+  // Full-bleed / edge-pinned mode: the panel spans the viewport's inline axis
+  // (pinned to both inline edges with `margin`) instead of being sized to its
+  // content. Only for a top/bottom placement — a left/right panel can't also
+  // span the full width. The main axis stays anchored to the trigger and still
+  // flips when there is no room below/above, which is the mobile full-width
+  // dropdown / action-sheet pattern. Everything is written as inline style so a
+  // consumer never needs `!important` to express it.
+  if (opts?.stretch === "viewport" && (placement === "top" || placement === "bottom")) {
+    // Pin both inline edges. In fixed positioning `right` is measured from the
+    // viewport's inline-end edge, so left + right together span the width minus
+    // `margin` on each side — robust to the panel's box-sizing and padding (no
+    // explicit width to fight the app's skin). Clear any min-width a prior
+    // content-sized placement set so it can't widen the pinned panel.
+    panel.style.left = `${margin}px`;
+    panel.style.right = `${margin}px`;
+    panel.style.minWidth = "";
+    // Main axis: anchor-relative, flipping to the other side when it overflows
+    // (panelW is unused by the top/bottom flip test, so 0 is fine).
+    const panelH = panel.offsetHeight;
+    const effective = flip
+      ? resolvePlacement(placement, rect, 0, panelH, offset, margin, vp)
+      : placement;
+    const top = effective === "bottom" ? rect.bottom + offset : rect.top - panelH - offset;
+    panel.style.top = `${top}px`;
+    return;
+  }
+
+  // Content-sized placement. Clear an inline-end pin a prior stretch placement
+  // may have written so the panel's own width is honored again.
+  panel.style.right = "";
 
   // Apply matchAnchorWidth first so the measured panel size reflects it.
   if (matchWidth !== false) {
@@ -239,7 +291,6 @@ export function placeAnchored(
 
   const panelW = panel.offsetWidth;
   const panelH = panel.offsetHeight;
-  const vp = viewportBox();
 
   const effective = flip
     ? resolvePlacement(placement, rect, panelW, panelH, offset, margin, vp)
@@ -291,6 +342,29 @@ export function createPopover(
   // hide() this forces focus back out even without returnFocus, so it is never
   // stranded on the now-hidden panel (WCAG 2.4.3 focus-loss).
   let movedFocusIn = false;
+  // While a leave animation is in flight this holds afterTransition's cancel
+  // handle (else null). The panel stays in the DOM with `is-leaving` until the
+  // transition ends (or the fallback fires); a re-show cancels it.
+  let cancelLeave: (() => void) | null = null;
+
+  // Whether the panel is opened full-bleed. Drives the `is-stretched` skin hook
+  // (a marker class the app can target to square edges / drop side borders on
+  // the full-width variant); positioning itself is done inline by placeAnchored.
+  const placement = opts?.placement ?? "bottom";
+  const stretched = opts?.stretch === "viewport" && (placement === "top" || placement === "bottom");
+
+  // Cancel a pending leave synchronously WITHOUT running its callback: detach
+  // the transition listener + clear the fallback timer, then drop the leaving
+  // state. Used by show() so a re-show mid-fade re-reveals cleanly rather than
+  // letting the stale leave fire and hide the panel again. (dispose() does NOT
+  // call this — it runs the animated leave via hide(), per the leave contract.)
+  const clearLeave = (): void => {
+    if (cancelLeave !== null) {
+      cancelLeave();
+      cancelLeave = null;
+    }
+    panel.classList.remove("is-leaving");
+  };
 
   // Public reposition: synchronous. Callers invoke it after a content change
   // and expect an immediate re-measure + re-clamp.
@@ -391,6 +465,9 @@ export function createPopover(
   };
 
   const show = (): void => {
+    // A show() during the leave fade cancels it and re-reveals immediately, so a
+    // rapid hide→show (or toggle) doesn't strand the panel half-faded.
+    clearLeave();
     if (open) {
       // Idempotent: a show() while open just repositions.
       placeAnchored(panel, anchor, opts);
@@ -400,6 +477,11 @@ export function createPopover(
     panel.classList.add("uip-popover");
     panel.hidden = false;
     panel.classList.add("is-open");
+    if (stretched) {
+      // Skin hook for the full-bleed variant (positioning is done inline by
+      // placeAnchored; this only lets the app square edges / drop side borders).
+      panel.classList.add("is-stretched");
+    }
     if (!panel.isConnected) {
       // Host the panel in the nearest open <dialog> ancestor of the anchor when
       // there is one, so a popover opened from within a native-<dialog> modal
@@ -444,18 +526,19 @@ export function createPopover(
 
   const hide = (): void => {
     if (!open) {
+      // Idempotent: already closed, or a leave animation is already running
+      // (open flips to false the instant hide() begins).
       return;
     }
     open = false;
     removeListeners();
-    panel.hidden = true;
-    panel.classList.remove("is-open");
     anchorEl?.setAttribute("aria-expanded", "false");
     // Restore focus to the target captured/supplied at show() time if it is
     // still connected. If the controller moved focus INTO the panel but that
     // target is gone, blur the panel so focus is not stranded on the now-hidden
     // node (falls to <body>). With neither initialFocus nor returnFocus both are
-    // null/false, so focus is left untouched.
+    // null/false, so focus is left untouched. Done synchronously — focus must
+    // not wait for the fade-out.
     const target = restoreFocus;
     const didMoveFocusIn = movedFocusIn;
     restoreFocus = null;
@@ -468,6 +551,26 @@ export function createPopover(
         active.blur();
       }
     }
+    // Leave lifecycle: swap is-open → is-leaving and keep the panel in the DOM
+    // (still the caller's element) until its transition ends — or the fallback
+    // fires when there is no transition / reduced motion / an interruption —
+    // then set [hidden] and drop the state classes. Mirrors dialog/modal/toast.
+    panel.classList.remove("is-open");
+    panel.classList.add("is-leaving");
+    cancelLeave = afterTransition(
+      panel,
+      () => {
+        cancelLeave = null;
+        // A re-show during the fade clears is-leaving; only finalize if we're
+        // still leaving, so we never yank a freshly re-shown panel shut.
+        if (panel.classList.contains("is-leaving")) {
+          panel.classList.remove("is-leaving");
+          panel.classList.remove("is-stretched");
+          panel.hidden = true;
+        }
+      },
+      LEAVE_FALLBACK_MS,
+    );
     opts?.onClose?.();
   };
 
