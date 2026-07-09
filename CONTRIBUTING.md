@@ -79,8 +79,8 @@ stylelint-clean under `stylelint-config-standard`. Rules:
 
 ```sh
 npm install
-npm run typecheck         # tsgo -p tsconfig.json (source)
-npm run typecheck:tests   # tsgo -p tsconfig.test.json (incl. tests)
+npm run typecheck         # tsc -p tsconfig.json (source)
+npm run typecheck:tests   # tsc -p tsconfig.test.json (incl. tests)
 npm test                  # vitest --run
 npm run test:coverage     # vitest --run --coverage
 npm run lint:eslint       # strict typed lint
