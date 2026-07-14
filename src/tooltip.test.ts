@@ -198,3 +198,57 @@ describe("initTooltips", () => {
     expect(t.parentElement).toBe(d); // appended into the dialog, not document.body
   });
 });
+
+describe("focus-triggered tooltips (:focus-visible gate)", () => {
+  function focusIn(el: HTMLElement): void {
+    el.dispatchEvent(new Event("focusin", { bubbles: true }));
+  }
+
+  it("shows on keyboard-driven focus (element matches :focus-visible)", () => {
+    initTooltips();
+    const a = anchor("hint");
+    vi.spyOn(a, "matches").mockImplementation((sel: string) => sel === ":focus-visible");
+    focusIn(a);
+    vi.advanceTimersByTime(1000);
+    expect(tip()).not.toBeNull();
+  });
+
+  it("stays quiet on programmatic or pointer focus (no :focus-visible)", () => {
+    // The regression this gate exists for: a modal opening and focusing its
+    // first control (or a focus-trap restoring focus) popped a tooltip with
+    // no hover and no keypress.
+    initTooltips();
+    const a = anchor("hint");
+    vi.spyOn(a, "matches").mockReturnValue(false);
+    focusIn(a);
+    vi.advanceTimersByTime(5000);
+    expect(tip()).toBeNull();
+  });
+
+  it("falls back to showing when the engine lacks :focus-visible (matches throws)", () => {
+    initTooltips();
+    const a = anchor("hint");
+    vi.spyOn(a, "matches").mockImplementation(() => {
+      throw new SyntaxError("unsupported selector");
+    });
+    focusIn(a);
+    vi.advanceTimersByTime(1000);
+    expect(tip()).not.toBeNull();
+  });
+
+  it("focusout hides a keyboard-shown tooltip", () => {
+    initTooltips();
+    const a = anchor("hint");
+    vi.spyOn(a, "matches").mockImplementation((sel: string) => sel === ":focus-visible");
+    focusIn(a);
+    vi.advanceTimersByTime(1000);
+    expect(tip()).not.toBeNull();
+    const out = new Event("focusout", { bubbles: true }) as Event & {
+      relatedTarget: EventTarget | null;
+    };
+    out.relatedTarget = null;
+    a.dispatchEvent(out);
+    vi.advanceTimersByTime(500);
+    expect(document.querySelector(".uip-tooltip:not(.is-leaving)")).toBeNull();
+  });
+});
