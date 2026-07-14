@@ -55,6 +55,14 @@ class TooltipController {
     this.onLeave(e);
   };
   private readonly onFocusIn = (e: Event): void => {
+    // Focus-triggered tooltips are for KEYBOARD users only (:focus-visible).
+    // A bare focusin gate also fires on programmatic focus — a modal opening
+    // and focusing its first control, a focus-trap restoring focus on close,
+    // an autofocus — which popped tooltips with no hover and no keypress.
+    // Pointer-driven focus is covered by the pointerover path anyway.
+    if (!isKeyboardFocus(e.target)) {
+      return;
+    }
     this.onEnter(e);
   };
   private readonly onFocusOut = (e: Event): void => {
@@ -257,6 +265,21 @@ function removeDescribedBy(anchor: HTMLElement, id: string): void {
     anchor.setAttribute("aria-describedby", tokens.join(" "));
   } else {
     anchor.removeAttribute("aria-describedby");
+  }
+}
+
+/** True when the focus landing on `target` should count as keyboard-driven:
+ *  the element matches `:focus-visible`. Engines without the selector (or a
+ *  non-Element target) fall back to `true`, preserving the old show-on-focus
+ *  behavior rather than silently disabling focus tooltips. */
+function isKeyboardFocus(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) {
+    return false;
+  }
+  try {
+    return target.matches(":focus-visible");
+  } catch {
+    return true;
   }
 }
 
