@@ -99,3 +99,72 @@ describe("viewTransition", () => {
     expect(order).toEqual([2]);
   });
 });
+
+describe("suspended-renderer safety", () => {
+  afterEach(() => {
+    // Restore the prototype-backed accessor removed by the defineProperty
+    // override below.
+    delete (document as unknown as Record<string, unknown>)["hidden"];
+    vi.useRealTimers();
+  });
+
+  it("runs fn directly (no transition) when the document is hidden", async () => {
+    const startViewTransition = vi.fn();
+    (document as MutableDoc).startViewTransition = startViewTransition;
+    Object.defineProperty(document, "hidden", { value: true, configurable: true });
+    const fn = vi.fn();
+    await viewTransition(fn);
+    expect(fn).toHaveBeenCalledOnce();
+    expect(startViewTransition).not.toHaveBeenCalled();
+  });
+
+  it("watchdog skips a transition whose finished never settles, and the queue survives", async () => {
+    vi.useFakeTimers();
+    // A starved renderer grants no rendering opportunities: `finished` pends
+    // forever until skipTransition() flushes the update via task queues.
+    let resolveFinished!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      resolveFinished = resolve;
+    });
+    const skipTransition = vi.fn(() => {
+      resolveFinished();
+    });
+    (document as MutableDoc).startViewTransition = (cb: () => void) => {
+      cb();
+      return {
+        finished,
+        ready: new Promise(() => undefined),
+        updateCallbackDone: Promise.resolve(),
+        skipTransition,
+      };
+    };
+    const fn = vi.fn();
+    const first = viewTransition(fn);
+    const queued = vi.fn();
+    const second = viewTransition(queued); // must not wedge behind the first
+    await vi.advanceTimersByTimeAsync(1_000);
+    await first;
+    expect(skipTransition).toHaveBeenCalledOnce();
+    expect(fn).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await second;
+    expect(queued).toHaveBeenCalledOnce();
+  });
+
+  it("clears the watchdog when the transition finishes normally", async () => {
+    vi.useFakeTimers();
+    const skipTransition = vi.fn();
+    (document as MutableDoc).startViewTransition = (cb: () => void) => {
+      cb();
+      return {
+        finished: Promise.resolve(),
+        ready: Promise.resolve(),
+        updateCallbackDone: Promise.resolve(),
+        skipTransition,
+      };
+    };
+    await viewTransition(vi.fn());
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(skipTransition).not.toHaveBeenCalled();
+  });
+});
