@@ -35,7 +35,7 @@
 
   /* Modal (native <dialog>). The platform top layer owns stacking (no z-index)
    * and ::backdrop is the dim overlay (reuses --uip-backdrop by default). Fades
-   * out on leave like dialog/confirm; enter is instant (matching the family). */
+   * out on leave like dialog/ask; enter is instant (matching the family). */
   --uip-modal-backdrop: var(--uip-backdrop);
   --uip-modal-leave-duration: 150ms;
   --uip-modal-leave-easing: ease;
@@ -46,9 +46,11 @@
 
   /* Popover (anchored floating panel). z-index orders it below toast (9999) /
    * tooltip (10000) in the base layer. A modal is a native <dialog> in the top
-   * layer (above every base-layer z-index), so a popover opened from within a
-   * modal is rendered INTO that <dialog> (createPopover hosts it in the nearest
-   * open dialog) to sit over it. */
+   * layer (above every base-layer z-index), so a DISCONNECTED panel opened from
+   * within a modal is hosted INTO that <dialog> (the trigger's nearest open
+   * dialog, else the topmost open one) to sit over it; a caller-connected panel
+   * stays where the caller put it — connect it inside the dialog when opening
+   * from a modal. */
   --uip-z-popover: 1100;
   --uip-popover-enter-duration: 100ms;
   --uip-popover-enter-easing: ease;
@@ -140,34 +142,31 @@
   opacity: 0;
 }
 
-/* ===== Dialog + Confirm + Prompt ========================================= */
+/* ===== Dialog + Ask ====================================================== */
 
-/* prompt is confirm's input-collecting sibling and shares the exact same
- * dialog-family motion (the --uip-dialog-* properties). */
-.uip-confirm,
-.uip-dialog,
-.uip-prompt {
+/* ask is the Promise-shaped question dialog (boolean, or input-collecting
+ * with the .uip-ask--input modifier); it shares the exact same dialog-family
+ * motion (the --uip-dialog-* properties). */
+.uip-ask,
+.uip-dialog {
   opacity: 1;
   transition: opacity var(--uip-dialog-leave-duration, 150ms) var(--uip-dialog-leave-easing, ease);
 }
 
-.uip-confirm.is-leaving,
-.uip-dialog.is-leaving,
-.uip-prompt.is-leaving {
+.uip-ask.is-leaving,
+.uip-dialog.is-leaving {
   opacity: 0;
 }
 
-.uip-confirm::backdrop,
-.uip-dialog::backdrop,
-.uip-prompt::backdrop {
+.uip-ask::backdrop,
+.uip-dialog::backdrop {
   background: var(--uip-backdrop, oklch(0% 0 0deg / 50%));
   opacity: 1;
   transition: opacity var(--uip-dialog-leave-duration, 150ms) var(--uip-dialog-leave-easing, ease);
 }
 
-.uip-confirm.is-leaving::backdrop,
-.uip-dialog.is-leaving::backdrop,
-.uip-prompt.is-leaving::backdrop {
+.uip-ask.is-leaving::backdrop,
+.uip-dialog.is-leaving::backdrop {
   opacity: 0;
 }
 
@@ -177,7 +176,7 @@
  * and background inerting all come from the browser (no z-index, no overlay
  * div). Auto-margined to center in the viewport, which also sidesteps the Safari
  * <dialog> height bug the old overlay grid-centering worked around. Like
- * dialog/confirm it fades out on leave — the library adds `is-leaving` and waits
+ * dialog/ask it fades out on leave — the library adds `is-leaving` and waits
  * for its transitionend before close() — so exit works without display/overlay
  * allow-discrete; enter is instant, matching the rest of the <dialog> family.
  * The inner content keeps the `.uip-modal-dialog` class as a skinning hook. */
@@ -298,13 +297,11 @@
   .uip-toast,
   .uip-toast.is-leaving,
   .uip-tooltip,
-  .uip-confirm,
+  .uip-ask,
   .uip-dialog,
-  .uip-prompt,
   .uip-modal,
-  .uip-confirm::backdrop,
+  .uip-ask::backdrop,
   .uip-dialog::backdrop,
-  .uip-prompt::backdrop,
   .uip-modal::backdrop,
   .uip-modal.is-leaving,
   .uip-modal.is-leaving::backdrop,

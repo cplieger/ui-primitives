@@ -20,8 +20,8 @@ Built on [`@cplieger/reactive`](https://github.com/cplieger/reactive) (uses its
 `el` DOM factory). ESM-only, published as TypeScript source to npm and JSR.
 
 Primitives: **toast**, **tooltip**, **popover**, **popup**, **dialog**,
-**modal**, **confirm**, **prompt**, **disclosure**, **focus-trap**,
-**roving-focus**, **theme**, **view-transition**, **announce**, **skeleton**.
+**modal**, **ask**, **disclosure**, **focus-trap**, **roving-focus**,
+**theme**, **view-transition**, **announce**, **skeleton**.
 
 ## Install
 
@@ -31,7 +31,10 @@ npm i @cplieger/ui-primitives
 npx jsr add @cplieger/ui-primitives
 ```
 
-Requires TypeScript ≥ 5 and a bundler that resolves ESM + TS source. `@cplieger/reactive` is a runtime dependency and is installed automatically.
+Requires TypeScript ≥ 6 and a bundler that resolves ESM + TS source (the
+package ships TS source, so your compiler typechecks it — and its
+`@cplieger/reactive` dependency — under your own flags). `@cplieger/reactive`
+is a runtime dependency and is installed automatically.
 
 ## The skin-vs-behavior split
 
@@ -82,7 +85,7 @@ import "@cplieger/ui-primitives/css";
 
 ```ts
 import { toast } from "@cplieger/ui-primitives/toast";
-import { confirm } from "@cplieger/ui-primitives/confirm";
+import { ask } from "@cplieger/ui-primitives/ask";
 import { initTooltips } from "@cplieger/ui-primitives/tooltip";
 import { createTheme } from "@cplieger/ui-primitives/theme";
 import "@cplieger/ui-primitives/css";
@@ -92,7 +95,7 @@ const theme = createTheme({ storageKey: "app-theme" });
 
 toast.success("Saved");
 
-if (await confirm("Delete this file?", { variant: "destructive" })) {
+if (await ask("Delete this file?", { variant: "destructive" })) {
   // ...
 }
 ```
@@ -162,10 +165,16 @@ visually-hidden child span so the focused node stays self-describing for
 keyboard and screen-reader users. Nothing is appended to the DOM at import
 time: the stack is created lazily on the first toast shown.
 
-Toasts mount on `document.body`. A toast raised while a modal `<dialog>` is open
-therefore renders behind the dialog's top layer; raise toasts before opening a
-modal, or after it closes. (Tooltips, by contrast, re-parent into an open
-ancestor `<dialog>` — see below.)
+Toasts mount on `document.body` — except while a modal `<dialog>` is open.
+`showModal()` inerts everything outside the dialog subtree (a body-mounted
+stack would paint behind the modal AND be dead to clicks, hover, and assistive
+technology), so the default stack auto-hosts into the topmost open modal
+dialog: toasts raised while a modal is open show over it, stay clickable, keep
+their hover/focus pause and Retry button, and are still announced. The stack
+returns to `document.body` when the modal closes (re-evaluated on each toast
+shown and on the hosting dialog's `close`). A toaster created with an explicit
+`container` is pinned to it and never auto-hosts — an embedded widget's chrome
+must not escape its root.
 
 ### view-transition — `@cplieger/ui-primitives/view-transition`
 
@@ -310,60 +319,62 @@ users don't get a flash of light — including a 2-state app on first paint. The
 context, so a value containing `</script>` (or other HTML-breaking characters)
 is safe.
 
-### confirm — `@cplieger/ui-primitives/confirm`
+### ask — `@cplieger/ui-primitives/ask`
+
+The Promise-shaped question dialog — the styled, non-blocking replacement for
+**both** `window.confirm` and `window.prompt`.
 
 ```ts
-import { confirm } from "@cplieger/ui-primitives/confirm";
+import { ask } from "@cplieger/ui-primitives/ask";
 
-const ok = await confirm("Delete everything?", {
+// Boolean ask (confirm): resolves true / false.
+const ok = await ask("Delete everything?", {
   title: "Danger",
   confirmLabel: "Delete",
   variant: "destructive",
 });
-```
 
-- `confirm(message, opts?)` → `Promise<boolean>`.
-- `ConfirmOptions` = `{ title?; confirmLabel?; cancelLabel?; variant?: "normal" | "destructive" }`.
-
-Renders a lazily-created, reused native `<dialog>` — labelled by its title
-(`aria-labelledby`), described by its message body (`aria-describedby`), or
-labelled by the message when there is no title. `showModal()` provides the focus
-trap and focus restoration; `destructive` upgrades it to `role="alertdialog"`
-and focuses **Cancel** (so a keyboard user can't confirm by accident) and adds
-`is-destructive` to the confirm button for skinning. Escape, a backdrop click,
-or a newer `confirm()` call all resolve `false`.
-
-### prompt — `@cplieger/ui-primitives/prompt`
-
-Confirm's input-collecting sibling: a Promise-based single-input dialog, the
-styled, non-blocking replacement for `window.prompt`.
-
-```ts
-import { prompt } from "@cplieger/ui-primitives/prompt";
-
-const name = await prompt("Rename passkey:", { initialValue: current, maxLength: 64 });
+// Input ask (prompt): resolves the value, or null on cancellation.
+const name = await ask("Rename passkey:", {
+  input: { initialValue: current, maxLength: 64 },
+});
 if (name !== null) rename(name);
 
-const pw = await prompt("Enter your password to continue:", {
+const pw = await ask("Enter your password to continue:", {
   title: "Verify",
-  type: "password",
-  autocomplete: "current-password",
+  input: { type: "password", autocomplete: "current-password" },
 });
 ```
 
-- `prompt(message, opts?)` → `Promise<string | null>`.
-- `PromptOptions` = `{ title?; confirmLabel?; cancelLabel?; type?: "text" | "password"; initialValue?; placeholder?; maxLength?; autocomplete? }`.
+- `ask(message, opts?)` → `Promise<boolean>`; with `input` set →
+  `Promise<string | null>` (the overloads narrow the return type from the
+  options shape).
+- `AskOptions` = `{ title?; confirmLabel?; cancelLabel?; variant?: "normal" | "destructive"; input?: AskInput | true }`.
+- `AskInput` = `{ type?: "text" | "password"; initialValue?; placeholder?; maxLength?; autocomplete? }` (`input: true` = a default text input).
 
-Renders a lazily-created, reused native `<dialog class="uip-prompt">` sharing
-confirm's dialog-family motion. The message is the input's real `<label>`
-(native form semantics); the dialog is labelled by the title and described by
-the message, or labelled by the message when there is no title. **OK** or
+Renders a lazily-created, reused native `<dialog class="uip-ask">` — labelled
+by its title (`aria-labelledby`), described by its message body
+(`aria-describedby`), or labelled by the message when there is no title.
+`showModal()` provides the focus trap and focus restoration. `variant:
+"destructive"` upgrades it to `role="alertdialog"` and adds `is-destructive`
+to the OK button for skinning; on a boolean ask it also focuses **Cancel** (so
+a keyboard user can't confirm by accident), while an input ask always focuses
+its input — the typed value is what gets submitted, and type-to-confirm flows
+(`variant: "destructive"` + `input`) need the caret.
+
+With `input` set, the dialog gains the `.uip-ask--input` modifier, the message
+becomes the input's real `<label>` (native form semantics), and **OK** or
 **Enter** (the input sits in a form; OK is its submit button) resolve the
 input's value **as-is** — an empty submission resolves `""`, distinct from the
 `null` of a cancellation (trim/empty-to-null mapping is the caller's policy).
-Cancel, Escape, a backdrop click, or a newer `prompt()` call resolve `null`.
 The input is focused on open with any `initialValue` selected, like
 `window.prompt`.
+
+Cancellation is uniform: Cancel, Escape, a backdrop click, or preemption by a
+newer `ask()` resolve `false` (boolean) / `null` (input). Preemption spans
+both shapes — one question at a time, whatever its kind: a same-shape
+successor takes over the still-open dialog seamlessly; a cross-shape one fades
+the other dialog closed.
 
 ### dialog — `@cplieger/ui-primitives/dialog`
 
@@ -439,7 +450,7 @@ What `modal` adds on top of the platform `<dialog>`:
 
 - **Drag-safe backdrop dismiss** — closes only when a press starts and ends on the `<dialog>` itself, so a drag-select escaping the panel doesn't dismiss (default `closeOnBackdrop: true`).
 - **Escape** — intercepts the platform `cancel` event so the fade-out lifecycle runs, or so Escape is ignored when `closeOnEscape: false` (the browser already closes the topmost dialog on Escape).
-- **Leave lifecycle** mirrors dialog/confirm: add `is-leaving`, wait for the dialog's `transitionend` (or a fallback), then `close()`.
+- **Leave lifecycle** mirrors dialog/ask: add `is-leaving`, wait for the dialog's `transitionend` (or a fallback), then `close()`.
 - **iOS-safe scroll-lock** (default `scrollLock: true`, ref-counted across nested modals) — a native `<dialog>` does not lock background scroll and `overflow:hidden` on the root is ignored by iOS Safari for touch-scroll, so the body is pinned with `position:fixed` at the negated scroll offset and restored + scrolled back on release.
 - **ARIA** — `role` defaults to the `<dialog>` implicit `dialog` (`aria-modal` is implicit under `showModal()`); `"alertdialog"` sets the role + the `.uip-modal--alert` modifier. `aria-labelledby`/`aria-describedby` come from the options, or, when omitted, from a descendant whose `id` ends in `-title` / `-desc` / `-description`.
 
@@ -538,11 +549,14 @@ One delegated controller handles every trigger. The first tooltip of a "cold"
 group waits `delayCold`; peers show instantly while the group is warm. The
 trigger text is appended to the anchor's `aria-describedby` (preserving any
 token the app already set, and removing only its own on hide); `\n` in the value
-splits into `<br>`-separated lines. Escape, scroll, and window blur hide it.
-Positioned `fixed` above the anchor (flips below when there is no room), clamped
-to the viewport. When the anchor sits inside an open modal `<dialog>`, the
-tooltip is appended into that dialog so it shares the dialog's top layer instead
-of rendering behind it.
+splits into `<br>`-separated lines. Escape, scroll, and window blur hide it —
+scroll deliberately _hides_ rather than repositions (a tooltip is hover-context
+help; once the user scrolls, the pointer context is gone and native `title`
+behavior is to vanish — popover, an opened surface, tracks and repositions
+instead). Positioned `fixed` above the anchor (flips below when there is no
+room), clamped to the viewport. When the anchor sits inside an open modal
+`<dialog>`, the tooltip is appended into that dialog so it shares the dialog's
+top layer instead of rendering behind it.
 
 ### popover — `@cplieger/ui-primitives/popover`
 
@@ -715,8 +729,13 @@ constructor-bound and cannot be patched.
 
 `--uip-z-popover` (`1100`) orders the popover below toast (`9999`) / tooltip
 (`10000`) in the base layer. A modal is a native `<dialog>` in the top layer
-(above every base-layer z-index), so a popover opened from within one is
-rendered INTO that `<dialog>` (not stacked by z-index) to show over it.
+(above every base-layer z-index), so z-index cannot stack a popover over it —
+DOM position can: a **disconnected** panel opened from within a modal is hosted
+INTO that `<dialog>` (the trigger's nearest open dialog ancestor, or the
+topmost open dialog for point-anchored / trigger-less popovers) to show over
+it; a **caller-connected** panel stays exactly where you put it, so when a
+popover opens from inside a modal, connect its panel inside that dialog (a
+panel connected outside would paint behind the modal and be inert).
 
 Like tooltip, popover positions with JS (`getBoundingClientRect` + `position: fixed`)
 rather than the native [Popover API](https://developer.mozilla.org/en-US/docs/Web/API/Popover_API)
@@ -780,8 +799,11 @@ plays — an _animation_ on `is-open` works too) and swaps `is-open` →
 ```
 
 A disconnected panel is hosted on `show()` — into the trigger's nearest open
-`<dialog>` ancestor (top-layer correctness) or `<body>`; a caller-connected
-panel (the usual in-flow case) stays exactly where you put it.
+`<dialog>` ancestor when there is one, else the topmost open dialog (so
+trigger-less and point-anchored popups opened while a modal is up stay
+interactive instead of landing inert on `<body>`), else `<body>`; a
+caller-connected panel (the usual in-flow case) stays exactly where you put
+it.
 
 ### announce — `@cplieger/ui-primitives/announce`
 
@@ -795,7 +817,10 @@ announce("Connection lost", "assertive");
 Updates a shared visually-hidden ARIA live region so screen readers announce
 the message. `polite` (default) and `assertive` use separate regions. The text
 is cleared then re-set after a short (~100ms) delay so repeated identical
-messages still announce.
+messages still announce. While a modal `<dialog>` is open, the region is
+re-homed into it at announce time (`showModal()` inerts everything outside the
+dialog subtree, and inert content is silent to assistive technology), then back
+to `document.body` on the next announce after it closes.
 
 ### skeleton — `@cplieger/ui-primitives/skeleton`
 
@@ -864,9 +889,9 @@ scoped) to tune behavior, and style the classes for your skin.
 | `--uip-toast-progress-color`   | `currentcolor`           | progress-bar color                                              |
 | `--uip-tooltip-fade-duration`  | `100ms`                  | tooltip fade                                                    |
 | `--uip-tooltip-fade-easing`    | `ease`                   | tooltip fade easing                                             |
-| `--uip-dialog-leave-duration`  | `150ms`                  | dialog / confirm / backdrop fade                                |
-| `--uip-dialog-leave-easing`    | `ease`                   | dialog / confirm / backdrop fade easing                         |
-| `--uip-backdrop`               | `oklch(0% 0 0deg / 50%)` | dialog / confirm backdrop dim                                   |
+| `--uip-dialog-leave-duration`  | `150ms`                  | dialog / ask / backdrop fade                                    |
+| `--uip-dialog-leave-easing`    | `ease`                   | dialog / ask / backdrop fade easing                             |
+| `--uip-backdrop`               | `oklch(0% 0 0deg / 50%)` | dialog / ask backdrop dim                                       |
 | `--uip-modal-backdrop`         | `var(--uip-backdrop)`    | modal `::backdrop` dim                                          |
 | `--uip-modal-leave-duration`   | `150ms`                  | modal + `::backdrop` leave fade                                 |
 | `--uip-modal-leave-easing`     | `ease`                   | modal + `::backdrop` leave-fade easing                          |
@@ -890,33 +915,32 @@ duration in code, and style the bar's color/size via the properties above.
 
 ### Classes and state classes
 
-| Class                                                                              | Element                                                                |
-| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `.uip-toast-stack`                                                                 | toast container (visual only, not a live region)                       |
-| `.uip-toast`, `.uip-toast--info` / `--success` / `--error`                         | a toast (level modifier)                                               |
-| `.uip-toast-msg`                                                                   | toast message text                                                     |
-| `.uip-toast-retry`                                                                 | toast retry button                                                     |
-| `.uip-toast-progress`                                                              | toast countdown bar (`aria-hidden`)                                    |
-| `.uip-tooltip`                                                                     | a tooltip (`role="tooltip"`)                                           |
-| `.uip-confirm`                                                                     | the confirm `<dialog>`                                                 |
-| `.uip-confirm-title` / `-msg` / `-actions` / `-ok` / `-cancel`                     | confirm parts                                                          |
-| `.uip-prompt`                                                                      | the prompt `<dialog>` (shares the dialog-family motion)                |
-| `.uip-prompt-title` / `-msg` / `-form` / `-input` / `-actions` / `-ok` / `-cancel` | prompt parts (`-msg` is the input's `<label>`)                         |
-| `.uip-dialog`                                                                      | a `<dialog>` wrapped by `createDialog`                                 |
-| `.uip-modal`, `.uip-modal--alert`                                                  | the modal `<dialog>` (top layer + `::backdrop`; alert modifier)        |
-| `.uip-modal-dialog`                                                                | modal content (skin hook inside the `<dialog>`)                        |
-| `.uip-disclosure-region`                                                           | disclosure collapsible region (`aria-hidden` when closed)              |
-| `.uip-popover`                                                                     | anchored floating panel (`position: fixed`, JS-positioned)             |
-| `.uip-popup`                                                                       | panel wired by `createPopup` (no placement; only `[hidden]` is styled) |
-| `.uip-visually-hidden`                                                             | the announce live regions (sr-only)                                    |
+| Class                                                      | Element                                                                |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `.uip-toast-stack`                                         | toast container (visual only, not a live region)                       |
+| `.uip-toast`, `.uip-toast--info` / `--success` / `--error` | a toast (level modifier)                                               |
+| `.uip-toast-msg`                                           | toast message text                                                     |
+| `.uip-toast-retry`                                         | toast retry button                                                     |
+| `.uip-toast-progress`                                      | toast countdown bar (`aria-hidden`)                                    |
+| `.uip-tooltip`                                             | a tooltip (`role="tooltip"`)                                           |
+| `.uip-ask`, `.uip-ask--input`                              | the ask `<dialog>` (input-shape modifier)                              |
+| `.uip-ask-title` / `-msg` / `-actions` / `-ok` / `-cancel` | ask parts (`-msg` is the input's `<label>` in the input shape)         |
+| `.uip-ask-form` / `-input`                                 | input-shape parts                                                      |
+| `.uip-dialog`                                              | a `<dialog>` wrapped by `createDialog`                                 |
+| `.uip-modal`, `.uip-modal--alert`                          | the modal `<dialog>` (top layer + `::backdrop`; alert modifier)        |
+| `.uip-modal-dialog`                                        | modal content (skin hook inside the `<dialog>`)                        |
+| `.uip-disclosure-region`                                   | disclosure collapsible region (`aria-hidden` when closed)              |
+| `.uip-popover`                                             | anchored floating panel (`position: fixed`, JS-positioned)             |
+| `.uip-popup`                                               | panel wired by `createPopup` (no placement; only `[hidden]` is styled) |
+| `.uip-visually-hidden`                                     | the announce live regions (sr-only)                                    |
 
 State classes toggled at runtime (style these for motion/emphasis):
 
 - `.uip-toast` lifecycle: `is-entering` → `is-shown` → `is-leaving`
-- `.uip-tooltip.is-leaving`, `.uip-confirm.is-leaving`, `.uip-prompt.is-leaving`, `.uip-dialog.is-leaving`, `.uip-modal.is-leaving` (fade-out; the modal also fades its `::backdrop`)
+- `.uip-tooltip.is-leaving`, `.uip-ask.is-leaving`, `.uip-dialog.is-leaving`, `.uip-modal.is-leaving` (fade-out; the modal also fades its `::backdrop`)
 - `.uip-popover.is-open` (optional enter fade), `.uip-popover.is-leaving` (leave fade before `[hidden]`), `.uip-popover.is-stretched` (full-bleed skin hook — square edges / drop side borders on the full-width variant)
 - `.uip-popup.is-open` / `.uip-popup.is-leaving` (all motion is the app's; the base ships none for popup)
-- `.uip-confirm-ok.is-destructive` (destructive emphasis)
+- `.uip-ask-ok.is-destructive` (destructive emphasis)
 
 A `@media (prefers-reduced-motion: reduce)` block neutralizes the animations to
 near-zero (not zero, so `transitionend`/`animationend` still fire and the leave
@@ -933,8 +957,7 @@ lifecycles complete).
 | `@cplieger/ui-primitives/popup`           | `createPopup`, `closePopupGroup`, types                                                               |
 | `@cplieger/ui-primitives/dialog`          | `createDialog`, `openDialog`, `closeDialog`                                                           |
 | `@cplieger/ui-primitives/modal`           | `createModal`                                                                                         |
-| `@cplieger/ui-primitives/confirm`         | `confirm`                                                                                             |
-| `@cplieger/ui-primitives/prompt`          | `prompt`                                                                                              |
+| `@cplieger/ui-primitives/ask`             | `ask`, types                                                                                          |
 | `@cplieger/ui-primitives/disclosure`      | `createDisclosure`                                                                                    |
 | `@cplieger/ui-primitives/focus-trap`      | `trapFocus`                                                                                           |
 | `@cplieger/ui-primitives/roving-focus`    | `rovingFocus`                                                                                         |
