@@ -338,3 +338,47 @@ describe("popup: setOptions", () => {
     b.dispose();
   });
 });
+
+describe("disconnected-panel hosting under a modal (no trigger to derive it from)", () => {
+  it("hosts a trigger-less disconnected panel into the topmost open dialog", () => {
+    const modal = document.createElement("dialog");
+    document.body.appendChild(modal);
+    modal.showModal();
+
+    // No trigger: the old rule fell back to <body>, where the open modal
+    // inerts the panel. The core now falls back to the topmost open dialog.
+    const loose = document.createElement("div");
+    const pop = createPopup(loose);
+    pop.show();
+    expect(loose.parentElement).toBe(modal);
+
+    pop.dispose();
+    modal.close();
+    modal.remove();
+  });
+
+  it("still prefers the trigger's own open dialog ancestor over the topmost", () => {
+    const outer = document.createElement("dialog");
+    document.body.appendChild(outer);
+    outer.showModal();
+    const trigger = document.createElement("button");
+    outer.appendChild(trigger);
+
+    const topmost = document.createElement("dialog");
+    document.body.appendChild(topmost);
+    topmost.showModal();
+
+    // The trigger lives in `outer`, so its panel belongs there — the
+    // trigger-derived host wins over the global topmost fallback.
+    const panel = document.createElement("div");
+    const pop = createPopup(panel, { trigger });
+    pop.show();
+    expect(panel.parentElement).toBe(outer);
+
+    pop.dispose();
+    topmost.close();
+    outer.close();
+    topmost.remove();
+    outer.remove();
+  });
+});

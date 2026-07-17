@@ -25,11 +25,6 @@ export interface Toaster {
   dispose(): void;
 }
 
-interface ResettableToaster extends Toaster {
-  /** Clear state + remove the container (kept internal; the ESC handler stays). */
-  reset(): void;
-}
-
 export interface ToasterOptions {
   /** Maximum simultaneously-visible toasts (`"stack"` mode). Default `3`. */
   maxVisible?: number;
@@ -46,7 +41,7 @@ export interface ToasterOptions {
   mode?: "stack" | "replace";
 }
 
-function build(opts?: ToasterOptions): ResettableToaster {
+function build(opts?: ToasterOptions): Toaster {
   const view = createToastView(opts?.container);
   const engine = new ToastEngine<ToastHandle>({
     view,
@@ -77,10 +72,6 @@ function build(opts?: ToasterOptions): ResettableToaster {
       engine.clear();
       view.dispose();
     },
-    reset: () => {
-      engine.clear();
-      view.dispose();
-    },
   };
 }
 
@@ -89,27 +80,53 @@ export function createToaster(opts?: ToasterOptions): Toaster {
   return build(opts);
 }
 
-const singleton = build();
+// The default toaster is built LAZILY, on first use: build() attaches a
+// document keydown (Escape) listener, so building at import time would be an
+// import-time side effect — it would throw in a DOM-less runtime and attach
+// the listener even for createToaster-only consumers (and it would contradict
+// the "no import-time side effects" contract this package publishes under).
+let singleton: Toaster | null = null;
 
-/** Default shared toaster. */
-export const toast: Toaster = singleton;
+function getSingleton(): Toaster {
+  singleton ??= build();
+  return singleton;
+}
+
+/** Default shared toaster (built lazily on first use; lives for the app's
+ *  lifetime — never dispose it). */
+export const toast: Toaster = {
+  show: (message, opts) => getSingleton().show(message, opts),
+  info: (message) => getSingleton().info(message),
+  success: (message) => getSingleton().success(message),
+  error: (message, retry) => getSingleton().error(message, retry),
+  clear: (): void => {
+    getSingleton().clear();
+  },
+  dispose: (): void => {
+    getSingleton().dispose();
+  },
+};
 
 /** Show an info toast on the default toaster. */
 export function info(message: string): () => void {
-  return singleton.info(message);
+  return getSingleton().info(message);
 }
 
 /** Show a success toast on the default toaster. */
 export function success(message: string): () => void {
-  return singleton.success(message);
+  return getSingleton().success(message);
 }
 
 /** Show an error toast on the default toaster. */
 export function error(message: string, retry?: ToastRetry): () => void {
-  return singleton.error(message, retry);
+  return getSingleton().error(message, retry);
 }
 
-/** Test-only: clear the default toaster and remove its container. */
+/** Test-only: tear down the default toaster entirely (listener included); the
+ *  next use lazily rebuilds it fresh. */
 export function _resetForTest(): void {
-  singleton.reset();
+  if (singleton !== null) {
+    singleton.dispose();
+    singleton = null;
+  }
 }

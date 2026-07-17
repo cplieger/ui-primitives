@@ -8,6 +8,12 @@
 // anchor via `aria-describedby` so AT announces it, and `\n` splits into
 // <br>-separated lines. Placement is `position: fixed` via getBoundingClientRect
 // with viewport clamping and above→below flip when there is no room above.
+//
+// Scroll HIDES the tooltip rather than repositioning it (popover, by contrast,
+// tracks its anchor and repositions). Deliberate: a tooltip is hover-context
+// help — once the user scrolls, the pointer is no longer meaningfully over the
+// anchor and native `title` behavior is to vanish; a popover is an opened
+// surface the user is interacting with, which must follow its anchor.
 
 import { el } from "@cplieger/reactive";
 

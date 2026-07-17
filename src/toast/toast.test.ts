@@ -336,3 +336,105 @@ describe("createToaster: container option", () => {
     t.dispose();
   });
 });
+
+describe("toast: modal <dialog> auto-hosting", () => {
+  function openModal(): HTMLDialogElement {
+    const dlg = document.createElement("dialog");
+    document.body.appendChild(dlg);
+    dlg.showModal();
+    return dlg;
+  }
+
+  it("hosts the default stack inside an open modal so toasts stay interactive (not inert)", () => {
+    const dlg = openModal();
+    info("over the modal");
+    // Inertness is DOM-tree-scoped: only a stack INSIDE the dialog subtree is
+    // clickable/hoverable while the modal is open.
+    expect(stack()!.parentElement).toBe(dlg);
+    dlg.close();
+    dlg.remove();
+  });
+
+  it("moves a live stack in and back out, carrying visible toasts along", () => {
+    error("sticky"); // sticky error toast, no auto-dismiss
+    expect(stack()!.parentElement).toBe(document.body);
+
+    const dlg = openModal();
+    info("raised over modal"); // mount re-resolves the host → stack moves INTO the dialog
+    expect(stack()!.parentElement).toBe(dlg);
+    expect(toasts()).toHaveLength(2); // the sticky toast rode along
+
+    dlg.close(); // close event → evacuation without needing a new toast
+    expect(stack()!.parentElement).toBe(document.body);
+    expect(toasts()).toHaveLength(2); // both toasts survived both moves
+    dlg.remove();
+  });
+
+  it("a toast raised after the modal closed lands on document.body", () => {
+    const dlg = openModal();
+    info("in dialog");
+    expect(stack()!.parentElement).toBe(dlg);
+    dlg.close();
+    dlg.remove();
+    info("after close");
+    expect(stack()!.parentElement).toBe(document.body);
+  });
+
+  it("nested modals: hosts into the most recent, steps back one per close", () => {
+    const outer = openModal();
+    const inner = openModal(); // appended after outer → resolves as topmost
+    info("nested");
+    expect(stack()!.parentElement).toBe(inner);
+    inner.close(); // re-sync lands on the still-open outer modal
+    expect(stack()!.parentElement).toBe(outer);
+    outer.close();
+    expect(stack()!.parentElement).toBe(document.body);
+    inner.remove();
+    outer.remove();
+  });
+
+  it("an explicit container pins the stack — no auto-hosting into modals", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const t = createToaster({ container: host });
+    const dlg = openModal();
+    t.info("scoped");
+    // The embedded-widget contract: chrome never escapes the configured root.
+    expect(host.querySelector(".uip-toast-stack")).not.toBeNull();
+    dlg.close();
+    dlg.remove();
+    t.dispose();
+  });
+
+  it("recovers a stack whose hosting dialog was removed without firing close", () => {
+    const dlg = openModal();
+    info("inside");
+    expect(stack()!.parentElement).toBe(dlg);
+    dlg.remove(); // dispose-style teardown that skips the close event
+    expect(stack()).toBeNull(); // stack left the document with the dialog
+    info("recovers"); // next mount re-resolves the host
+    expect(stack()!.parentElement).toBe(document.body);
+  });
+});
+
+describe("toast: default toaster laziness", () => {
+  it("importing attaches no document listener and creates no DOM; first use does", async () => {
+    vi.resetModules();
+    const spy = vi.spyOn(document, "addEventListener");
+    const fresh = await import("./index.js");
+    const keydownCalls = (): number => spy.mock.calls.filter(([type]) => type === "keydown").length;
+
+    // Import-time: no Escape listener, no stack container (the module import
+    // must be side-effect free — DOM-less runtimes import it too).
+    expect(keydownCalls()).toBe(0);
+    expect(document.querySelector(".uip-toast-stack")).toBeNull();
+
+    // First use builds the singleton: listener attaches, stack appears.
+    fresh.info("first use");
+    expect(keydownCalls()).toBe(1);
+    expect(document.querySelector(".uip-toast-stack")).not.toBeNull();
+
+    fresh._resetForTest();
+    spy.mockRestore();
+  });
+});

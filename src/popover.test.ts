@@ -1534,3 +1534,44 @@ describe("createPopover: setOptions (responsive placement)", () => {
     pop.dispose();
   });
 });
+
+describe("placeAnchored — clearing matchAnchorWidth", () => {
+  it("a placement without the option clears the inline min-width a prior one wrote", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+
+    placeAnchored(panel, anchor, { matchAnchorWidth: 220, flip: false, clamp: false });
+    expect(panel.style.minWidth).toBe("220px");
+
+    // The setOptions({ matchAnchorWidth: undefined }) seam ends here: the
+    // next placement runs with the option at its default (false) and must
+    // clear the stale inline min-width, not leave it stuck on the panel.
+    placeAnchored(panel, anchor, { flip: false, clamp: false });
+    expect(panel.style.minWidth).toBe("");
+  });
+});
+
+describe("createPopover — pointAnchor panel hosting under a modal", () => {
+  it("hosts a disconnected point-anchored panel into the open modal (context menu in a modal)", () => {
+    const modal = document.createElement("dialog");
+    document.body.appendChild(modal);
+    modal.showModal();
+
+    // A virtual anchor has no trigger element, so the trigger-derived dialog
+    // rule can't apply; the core's topmost-open-dialog fallback keeps the
+    // context menu usable (a body-hosted panel would be inert behind the
+    // modal).
+    const panel = document.createElement("div");
+    stubSize(panel, 100, 40);
+    const pop = createPopover(pointAnchor(50, 60), panel);
+    pop.show();
+    expect(panel.parentElement).toBe(modal);
+
+    pop.dispose();
+    modal.close();
+    modal.remove();
+  });
+});
