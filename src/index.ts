@@ -44,13 +44,12 @@ export type {
   DisclosureToggleSource,
 } from "./disclosure.js";
 
-export { confirm } from "./confirm.js";
-export type { ConfirmOptions } from "./confirm.js";
-
-// prompt is confirm's input-collecting sibling: a Promise-based single-input
-// dialog (the styled, non-blocking window.prompt replacement).
-export { prompt } from "./prompt.js";
-export type { PromptOptions } from "./prompt.js";
+// ask is the Promise-shaped question dialog — the styled, non-blocking
+// replacement for BOTH window.confirm and window.prompt: a plain ask resolves
+// boolean; passing `input` collects a value and resolves string | null (the
+// overloads narrow the return type from the options shape).
+export { ask } from "./ask.js";
+export type { AskInput, AskOptions } from "./ask.js";
 
 export { initTooltips } from "./tooltip.js";
 export type { TooltipOptions } from "./tooltip.js";
