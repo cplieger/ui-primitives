@@ -23,13 +23,14 @@
 // JS positioning (getBoundingClientRect + fixed) rather than the native Popover
 // API / CSS anchor positioning, for testability and consistency with tooltip.
 
-// createPopover is layered on the popup primitive: popup owns the reveal /
-// light-dismiss lifecycle (state classes, outside-click, Escape isolation,
-// trigger ARIA, groups, opt-in focus) and popover adds anchored placement,
-// scroll/resize/visualViewport tracking, and the full-bleed stretch mode.
+// createPopover is layered on the shared popup lifecycle core (popup-core.ts,
+// internal): the core owns the reveal / light-dismiss lifecycle (state
+// classes, outside-click, Escape isolation, trigger ARIA, groups, opt-in
+// focus) and popover adds anchored placement, scroll/resize/visualViewport
+// tracking, and the full-bleed stretch mode through the core's hooks seam.
 
-import { createPopup } from "./popup.js";
-import type { PopupOptions, PopupOptionsPatch } from "./popup.js";
+import { createPopupCore } from "./popup-core.js";
+import type { PopupOptions, PopupOptionsPatch } from "./popup-core.js";
 
 export type PopoverPlacement = "top" | "bottom" | "left" | "right";
 export type PopoverAlign = "start" | "center" | "end";
@@ -49,7 +50,13 @@ export type PopoverAnchor = HTMLElement | VirtualAnchor;
  *  at a right-click / pointer point. The rect is zero-size at (x, y), so the
  *  popover opens from that point (bottom/start places it just below-right of the
  *  cursor). Read fresh each placement, so pass a function-free fixed point; for a
- *  moving point, build a new pointAnchor and call reposition/placeAnchored again. */
+ *  moving point, build a new pointAnchor and call reposition/placeAnchored again.
+ *
+ *  Inside a modal `<dialog>`: a virtual anchor has no trigger element to derive
+ *  the dialog from, so a DISCONNECTED point-anchored panel is hosted into the
+ *  topmost open dialog (falling back to `document.body` when none is open) —
+ *  a right-click context menu inside a modal stays interactive. A
+ *  caller-connected panel stays where the caller put it, as always. */
 export function pointAnchor(x: number, y: number): VirtualAnchor {
   return {
     getBoundingClientRect: (): DOMRect => ({
@@ -285,10 +292,15 @@ export function placeAnchored(
   // may have written so the panel's own width is honored again.
   panel.style.right = "";
 
-  // Apply matchAnchorWidth first so the measured panel size reflects it.
+  // Apply matchAnchorWidth first so the measured panel size reflects it — and
+  // CLEAR the inline min-width when the option is off, so disabling it via
+  // setOptions({ matchAnchorWidth: undefined }) doesn't leave the previous
+  // placement's min-width stuck on the panel.
   if (matchWidth !== false) {
     const min = matchWidth === true ? rect.width : Math.max(rect.width, matchWidth);
     panel.style.minWidth = `${min}px`;
+  } else {
+    panel.style.minWidth = "";
   }
 
   const panelW = panel.offsetWidth;
@@ -313,19 +325,28 @@ export function placeAnchored(
   panel.style.top = `${finalTop}px`;
 }
 
-/** The popup-lifecycle option keys forwarded from a PopoverOptions object /
- *  patch to the underlying popup controller. Placement keys stay local. */
-const POPUP_OPTION_KEYS = [
-  "closeOnOutside",
-  "closeOnEscape",
-  "isolateEscape",
-  "group",
-  "initialFocus",
-  "returnFocus",
-  "haspopup",
-  "onOpen",
-  "onClose",
-] as const;
+/** The popup-lifecycle options forwarded from a PopoverOptions object / patch
+ *  to the underlying popup controller. Placement keys stay local. A `Record`
+ *  over `keyof` so the compiler enforces exhaustiveness BOTH ways: adding an
+ *  option to PopupOptions (other than `trigger`, which popover owns) without
+ *  listing it here — or listing a key popup no longer has — is a type error,
+ *  so a new popup option can never silently fail to forward. */
+const FORWARDED_POPUP_OPTIONS: Record<keyof Omit<PopupOptions, "trigger">, true> = {
+  closeOnOutside: true,
+  closeOnEscape: true,
+  isolateEscape: true,
+  group: true,
+  initialFocus: true,
+  returnFocus: true,
+  haspopup: true,
+  onOpen: true,
+  onClose: true,
+};
+
+const POPUP_OPTION_KEYS = Object.keys(FORWARDED_POPUP_OPTIONS) as readonly (keyof Omit<
+  PopupOptions,
+  "trigger"
+>)[];
 
 /** Pick the popup-relevant keys PRESENT in `patch` (preserving merge-patch
  *  semantics: an absent key is not forwarded, an explicit undefined is). */
@@ -432,29 +453,33 @@ export function createPopover(
   // The cast is sound: `current` is a spread of an exact-optional options
   // object, so the subset never carries an explicitly-undefined value here
   // (only setOptions patches can, and those go to popup.setOptions instead).
-  const popup = createPopup(panel, { ...popupSubset(current), trigger: anchorEl } as PopupOptions, {
-    stateClass: "uip-popover",
-    onReveal: (): void => {
-      if (isStretched()) {
-        // Skin hook for the full-bleed variant (positioning is inline via
-        // placeAnchored; this only lets the app square edges / drop borders).
-        panel.classList.add("is-stretched");
-      }
-      place();
+  const popup = createPopupCore(
+    panel,
+    { ...popupSubset(current), trigger: anchorEl } as PopupOptions,
+    {
+      stateClass: "uip-popover",
+      onReveal: (): void => {
+        if (isStretched()) {
+          // Skin hook for the full-bleed variant (positioning is inline via
+          // placeAnchored; this only lets the app square edges / drop borders).
+          panel.classList.add("is-stretched");
+        }
+        place();
+      },
+      // A show() while open just repositions (idempotent).
+      onShowWhileOpen: place,
+      onListeners: (armed: boolean): void => {
+        if (armed) {
+          addTracking();
+        } else {
+          removeTracking();
+        }
+      },
+      onLeaveEnd: (): void => {
+        panel.classList.remove("is-stretched");
+      },
     },
-    // A show() while open just repositions (idempotent).
-    onShowWhileOpen: place,
-    onListeners: (armed: boolean): void => {
-      if (armed) {
-        addTracking();
-      } else {
-        removeTracking();
-      }
-    },
-    onLeaveEnd: (): void => {
-      panel.classList.remove("is-stretched");
-    },
-  });
+  );
 
   return {
     show(): void {

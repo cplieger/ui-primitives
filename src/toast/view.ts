@@ -12,6 +12,7 @@
 import { el } from "@cplieger/reactive";
 
 import { announce } from "../announce.js";
+import { topmostOpenDialog } from "../modal-host.js";
 import { afterTransition } from "../transition.js";
 import type { ToastCallbacks, ToastRenderData, ToastView } from "./engine.js";
 
@@ -42,22 +43,68 @@ export interface ToastHandle {
  * stylesheet positions the stack `fixed` relative to the viewport; a host with
  * a `transform`/`filter`/`contain` creates a new containing block, which scopes
  * the stack to the host — usually exactly what an embedded widget wants.
+ *
+ * Modal `<dialog>`s: `showModal()` inerts everything outside the dialog
+ * subtree, so a body-mounted stack under an open modal would paint behind it
+ * AND be dead to clicks/hover/AT. Without an explicit `host`, the stack
+ * therefore auto-hosts into the topmost open modal dialog (re-evaluated on
+ * every toast shown, and when that dialog closes), so toasts stay visible and
+ * interactive over the modal, then return to `document.body`. An explicit
+ * `host` pins the stack — an embedded widget's chrome must never escape its
+ * root, so it is exempt from auto-hosting.
  */
 export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
   let container: HTMLElement | null = null;
+  // The open modal <dialog> currently hosting the stack (auto-hosting only;
+  // null when the stack sits on `host` / document.body). Its `close` event
+  // re-runs syncHost so a sticky toast is evacuated before the closed dialog
+  // hides it.
+  let adoptedDialog: HTMLDialogElement | null = null;
+
+  const onAdoptedClose = (): void => {
+    syncHost();
+  };
+
+  const releaseAdopted = (): void => {
+    if (adoptedDialog !== null) {
+      adoptedDialog.removeEventListener("close", onAdoptedClose);
+      adoptedDialog = null;
+    }
+  };
+
+  /** Move the stack to where it must live RIGHT NOW: the explicit `host` when
+   *  configured, else the topmost open modal dialog, else `document.body`.
+   *  `appendChild` MOVES the stack, so live toasts (with their timers,
+   *  listeners, and progress state) ride along untouched. */
+  const syncHost = (): void => {
+    if (container === null) {
+      return;
+    }
+    const desired: HTMLElement = host ?? topmostOpenDialog() ?? document.body;
+    if (container.parentElement !== desired) {
+      desired.appendChild(container);
+    }
+    const dialog = host === undefined && desired instanceof HTMLDialogElement ? desired : null;
+    if (dialog !== adoptedDialog) {
+      releaseAdopted();
+      if (dialog !== null) {
+        adoptedDialog = dialog;
+        dialog.addEventListener("close", onAdoptedClose);
+      }
+    }
+  };
 
   const ensureContainer = (): HTMLElement => {
-    if (container !== null) {
-      return container;
-    }
-    // Visual-only container: deliberately NOT a live region. Announcement goes
-    // through announce() (see `mount`), so an error node's live region can
-    // never nest inside a polite stack, and nothing is appended to the DOM
-    // until a toast is actually shown.
-    const stack = el("div", { className: "uip-toast-stack" });
-    (host ?? document.body).appendChild(stack);
-    container = stack;
-    return stack;
+    // Visual-only container: deliberately NOT a live region. Announcement
+    // goes through announce() (see `mount`), so an error node's live region
+    // can never nest inside a polite stack, and nothing is appended to the
+    // DOM until a toast is actually shown.
+    container ??= el("div", { className: "uip-toast-stack" });
+    // Re-resolve the host on every mount: a modal may have opened or closed
+    // since the last toast (and covers hosts that vanished, e.g. a disposed
+    // dialog that was removed while the stack sat inside it).
+    syncHost();
+    return container;
   };
 
   return {
@@ -213,6 +260,7 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
     },
 
     dispose(): void {
+      releaseAdopted();
       if (container !== null) {
         container.remove();
         container = null;

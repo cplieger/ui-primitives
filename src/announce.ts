@@ -8,6 +8,8 @@
 
 import { el } from "@cplieger/reactive";
 
+import { topmostOpenDialog } from "./modal-host.js";
+
 type Politeness = "polite" | "assertive";
 
 /** Gap (ms) between clearing the region and setting the new text. Long enough
@@ -23,19 +25,27 @@ interface Region {
 const regions = new Map<Politeness, Region>();
 
 function ensureRegion(politeness: Politeness): Region {
-  const existing = regions.get(politeness);
-  if (existing !== undefined) {
-    return existing;
+  let region = regions.get(politeness);
+  if (region === undefined) {
+    const node = el("div", {
+      className: "uip-visually-hidden",
+      role: politeness === "assertive" ? "alert" : "status",
+      "aria-live": politeness,
+      "aria-atomic": "true",
+    });
+    region = { el: node, timer: null };
+    regions.set(politeness, region);
   }
-  const node = el("div", {
-    className: "uip-visually-hidden",
-    role: politeness === "assertive" ? "alert" : "status",
-    "aria-live": politeness,
-    "aria-atomic": "true",
-  });
-  document.body.appendChild(node);
-  const region: Region = { el: node, timer: null };
-  regions.set(politeness, region);
+  // Host the region where assistive technology can hear it. `showModal()`
+  // inerts everything outside the dialog subtree — inert content is hidden
+  // from AT, so a body-hosted region is silent while a modal is open. Re-home
+  // the region into the topmost open modal (or back to body) at announce
+  // time; the ANNOUNCE_DELAY_MS clear→set gap below also gives AT time to
+  // register a re-homed region before the text lands.
+  const host: HTMLElement = topmostOpenDialog() ?? document.body;
+  if (region.el.parentElement !== host) {
+    host.appendChild(region.el);
+  }
   return region;
 }
 

@@ -74,3 +74,29 @@ describe("announce", () => {
     expect(regions()[0]!.textContent).toBe("second");
   });
 });
+
+describe("announce: modal <dialog> re-homing", () => {
+  it("homes the region into an open modal (inert-safe) and back after it closes", () => {
+    const dlg = document.createElement("dialog");
+    document.body.appendChild(dlg);
+    dlg.showModal();
+
+    // showModal() inerts everything outside the dialog subtree, and inert
+    // content is silent to AT — the region must live INSIDE the dialog.
+    announce("saved inside modal");
+    const region = regions()[0]!;
+    expect(region.parentElement).toBe(dlg);
+    vi.advanceTimersByTime(100);
+    expect(region.textContent).toBe("saved inside modal");
+
+    dlg.close();
+    dlg.remove();
+
+    // Next announce re-resolves the host: back on document.body (and the
+    // region survives its host's removal — it re-attaches).
+    announce("back outside");
+    expect(region.parentElement).toBe(document.body);
+    vi.advanceTimersByTime(100);
+    expect(region.textContent).toBe("back outside");
+  });
+});
