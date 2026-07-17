@@ -60,6 +60,11 @@ export interface ToastEngineOptions<H> {
   maxVisible?: number;
   maxQueue?: number;
   defaultDuration?: number;
+  /** `"stack"` (default): up to `maxVisible` toasts show at once, the rest
+   *  queue. `"replace"`: single-slot latest-wins — a new toast instantly
+   *  replaces the visible one (no leave animation, no queue), the embeddable-
+   *  widget semantics where a stale "Copied" queue would be wrong. */
+  mode?: "stack" | "replace";
 }
 
 interface ActiveToast<H> {
@@ -86,13 +91,16 @@ export class ToastEngine<H> {
   private readonly maxVisible: number;
   private readonly maxQueue: number;
   private readonly defaultDuration: number;
+  private readonly replace: boolean;
   private readonly visible: ActiveToast<H>[] = [];
   private readonly queue: QueuedToast[] = [];
   private idSeq = 0;
 
   constructor(opts: ToastEngineOptions<H>) {
     this.view = opts.view;
-    this.maxVisible = Math.max(1, opts.maxVisible ?? DEFAULT_MAX_VISIBLE);
+    this.replace = opts.mode === "replace";
+    // Replace mode is single-slot by definition; maxVisible is ignored there.
+    this.maxVisible = this.replace ? 1 : Math.max(1, opts.maxVisible ?? DEFAULT_MAX_VISIBLE);
     this.maxQueue = Math.max(0, opts.maxQueue ?? DEFAULT_MAX_QUEUE);
     this.defaultDuration = opts.defaultDuration ?? DEFAULT_DURATION_MS;
   }
@@ -111,6 +119,20 @@ export class ToastEngine<H> {
     const duration = opts?.duration ?? defaultDurationFor(level, this.defaultDuration);
     const retry = opts?.retry;
     const id = ++this.idSeq;
+
+    // Latest-wins: instantly remove whatever is showing (no leave animation —
+    // the new message must not visually coexist with or wait for the old one).
+    if (this.replace && this.visible.length > 0) {
+      for (const t of [...this.visible]) {
+        if (t.timer !== null) {
+          clearTimeout(t.timer);
+          t.timer = null;
+        }
+        t.dismissed = true;
+        this.view.remove(t.handle);
+      }
+      this.visible.length = 0;
+    }
 
     if (this.visible.length < this.maxVisible) {
       this.mountToast(id, message, level, duration, retry);

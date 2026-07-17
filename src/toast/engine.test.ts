@@ -229,3 +229,54 @@ describe("ToastEngine", () => {
     );
   });
 });
+
+describe("ToastEngine: mode replace (single-slot latest-wins)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("a new toast instantly removes the visible one — remove, not a leave; nothing queues", () => {
+    const { view, mounts } = makeFakeView();
+    const engine = new ToastEngine<FakeToast>({ view, mode: "replace", defaultDuration: 0 });
+
+    engine.show("first");
+    engine.show("second");
+    expect(engine.visibleCount).toBe(1);
+    expect(engine.queuedCount).toBe(0);
+    expect(mounts).toHaveLength(2);
+    expect(mounts[0]?.removed).toBe(true);
+    expect(mounts[0]?.left).toBe(false);
+    expect(mounts[1]?.removed).toBe(false);
+  });
+
+  it("ignores maxVisible (single slot) and cancels the replaced toast's timer", () => {
+    vi.useFakeTimers();
+    const { view, mounts } = makeFakeView();
+    const engine = new ToastEngine<FakeToast>({
+      view,
+      mode: "replace",
+      maxVisible: 5,
+      defaultDuration: 1000,
+    });
+
+    engine.show("a");
+    engine.show("b");
+    expect(engine.visibleCount).toBe(1);
+
+    // Only b's timer may fire; a's was cancelled with its removal.
+    vi.advanceTimersByTime(1000);
+    expect(mounts[0]?.left).toBe(false);
+    expect(mounts[1]?.left).toBe(true);
+  });
+
+  it("a replaced toast's dismiss fn is a safe no-op", () => {
+    const { view, mounts } = makeFakeView();
+    const engine = new ToastEngine<FakeToast>({ view, mode: "replace", defaultDuration: 0 });
+    const dismissFirst = engine.show("first");
+    engine.show("second");
+    dismissFirst(); // must not throw or touch the new toast
+    expect(engine.visibleCount).toBe(1);
+    expect(mounts[1]?.left).toBe(false);
+    expect(mounts[1]?.removed).toBe(false);
+  });
+});

@@ -1475,3 +1475,62 @@ describe("createPopover — leave animation lifecycle", () => {
     expect(panel.isConnected).toBe(true); // the caller owns it; never removed
   });
 });
+
+describe("createPopover: setOptions (responsive placement)", () => {
+  it("flips a live open popover between content-sized and full-bleed stretch", () => {
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+    const anchor = document.createElement("button");
+    stubRect(anchor, 100, 50, 200, 40);
+    const panel = document.createElement("div");
+    stubSize(panel, 300, 200);
+    document.body.append(anchor, panel);
+
+    const pop = createPopover(anchor, panel, { placement: "bottom", offset: 6, margin: 8 });
+    pop.show();
+    expect(panel.classList.contains("is-stretched")).toBe(false);
+    expect(leftOf(panel)).toBe(100);
+    expect(topOf(panel)).toBe(96); // anchor bottom 90 + offset 6
+
+    // Breakpoint flip: full-bleed, flush to the edges, larger offset.
+    pop.setOptions({ stretch: "viewport", margin: 0, offset: 10 });
+    expect(panel.classList.contains("is-stretched")).toBe(true);
+    expect(panel.style.left).toBe("0px");
+    expect(panel.style.right).toBe("0px");
+    expect(topOf(panel)).toBe(100); // anchor bottom 90 + offset 10
+
+    // And back: explicit undefined clears stretch; the inline-end pin is
+    // cleared so the panel is content-sized again.
+    pop.setOptions({ stretch: undefined, margin: 8, offset: 6 });
+    expect(panel.classList.contains("is-stretched")).toBe(false);
+    expect(panel.style.right).toBe("");
+    expect(leftOf(panel)).toBe(100);
+    expect(topOf(panel)).toBe(96);
+
+    pop.dispose();
+  });
+
+  it("re-arms dismissal listeners under patched flags while open", () => {
+    const anchor = document.createElement("button");
+    stubRect(anchor, 10, 10, 50, 20);
+    const panel = document.createElement("div");
+    stubSize(panel, 100, 100);
+    document.body.append(anchor, panel);
+
+    const pop = createPopover(anchor, panel);
+    pop.show();
+    vi.advanceTimersByTime(0);
+
+    pop.setOptions({ closeOnOutside: false });
+    vi.advanceTimersByTime(0);
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(pop.isOpen).toBe(true);
+
+    pop.setOptions({ closeOnOutside: true });
+    vi.advanceTimersByTime(0);
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(pop.isOpen).toBe(false);
+
+    pop.dispose();
+  });
+});

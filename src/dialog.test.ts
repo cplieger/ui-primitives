@@ -120,3 +120,64 @@ describe("createDialog", () => {
     expect(d.classList.contains("is-leaving")).toBe(false);
   });
 });
+
+describe("createDialog: canDismiss guard", () => {
+  function backdropPress(d: HTMLDialogElement): void {
+    d.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    d.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  }
+
+  it("refuses backdrop and Escape dismissal while the guard returns false, and stays armed", () => {
+    const d = makeDialog();
+    let allowed = false;
+    const canDismiss = vi.fn(() => allowed);
+    const ctl = createDialog(d, { canDismiss });
+    ctl.open();
+
+    backdropPress(d);
+    expect(d.open).toBe(true);
+
+    const cancel = new Event("cancel", { cancelable: true });
+    d.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(d.open).toBe(true);
+    expect(canDismiss).toHaveBeenCalledTimes(2);
+
+    // The refusal must not disarm the wiring: a later attempt re-consults the
+    // guard and succeeds once it allows.
+    allowed = true;
+    backdropPress(d);
+    vi.advanceTimersByTime(400);
+    expect(d.open).toBe(false);
+    expect(canDismiss).toHaveBeenCalledTimes(3);
+  });
+
+  it("programmatic close() ignores the guard", () => {
+    const d = makeDialog();
+    const canDismiss = vi.fn(() => false);
+    const ctl = createDialog(d, { canDismiss });
+    ctl.open();
+    ctl.close();
+    vi.advanceTimersByTime(400);
+    expect(d.open).toBe(false);
+    expect(canDismiss).not.toHaveBeenCalled();
+  });
+});
+
+describe("openDialog: reopen during the leave fade", () => {
+  it("cancels the pending close so the stale finalizer can't yank the dialog shut", () => {
+    const d = makeDialog();
+    openDialog(d);
+    closeDialog(d);
+    expect(d.classList.contains("is-leaving")).toBe(true);
+
+    // Reopen mid-fade (a reused dialog: search/sync popups, prompt, confirm).
+    openDialog(d);
+    expect(d.classList.contains("is-leaving")).toBe(false);
+    expect(d.open).toBe(true);
+
+    // The stale finalizer fires (fallback window) and must be a no-op.
+    vi.advanceTimersByTime(400);
+    expect(d.open).toBe(true);
+  });
+});

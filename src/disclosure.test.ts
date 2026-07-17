@@ -86,13 +86,13 @@ describe("open / close / toggle", () => {
     expect(d.isOpen).toBe(true);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(region.getAttribute("aria-hidden")).toBe("false");
-    expect(onToggle).toHaveBeenLastCalledWith(true);
+    expect(onToggle).toHaveBeenLastCalledWith(true, "api");
 
     d.toggle();
     expect(d.isOpen).toBe(false);
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     expect(region.getAttribute("aria-hidden")).toBe("true");
-    expect(onToggle).toHaveBeenLastCalledWith(false);
+    expect(onToggle).toHaveBeenLastCalledWith(false, "api");
   });
 
   it("open()/close() are idempotent — no onToggle when the state is unchanged", () => {
@@ -242,5 +242,41 @@ describe("dispose", () => {
     d.close(); // collapsing
     d.dispose();
     expect(region.style.height).toBe("0px");
+  });
+});
+
+describe("createDisclosure: region-only mode (trigger: null)", () => {
+  it("drives the region via the controller with no trigger wiring", () => {
+    const region = document.createElement("div");
+    document.body.appendChild(region);
+    const d = createDisclosure(null, region, { animate: false });
+
+    expect(region.getAttribute("aria-hidden")).toBe("true");
+    expect(region.inert).toBe(true);
+    d.open();
+    expect(d.isOpen).toBe(true);
+    expect(region.getAttribute("aria-hidden")).toBe("false");
+    expect(region.inert).toBe(false);
+    d.close();
+    expect(region.getAttribute("aria-hidden")).toBe("true");
+    d.dispose();
+  });
+});
+
+describe("createDisclosure: onToggle source", () => {
+  it("reports 'user' for trigger toggles and 'api' for controller toggles", () => {
+    const trigger = document.createElement("button");
+    const region = document.createElement("div");
+    document.body.append(trigger, region);
+    const onToggle = vi.fn();
+    const d = createDisclosure(trigger, region, { animate: false, onToggle });
+
+    trigger.click();
+    expect(onToggle).toHaveBeenLastCalledWith(true, "user");
+    d.close();
+    expect(onToggle).toHaveBeenLastCalledWith(false, "api");
+    d.toggle();
+    expect(onToggle).toHaveBeenLastCalledWith(true, "api");
+    d.dispose();
   });
 });

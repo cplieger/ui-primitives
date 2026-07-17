@@ -19,9 +19,9 @@ directly) and the primitive looks like your app.
 Built on [`@cplieger/reactive`](https://github.com/cplieger/reactive) (uses its
 `el` DOM factory). ESM-only, published as TypeScript source to npm and JSR.
 
-Primitives: **toast**, **tooltip**, **popover**, **dialog**, **modal**,
-**confirm**, **disclosure**, **focus-trap**, **theme**, **view-transition**,
-**announce**.
+Primitives: **toast**, **tooltip**, **popover**, **popup**, **dialog**,
+**modal**, **confirm**, **prompt**, **disclosure**, **focus-trap**,
+**roving-focus**, **theme**, **view-transition**, **announce**, **skeleton**.
 
 ## Install
 
@@ -123,9 +123,25 @@ toaster.show("Custom", { level: "info", duration: 2000 });
 - `toast: Toaster` — default shared toaster. `info` / `success` / `error` are the same methods as free functions.
 - `Toaster.show(message, opts?)` → returns a `() => void` dismiss function.
 - `Toaster.info(msg)` / `success(msg)` / `error(msg, retry?)` / `clear()` / `dispose()`.
-- `createToaster({ maxVisible?, maxQueue?, defaultDuration? })` — isolated instance. Call `dispose()` when the owning component unmounts to remove its document Escape listener and stack container. (The shared `toast` singleton lives for the app's lifetime and is never disposed.)
+- `createToaster(opts?: ToasterOptions)` — isolated instance. Call `dispose()` when the owning component unmounts to remove its document Escape listener and stack container. (The shared `toast` singleton lives for the app's lifetime and is never disposed.)
+- `ToasterOptions` = `{ maxVisible?; maxQueue?; defaultDuration?; container?: HTMLElement; mode?: "stack" | "replace" }`.
 - `ToastOptions` = `{ level?: "info" | "success" | "error"; duration?: number; retry?: ToastRetry }` (`duration: 0` = sticky).
 - `ToastRetry` = `{ label?: string; onClick: () => void | Promise<void> }` (async rejections + sync throws are caught and logged).
+
+**Embedding (`container`) and latest-wins (`mode: "replace"`).** By default the
+stack mounts on `document.body` and stacks up to `maxVisible` toasts. An
+embeddable widget can confine the stack to its own root with `container` (its
+stacking then composes with the host page — a host `transform`/`contain`
+becomes the fixed-position containing block, scoping the stack to the widget),
+and switch to `mode: "replace"` for single-slot latest-wins semantics: a new
+toast instantly replaces the visible one, nothing queues — the right shape for
+transient widget feedback ("Copied", "Swipe to switch") where a queue of stale
+messages would be wrong.
+
+```ts
+const widgetToast = createToaster({ container: widgetRoot, mode: "replace" });
+widgetToast.info("Copied");
+```
 
 Behavior: up to `maxVisible` (default 3) show at once; the rest queue (cap
 `maxQueue`, default 20, dropping the oldest). `info`/`success` auto-dismiss after
@@ -184,6 +200,42 @@ Tab / Shift+Tab cycle within the container (wrapping at the edges). On entry,
 `initialFocus` (or the first visible focusable element) is focused. `release()`
 restores focus to the element focused before the trap, to an explicit
 `returnFocus` element, or leaves focus alone when `returnFocus` is `false`.
+
+### roving-focus — `@cplieger/ui-primitives/roving-focus`
+
+WAI-ARIA roving-tabindex keyboard navigation for composite widgets: menus,
+listboxes, pickers, toolbars — any container whose items should be **one** Tab
+stop navigated with the arrow keys.
+
+```ts
+import { rovingFocus } from "@cplieger/ui-primitives/roving-focus";
+
+const nav = rovingFocus(menuEl, "[role=menuitem]");
+nav.focusFirst(); // e.g. when the menu opens
+nav.refresh(); // after a bulk re-render
+nav.dispose();
+```
+
+- `rovingFocus(container, selector, opts?)` → `{ focusFirst(); refresh(); dispose() }`.
+- `RovingFocusOptions` = `{ orientation?: "vertical" | "horizontal"; wrap?; homeEnd?; activate? }` (defaults: vertical, wrap, Home/End on, Enter/Space activate).
+
+Headless: it manages only `tabindex` and focus. The matching items are queried
+**live** on every keystroke, so rows added or removed after wiring (a filtered
+list, a reconciled menu) navigate correctly; call `refresh()` after a bulk
+re-render to restore the single-Tab-stop invariant on brand-new items. Focus
+moving into any item (pointer or keyboard) rolls the Tab stop onto it.
+
+This is the keyboard half of the WAI-ARIA **menu** pattern — pair it with
+popover so a `role="menu"` panel keeps its interaction promise:
+
+```ts
+const pop = createPopover(button, panel, { haspopup: "menu" });
+const nav = rovingFocus(panel, "[role=menuitem]");
+button.addEventListener("click", () => {
+  pop.toggle();
+  if (pop.isOpen) nav.focusFirst();
+});
+```
 
 ### theme — `@cplieger/ui-primitives/theme`
 
@@ -281,6 +333,38 @@ and focuses **Cancel** (so a keyboard user can't confirm by accident) and adds
 `is-destructive` to the confirm button for skinning. Escape, a backdrop click,
 or a newer `confirm()` call all resolve `false`.
 
+### prompt — `@cplieger/ui-primitives/prompt`
+
+Confirm's input-collecting sibling: a Promise-based single-input dialog, the
+styled, non-blocking replacement for `window.prompt`.
+
+```ts
+import { prompt } from "@cplieger/ui-primitives/prompt";
+
+const name = await prompt("Rename passkey:", { initialValue: current, maxLength: 64 });
+if (name !== null) rename(name);
+
+const pw = await prompt("Enter your password to continue:", {
+  title: "Verify",
+  type: "password",
+  autocomplete: "current-password",
+});
+```
+
+- `prompt(message, opts?)` → `Promise<string | null>`.
+- `PromptOptions` = `{ title?; confirmLabel?; cancelLabel?; type?: "text" | "password"; initialValue?; placeholder?; maxLength?; autocomplete? }`.
+
+Renders a lazily-created, reused native `<dialog class="uip-prompt">` sharing
+confirm's dialog-family motion. The message is the input's real `<label>`
+(native form semantics); the dialog is labelled by the title and described by
+the message, or labelled by the message when there is no title. **OK** or
+**Enter** (the input sits in a form; OK is its submit button) resolve the
+input's value **as-is** — an empty submission resolves `""`, distinct from the
+`null` of a cancellation (trim/empty-to-null mapping is the caller's policy).
+Cancel, Escape, a backdrop click, or a newer `prompt()` call resolve `null`.
+The input is focused on open with any `initialValue` selected, like
+`window.prompt`.
+
 ### dialog — `@cplieger/ui-primitives/dialog`
 
 Behavior helpers for native `<dialog>` elements — the platform gives focus
@@ -300,13 +384,30 @@ closeDialog(myDialog, () => console.log("closed"));
 ```
 
 - `createDialog(dialog, opts?)` → `{ open(); close(); readonly el; dispose() }`. Adds the `uip-dialog` class for the base skin.
-- `DialogOptions` = `{ closeOnBackdrop?; closeOnEscape?; onClose? }`.
+- `DialogOptions` = `{ closeOnBackdrop?; closeOnEscape?; canDismiss?: () => boolean; onClose? }`.
 - `openDialog(dialog)` — `showModal()` with a graceful fallback.
 - `closeDialog(dialog, onClosed?)` — fade out via `is-leaving`, then close.
 
 The backdrop-click guard only closes when a press **starts and ends** on the
 dialog element itself, so a drag-select that escapes the dialog does not dismiss
 it.
+
+**Conditional dismissal (`canDismiss`).** The guard is consulted on every USER
+dismissal attempt — backdrop click or Escape — and returning `false` refuses it
+while keeping the wiring armed, so later attempts re-consult it. Programmatic
+`close()` always closes. Put any "why not" feedback inside the guard:
+
+```ts
+const settings = createDialog(dlg, {
+  canDismiss: () => {
+    if (isUnconfigured()) {
+      toast.error("Save a valid configuration first");
+      return false;
+    }
+    return true;
+  },
+});
+```
 
 ### modal — `@cplieger/ui-primitives/modal`
 
@@ -332,7 +433,7 @@ modal.dispose(); // close + remove the <dialog> from the DOM
 ```
 
 - `createModal(content, opts?)` → `{ open(); close(); readonly el; readonly isOpen; dispose() }`. Wraps `content` (which gets the `.uip-modal-dialog` skin hook) in a native `<dialog class="uip-modal">` appended to `<body>`; `el` is that `HTMLDialogElement`. `dispose()` closes and removes it.
-- `ModalOptions` = `{ closeOnBackdrop?; closeOnEscape?; role?: "dialog" | "alertdialog"; labelledBy?; describedBy?; initialFocus?; scrollLock?; onClose? }`.
+- `ModalOptions` = `{ closeOnBackdrop?; closeOnEscape?; canDismiss?: () => boolean; role?: "dialog" | "alertdialog"; labelledBy?; describedBy?; initialFocus?; scrollLock?; onClose? }`. `canDismiss` guards USER dismissals (backdrop, Escape) exactly like dialog's — see the dialog section.
 
 What `modal` adds on top of the platform `<dialog>`:
 
@@ -390,13 +491,28 @@ d.isOpen; // boolean
 <div id="more-panel">…collapsible content…</div>
 ```
 
-- `createDisclosure(trigger, region, opts?)` → `{ open(); close(); toggle(); readonly isOpen; dispose() }`.
-- `DisclosureOptions` = `{ open?; animate?; onToggle?: (open: boolean) => void }` (defaults: closed, animated).
+- `createDisclosure(trigger, region, opts?)` → `{ open(); close(); toggle(); readonly isOpen; dispose() }`. `trigger` is an `HTMLElement` **or `null`** (region-only mode, below).
+- `DisclosureOptions` = `{ open?; animate?; onToggle?: (open: boolean, source: "user" | "api") => void }` (defaults: closed, animated). `source` distinguishes a trigger toggle (`"user"`) from a controller call (`"api"`) — the seam an auto-collapse state machine needs to latch "the user took over".
 
 The trigger gets button semantics — `aria-expanded` reflecting the state, and
 `role="button"` + `tabindex="0"` + Enter/Space handling when it isn't already a
 native `<button>` — and is linked to the region via `aria-controls`. The region
 gets a generated `id` (if it has none), and is marked `aria-hidden` **and** `inert` when collapsed (so collapsed content leaves the tab order and the accessibility tree entirely; `height:0`/`overflow:hidden` alone would keep descendants keyboard-focusable).
+
+**Region-only mode (`trigger: null`).** No trigger is wired — no
+`aria-expanded`, no click/keyboard handling — and the open state is driven
+entirely through the controller. Use it when the visible control is something a
+disclosure trigger would mis-describe: a checkbox enable-toggle whose `checked`
+already conveys the state, or an app state machine that owns its own header UI.
+The region still gets the height animation and `aria-hidden` + `inert`:
+
+```ts
+const body = createDisclosure(null, sectionBody, { open: checkbox.checked });
+checkbox.addEventListener("change", () => {
+  if (checkbox.checked) body.open();
+  else body.close();
+});
+```
 
 Height animates `0 ↔ auto`. Modern engines interpolate the `auto` keyword
 directly via `interpolate-size: allow-keywords` (set on the region in the base
@@ -465,8 +581,10 @@ Two exports, split by responsibility:
   coordinate_ below).
 - `createPopover(anchor, panel, opts?)` → `PopoverController` — the **controller**
   that reveals + positions the caller's panel, tracks the anchor, and dismisses
-  on outside-click / Escape. `{ show(); hide(); toggle(); reposition(); readonly isOpen; readonly el; dispose() }`.
-  `anchor` is a `PopoverAnchor` (element or virtual).
+  on outside-click / Escape. `{ show(); hide(); toggle(); reposition(); readonly isOpen; readonly el; setOptions(patch); dispose() }`.
+  `anchor` is a `PopoverAnchor` (element or virtual). The controller is built on
+  the **popup** primitive (which owns the reveal/dismiss lifecycle), so it also
+  accepts popup's `group` and `isolateEscape` options.
 
 `PlacementOptions` (shared by both):
 
@@ -568,14 +686,24 @@ media-query duplicate of the positioning). The controller also adds an
 square the top corners, drop the side borders):
 
 ```ts
-// Re-evaluate on a viewport-width media query; stretch only when narrow.
+// Responsive: content-sized on desktop, full-bleed under 600px — flipped on
+// the LIVE controller via setOptions (no dispose-and-rebuild). An open panel
+// repositions immediately; is-stretched tracks the mode.
 const narrow = matchMedia("(width < 600px)");
-const pop = createPopover(headerButton, menuPanel, {
-  placement: "bottom",
-  stretch: narrow.matches ? "viewport" : undefined,
-  margin: 0, // flush to the viewport edges
+const stretchOpts = () =>
+  narrow.matches ? { stretch: "viewport" as const, margin: 0 } : { stretch: undefined, margin: 8 };
+const pop = createPopover(headerButton, menuPanel, { placement: "bottom", ...stretchOpts() });
+narrow.addEventListener("change", () => {
+  pop.setOptions(stretchOpts());
 });
 ```
+
+`setOptions(patch)` is a **merge-patch** over the live options: keys present in
+the patch override the current value — an explicit `undefined` clears the
+option back to its default (that is how `stretch` is turned off above) — and
+absent keys are unchanged. Placement patches re-place an open panel
+immediately; dismissal-flag patches re-arm the listeners; the anchor is
+constructor-bound and cannot be patched.
 
 ```css
 /* skin the full-bleed variant */
@@ -596,6 +724,65 @@ or CSS anchor positioning — for testability and consistency with tooltip.
 Adopting the native Popover API (top-layer, no z-index juggling) is a possible
 future enhancement.
 
+### popup — `@cplieger/ui-primitives/popup`
+
+The reveal + light-dismiss lifecycle **without placement** — the behavior half
+of popover, exposed on its own. Reach for it when the panel is in-flow or
+self-positioned (an expandable pill/card, an inline tray, a bottom sheet) and
+you want the standardized dismiss behavior: outside-click, isolated Escape,
+single-open groups, trigger ARIA, opt-in focus, and the enter/leave state-class
+lifecycle.
+
+```ts
+import { createPopup, closePopupGroup } from "@cplieger/ui-primitives/popup";
+
+const popup = createPopup(cardEl, { trigger: pillEl, group: "pills" });
+pillEl.addEventListener("click", () => {
+  popup.toggle();
+});
+// Collapse every open pill when focus moves to the main input:
+input.addEventListener("focus", () => {
+  closePopupGroup("pills");
+});
+```
+
+- `createPopup(panel, opts?)` → `{ show(); hide(); toggle(); readonly isOpen; readonly el; setOptions(patch); dispose() }`.
+- `PopupOptions` = `{ trigger?: HTMLElement | null; closeOnOutside?; closeOnEscape?; isolateEscape?; group?; initialFocus?; returnFocus?; haspopup?; onOpen?; onClose? }`.
+- `closePopupGroup(group)` — close every open popup in a group.
+
+The `trigger` gets `aria-expanded` / `aria-haspopup` and is exempt from
+outside-click dismissal (so its own click handler can toggle); the controller
+does **not** wire activation on it — the caller owns that. `group` gives
+single-open coordination: opening one popup closes any open peer with the same
+group name. `isolateEscape` (default `true`) stops the consumed Escape's
+propagation, popover-style; disable it when an app-level Escape coordinator
+must still observe the key. `setOptions` is the same merge-patch as popover's.
+
+**Motion is entirely yours.** The library adds `uip-popup` + `is-open` on
+reveal (after a forced reflow, so a CSS _transition_ from the resting state
+plays — an _animation_ on `is-open` works too) and swaps `is-open` →
+`is-leaving` on conceal, setting `[hidden]` once the panel's first
+`transitionend` fires (or a 400ms fallback). The base stylesheet ships only the
+`[hidden]` display rule — no default motion, no custom properties:
+
+```css
+.my-card {
+  scale: 0.4;
+  opacity: 0;
+  transition:
+    scale 200ms ease,
+    opacity 200ms ease;
+}
+.my-card.is-open {
+  scale: 1;
+  opacity: 1;
+}
+```
+
+A disconnected panel is hosted on `show()` — into the trigger's nearest open
+`<dialog>` ancestor (top-layer correctness) or `<body>`; a caller-connected
+panel (the usual in-flow case) stays exactly where you put it.
+
 ### announce — `@cplieger/ui-primitives/announce`
 
 ```ts
@@ -609,6 +796,48 @@ Updates a shared visually-hidden ARIA live region so screen readers announce
 the message. `polite` (default) and `assertive` use separate regions. The text
 is cleared then re-set after a short (~100ms) delay so repeated identical
 messages still announce.
+
+### skeleton — `@cplieger/ui-primitives/skeleton`
+
+Anti-flicker timing for a "show a skeleton, then replace it with content" load.
+Pure timing, no DOM — you paint the skeleton and the content; it owns **when**.
+Two flickers are avoided: a fast load never paints the skeleton at all
+(show-delay), and a painted skeleton never instantly vanishes (opt-in
+min-visible).
+
+```ts
+import { skeletonTiming } from "@cplieger/ui-primitives/skeleton";
+
+// commit-style: the content render replaces the skeleton in place.
+const t = skeletonTiming(() => paint(out, skeletonRows()), {
+  minVisibleMs: 300,
+  signal, // suppresses a not-yet-painted skeleton if the load is aborted
+});
+const data = await load(signal);
+t.commit(() => paint(out, rows(data)));
+
+// teardown-style: the skeleton is its own element, removed on settle.
+const s = skeletonTiming(() => {
+  const node = makeSkeleton();
+  list.append(node);
+  return () => node.remove(); // the show callback may return a teardown
+});
+await load();
+s.cancel(); // clears a pending skeleton, or tears down a painted one
+```
+
+- `skeletonTiming(show, opts?)` → `{ commit(render); cancel() }`.
+- `SkeletonTimingOptions` = `{ showDelayMs? (150); minVisibleMs? (0); signal? }`.
+
+`commit(render)` paints the content: immediately when the skeleton never
+painted, else after min-visible has elapsed, running the `show` teardown (if
+any) right before the render. `cancel()` abandons the load: it clears a pending
+skeleton, tears down a painted one, and drops a commit render still deferred by
+min-visible. Both are idempotent; the first settle wins. The `signal` only
+suppresses a skeleton that has not painted yet — it never retracts one, and a
+`commit` render always runs (guard your own render closure for
+stale-sensitive results). Keep `minVisibleMs` at 0 when the skeleton shares its
+container with the real content and must clear the instant the load completes.
 
 ## CSS contract
 
@@ -661,28 +890,32 @@ duration in code, and style the bar's color/size via the properties above.
 
 ### Classes and state classes
 
-| Class                                                          | Element                                                         |
-| -------------------------------------------------------------- | --------------------------------------------------------------- |
-| `.uip-toast-stack`                                             | toast container (visual only, not a live region)                |
-| `.uip-toast`, `.uip-toast--info` / `--success` / `--error`     | a toast (level modifier)                                        |
-| `.uip-toast-msg`                                               | toast message text                                              |
-| `.uip-toast-retry`                                             | toast retry button                                              |
-| `.uip-toast-progress`                                          | toast countdown bar (`aria-hidden`)                             |
-| `.uip-tooltip`                                                 | a tooltip (`role="tooltip"`)                                    |
-| `.uip-confirm`                                                 | the confirm `<dialog>`                                          |
-| `.uip-confirm-title` / `-msg` / `-actions` / `-ok` / `-cancel` | confirm parts                                                   |
-| `.uip-dialog`                                                  | a `<dialog>` wrapped by `createDialog`                          |
-| `.uip-modal`, `.uip-modal--alert`                              | the modal `<dialog>` (top layer + `::backdrop`; alert modifier) |
-| `.uip-modal-dialog`                                            | modal content (skin hook inside the `<dialog>`)                 |
-| `.uip-disclosure-region`                                       | disclosure collapsible region (`aria-hidden` when closed)       |
-| `.uip-popover`                                                 | anchored floating panel (`position: fixed`, JS-positioned)      |
-| `.uip-visually-hidden`                                         | the announce live regions (sr-only)                             |
+| Class                                                                              | Element                                                                |
+| ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `.uip-toast-stack`                                                                 | toast container (visual only, not a live region)                       |
+| `.uip-toast`, `.uip-toast--info` / `--success` / `--error`                         | a toast (level modifier)                                               |
+| `.uip-toast-msg`                                                                   | toast message text                                                     |
+| `.uip-toast-retry`                                                                 | toast retry button                                                     |
+| `.uip-toast-progress`                                                              | toast countdown bar (`aria-hidden`)                                    |
+| `.uip-tooltip`                                                                     | a tooltip (`role="tooltip"`)                                           |
+| `.uip-confirm`                                                                     | the confirm `<dialog>`                                                 |
+| `.uip-confirm-title` / `-msg` / `-actions` / `-ok` / `-cancel`                     | confirm parts                                                          |
+| `.uip-prompt`                                                                      | the prompt `<dialog>` (shares the dialog-family motion)                |
+| `.uip-prompt-title` / `-msg` / `-form` / `-input` / `-actions` / `-ok` / `-cancel` | prompt parts (`-msg` is the input's `<label>`)                         |
+| `.uip-dialog`                                                                      | a `<dialog>` wrapped by `createDialog`                                 |
+| `.uip-modal`, `.uip-modal--alert`                                                  | the modal `<dialog>` (top layer + `::backdrop`; alert modifier)        |
+| `.uip-modal-dialog`                                                                | modal content (skin hook inside the `<dialog>`)                        |
+| `.uip-disclosure-region`                                                           | disclosure collapsible region (`aria-hidden` when closed)              |
+| `.uip-popover`                                                                     | anchored floating panel (`position: fixed`, JS-positioned)             |
+| `.uip-popup`                                                                       | panel wired by `createPopup` (no placement; only `[hidden]` is styled) |
+| `.uip-visually-hidden`                                                             | the announce live regions (sr-only)                                    |
 
 State classes toggled at runtime (style these for motion/emphasis):
 
 - `.uip-toast` lifecycle: `is-entering` → `is-shown` → `is-leaving`
-- `.uip-tooltip.is-leaving`, `.uip-confirm.is-leaving`, `.uip-dialog.is-leaving`, `.uip-modal.is-leaving` (fade-out; the modal also fades its `::backdrop`)
+- `.uip-tooltip.is-leaving`, `.uip-confirm.is-leaving`, `.uip-prompt.is-leaving`, `.uip-dialog.is-leaving`, `.uip-modal.is-leaving` (fade-out; the modal also fades its `::backdrop`)
 - `.uip-popover.is-open` (optional enter fade), `.uip-popover.is-leaving` (leave fade before `[hidden]`), `.uip-popover.is-stretched` (full-bleed skin hook — square edges / drop side borders on the full-width variant)
+- `.uip-popup.is-open` / `.uip-popup.is-leaving` (all motion is the app's; the base ships none for popup)
 - `.uip-confirm-ok.is-destructive` (destructive emphasis)
 
 A `@media (prefers-reduced-motion: reduce)` block neutralizes the animations to
@@ -697,11 +930,15 @@ lifecycles complete).
 | `@cplieger/ui-primitives/toast`           | `toast`, `createToaster`, `info`, `success`, `error`, types                                           |
 | `@cplieger/ui-primitives/tooltip`         | `initTooltips`                                                                                        |
 | `@cplieger/ui-primitives/popover`         | `createPopover`, `placeAnchored`, `pointAnchor`, types                                                |
+| `@cplieger/ui-primitives/popup`           | `createPopup`, `closePopupGroup`, types                                                               |
 | `@cplieger/ui-primitives/dialog`          | `createDialog`, `openDialog`, `closeDialog`                                                           |
 | `@cplieger/ui-primitives/modal`           | `createModal`                                                                                         |
 | `@cplieger/ui-primitives/confirm`         | `confirm`                                                                                             |
+| `@cplieger/ui-primitives/prompt`          | `prompt`                                                                                              |
 | `@cplieger/ui-primitives/disclosure`      | `createDisclosure`                                                                                    |
 | `@cplieger/ui-primitives/focus-trap`      | `trapFocus`                                                                                           |
+| `@cplieger/ui-primitives/roving-focus`    | `rovingFocus`                                                                                         |
+| `@cplieger/ui-primitives/skeleton`        | `skeletonTiming`                                                                                      |
 | `@cplieger/ui-primitives/theme`           | `createTheme`, `themeInitSnippet`, `themeInitSnippetFromJSON`                                         |
 | `@cplieger/ui-primitives/view-transition` | `viewTransition`                                                                                      |
 | `@cplieger/ui-primitives/announce`        | `announce`                                                                                            |

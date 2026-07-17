@@ -140,28 +140,34 @@
   opacity: 0;
 }
 
-/* ===== Dialog + Confirm ================================================== */
+/* ===== Dialog + Confirm + Prompt ========================================= */
 
+/* prompt is confirm's input-collecting sibling and shares the exact same
+ * dialog-family motion (the --uip-dialog-* properties). */
 .uip-confirm,
-.uip-dialog {
+.uip-dialog,
+.uip-prompt {
   opacity: 1;
   transition: opacity var(--uip-dialog-leave-duration, 150ms) var(--uip-dialog-leave-easing, ease);
 }
 
 .uip-confirm.is-leaving,
-.uip-dialog.is-leaving {
+.uip-dialog.is-leaving,
+.uip-prompt.is-leaving {
   opacity: 0;
 }
 
 .uip-confirm::backdrop,
-.uip-dialog::backdrop {
+.uip-dialog::backdrop,
+.uip-prompt::backdrop {
   background: var(--uip-backdrop, oklch(0% 0 0deg / 50%));
   opacity: 1;
   transition: opacity var(--uip-dialog-leave-duration, 150ms) var(--uip-dialog-leave-easing, ease);
 }
 
 .uip-confirm.is-leaving::backdrop,
-.uip-dialog.is-leaving::backdrop {
+.uip-dialog.is-leaving::backdrop,
+.uip-prompt.is-leaving::backdrop {
   opacity: 0;
 }
 
@@ -255,6 +261,17 @@
   }
 }
 
+/* ===== Popup (reveal + light-dismiss, no placement) ====================== */
+
+/* The popup primitive is fully headless about motion: the library only toggles
+ * the state classes (is-open on reveal, is-leaving before [hidden]) and owns
+ * the [hidden] display rule. The app supplies any enter/exit transition on its
+ * own classes or on .uip-popup.is-open / .is-leaving; the leave finalizes on
+ * the panel's first transitionend (or a 400ms fallback when there is none). */
+.uip-popup[hidden] {
+  display: none;
+}
+
 /* ===== Announce (screen-reader live regions) ============================= */
 
 /* Standard visually-hidden ("sr-only"): removed from the visual layout but
@@ -283,9 +300,11 @@
   .uip-tooltip,
   .uip-confirm,
   .uip-dialog,
+  .uip-prompt,
   .uip-modal,
   .uip-confirm::backdrop,
   .uip-dialog::backdrop,
+  .uip-prompt::backdrop,
   .uip-modal::backdrop,
   .uip-modal.is-leaving,
   .uip-modal.is-leaving::backdrop,
