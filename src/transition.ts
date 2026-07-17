@@ -6,6 +6,14 @@
 // a fallback timeout. This centralizes that guarded "whichever fires first,
 // exactly once" pattern that was copy-pasted across those modules.
 
+/** Read a layout property to flush pending style changes (force reflow) so the
+ *  next change starts a CSS transition rather than collapsing into one frame.
+ *  Shared by the primitives that reveal an element and animate it in the same
+ *  tick (disclosure's height tween, popup's enter transition). */
+export function forceReflow(el: HTMLElement): void {
+  el.getBoundingClientRect();
+}
+
 /**
  * Run `cb` exactly once, on the first `transitionend` whose `target` is `el`
  * (so a descendant's transition doesn't trigger it), or after `fallbackMs` if

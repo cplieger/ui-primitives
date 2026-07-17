@@ -30,17 +30,30 @@ interface ResettableToaster extends Toaster {
   reset(): void;
 }
 
-function build(opts?: {
+export interface ToasterOptions {
+  /** Maximum simultaneously-visible toasts (`"stack"` mode). Default `3`. */
   maxVisible?: number;
+  /** Overflow queue capacity (`"stack"` mode; oldest dropped). Default `20`. */
   maxQueue?: number;
+  /** Auto-dismiss window (ms) for non-error toasts. Default `4000`. */
   defaultDuration?: number;
-}): ResettableToaster {
-  const view = createToastView();
+  /** Mount the toast stack inside this element instead of `document.body` —
+   *  for an embeddable widget that must confine its chrome to its own root. */
+  container?: HTMLElement;
+  /** `"stack"` (default): up to `maxVisible` show, the rest queue.
+   *  `"replace"`: single-slot latest-wins — a new toast instantly replaces the
+   *  visible one; nothing queues. */
+  mode?: "stack" | "replace";
+}
+
+function build(opts?: ToasterOptions): ResettableToaster {
+  const view = createToastView(opts?.container);
   const engine = new ToastEngine<ToastHandle>({
     view,
     ...(opts?.maxVisible !== undefined ? { maxVisible: opts.maxVisible } : {}),
     ...(opts?.maxQueue !== undefined ? { maxQueue: opts.maxQueue } : {}),
     ...(opts?.defaultDuration !== undefined ? { defaultDuration: opts.defaultDuration } : {}),
+    ...(opts?.mode !== undefined ? { mode: opts.mode } : {}),
   });
 
   const onKeyDown = (e: KeyboardEvent): void => {
@@ -72,11 +85,7 @@ function build(opts?: {
 }
 
 /** Create an isolated toaster with its own stack container and queue. */
-export function createToaster(opts?: {
-  maxVisible?: number;
-  maxQueue?: number;
-  defaultDuration?: number;
-}): Toaster {
+export function createToaster(opts?: ToasterOptions): Toaster {
   return build(opts);
 }
 

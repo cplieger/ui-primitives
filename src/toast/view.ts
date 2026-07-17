@@ -35,8 +35,15 @@ export interface ToastHandle {
  * `mount`, so importing this module appends nothing to the DOM. Screen-reader
  * announcement is handled separately by `announce()` in `mount`, which keeps
  * the visual stack and the SR live region from ever nesting.
+ *
+ * The stack mounts on `document.body` by default; pass `host` to confine it to
+ * an app-owned element instead (an embeddable widget's root, a specific pane),
+ * so its stacking and positioning compose with the host page. The base
+ * stylesheet positions the stack `fixed` relative to the viewport; a host with
+ * a `transform`/`filter`/`contain` creates a new containing block, which scopes
+ * the stack to the host — usually exactly what an embedded widget wants.
  */
-export function createToastView(): ToastView<ToastHandle> {
+export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
   let container: HTMLElement | null = null;
 
   const ensureContainer = (): HTMLElement => {
@@ -48,7 +55,7 @@ export function createToastView(): ToastView<ToastHandle> {
     // never nest inside a polite stack, and nothing is appended to the DOM
     // until a toast is actually shown.
     const stack = el("div", { className: "uip-toast-stack" });
-    document.body.appendChild(stack);
+    (host ?? document.body).appendChild(stack);
     container = stack;
     return stack;
   };

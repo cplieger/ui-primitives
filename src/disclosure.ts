@@ -19,9 +19,16 @@ export interface DisclosureOptions {
   open?: boolean;
   /** Animate height changes. Default `true`. Ignored under reduced motion. */
   animate?: boolean;
-  /** Invoked whenever the open state changes via the controller or the trigger. */
-  onToggle?: (open: boolean) => void;
+  /** Invoked whenever the open state changes. `source` distinguishes a
+   *  user-initiated toggle (trigger click / Enter / Space) from a programmatic
+   *  one (`open()` / `close()` / `toggle()` on the controller) — the seam an
+   *  auto-collapse state machine needs to latch "the user took over". */
+  onToggle?: (open: boolean, source: DisclosureToggleSource) => void;
 }
+
+/** How a disclosure toggle was initiated: `"user"` = the wired trigger
+ *  (click / Enter / Space); `"api"` = a controller method. */
+export type DisclosureToggleSource = "user" | "api";
 
 export interface DisclosureController {
   open(): void;
@@ -57,9 +64,16 @@ function forceReflow(node: HTMLElement): void {
 }
 
 /** Wire `trigger` (a button, or any element given button semantics) to `region`
- *  as an animated disclosure. */
+ *  as an animated disclosure.
+ *
+ *  Pass `trigger: null` for a REGION-ONLY controller: no trigger is wired (no
+ *  aria-expanded, no click/keyboard handling) and the open state is driven
+ *  entirely through the controller — for a collapse whose visible control is
+ *  something a disclosure trigger would mis-describe (a checkbox enable-toggle
+ *  whose `checked` already conveys the state, an app state machine). The
+ *  region still gets the height animation and `aria-hidden` + `inert`. */
 export function createDisclosure(
-  trigger: HTMLElement,
+  trigger: HTMLElement | null,
   region: HTMLElement,
   opts?: DisclosureOptions,
 ): DisclosureController {
@@ -70,10 +84,10 @@ export function createDisclosure(
   if (region.id === "") {
     region.id = `uip-disclosure-${(++idSeq).toString()}`;
   }
-  trigger.setAttribute("aria-controls", region.id);
+  trigger?.setAttribute("aria-controls", region.id);
 
   const isNativeButton = trigger instanceof HTMLButtonElement;
-  if (!isNativeButton) {
+  if (trigger !== null && !isNativeButton) {
     if (!trigger.hasAttribute("role")) {
       trigger.setAttribute("role", "button");
     }
@@ -108,7 +122,7 @@ export function createDisclosure(
   };
 
   const reflectAria = (): void => {
-    trigger.setAttribute("aria-expanded", open ? "true" : "false");
+    trigger?.setAttribute("aria-expanded", open ? "true" : "false");
     region.setAttribute("aria-hidden", open ? "false" : "true");
     // Collapsed content must also leave the tab order + a11y tree. height:0 +
     // overflow:hidden clips paint but keeps descendants keyboard-focusable, and
@@ -144,14 +158,14 @@ export function createDisclosure(
     }
   };
 
-  const set = (next: boolean, animate: boolean): void => {
+  const set = (next: boolean, animate: boolean, source: DisclosureToggleSource): void => {
     if (next === open) {
       return;
     }
     open = next;
     reflectAria();
     applyHeight(next, animate);
-    onToggle?.(next);
+    onToggle?.(next, source);
   };
 
   // Initial state, applied without animation or an onToggle callback.
@@ -159,17 +173,17 @@ export function createDisclosure(
   applyHeight(open, false);
 
   const onClick = (): void => {
-    set(!open, animateDefault);
+    set(!open, animateDefault, "user");
   };
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
       // Space would scroll the page; Enter/Space both activate a button.
       e.preventDefault();
-      set(!open, animateDefault);
+      set(!open, animateDefault, "user");
     }
   };
-  trigger.addEventListener("click", onClick);
-  if (!isNativeButton) {
+  trigger?.addEventListener("click", onClick);
+  if (trigger !== null && !isNativeButton) {
     trigger.addEventListener("keydown", onKeyDown);
   }
 
@@ -178,21 +192,21 @@ export function createDisclosure(
       return open;
     },
     open(): void {
-      set(true, animateDefault);
+      set(true, animateDefault, "api");
     },
     close(): void {
-      set(false, animateDefault);
+      set(false, animateDefault, "api");
     },
     toggle(): void {
-      set(!open, animateDefault);
+      set(!open, animateDefault, "api");
     },
     dispose(): void {
       clearPending();
       // Settle the height so a dispose mid-animation doesn't freeze an inline
       // px height: open clears to auto, collapsed pins to 0.
       region.style.height = open ? "" : "0px";
-      trigger.removeEventListener("click", onClick);
-      if (!isNativeButton) {
+      trigger?.removeEventListener("click", onClick);
+      if (trigger !== null && !isNativeButton) {
         trigger.removeEventListener("keydown", onKeyDown);
       }
     },

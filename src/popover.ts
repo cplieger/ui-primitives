@@ -23,12 +23,13 @@
 // JS positioning (getBoundingClientRect + fixed) rather than the native Popover
 // API / CSS anchor positioning, for testability and consistency with tooltip.
 
-import { afterTransition } from "./transition.js";
+// createPopover is layered on the popup primitive: popup owns the reveal /
+// light-dismiss lifecycle (state classes, outside-click, Escape isolation,
+// trigger ARIA, groups, opt-in focus) and popover adds anchored placement,
+// scroll/resize/visualViewport tracking, and the full-bleed stretch mode.
 
-/** Fallback timeout (ms) for the leave animation if `transitionend` never fires
- *  (no CSS transition, reduced motion, or an interrupted animation). Mirrors the
- *  dialog / modal leave fallback. */
-const LEAVE_FALLBACK_MS = 400;
+import { createPopup } from "./popup.js";
+import type { PopupOptions, PopupOptionsPatch } from "./popup.js";
 
 export type PopoverPlacement = "top" | "bottom" | "left" | "right";
 export type PopoverAlign = "start" | "center" | "end";
@@ -96,27 +97,20 @@ export interface PlacementOptions {
   stretch?: "viewport";
 }
 
-export interface PopoverOptions extends PlacementOptions {
-  /** Click outside the panel and anchor closes the popover. Default `true`. */
-  closeOnOutside?: boolean;
-  /** Escape closes the popover. Default `true`. */
-  closeOnEscape?: boolean;
-  /** Focus this element after the popover opens, if it is a connected element.
-   *  Omit (or pass `null`) to leave focus alone — by default the caller owns
-   *  focus. Opt-in. */
-  initialFocus?: HTMLElement | null;
-  /** Restore focus when the popover closes. `true` captures whatever was
-   *  focused at open time and refocuses it on close; an element refocuses that
-   *  element; `false`/omitted leaves focus alone. Opt-in. */
-  returnFocus?: boolean | HTMLElement;
-  /** Invoked after the popover opens. */
-  onOpen?: () => void;
-  /** Invoked after the popover closes. */
-  onClose?: () => void;
-  /** aria-haspopup value advertised on an element anchor. Match the panel's role. Default `true`
-   *  (menu). Ignored for a virtual/point anchor. */
-  haspopup?: "menu" | "listbox" | "tree" | "grid" | "dialog" | true;
-}
+/** Placement options plus the popup lifecycle options (dismissal, Escape
+ *  isolation, single-open `group`, opt-in focus, open/close callbacks,
+ *  `haspopup` — advertised on an element anchor; ignored for a virtual/point
+ *  anchor, which has no element to annotate). The popup `trigger` is not an
+ *  option here: the anchor is the trigger when it is a real element. */
+export interface PopoverOptions extends PlacementOptions, Omit<PopupOptions, "trigger"> {}
+
+/** A merge-patch for `setOptions`: keys PRESENT in the patch override the
+ *  current value — including an explicit `undefined`, which clears the option
+ *  back to its default (e.g. `{ stretch: undefined }` leaves full-bleed mode).
+ *  Keys absent from the patch are left unchanged. */
+export type PopoverOptionsPatch = {
+  [K in keyof PopoverOptions]?: PopoverOptions[K] | undefined;
+};
 
 export interface PopoverController {
   show(): void;
@@ -127,6 +121,14 @@ export interface PopoverController {
   readonly isOpen: boolean;
   /** The panel element (the caller's, never one this controller created). */
   readonly el: HTMLElement;
+  /** Merge-patch the options on the LIVE controller — the seam for responsive
+   *  placement (e.g. flip `stretch` / `offset` / `margin` on a breakpoint
+   *  change instead of disposing and rebuilding). Keys present in the patch
+   *  override (an explicit `undefined` clears back to the default); absent
+   *  keys are unchanged. An open popover repositions immediately and updates
+   *  its `is-stretched` marker; dismissal listeners re-arm under the new
+   *  flags. The anchor is constructor-bound and cannot be patched. */
+  setOptions(patch: PopoverOptionsPatch): void;
   dispose(): void;
 }
 
@@ -311,66 +313,78 @@ export function placeAnchored(
   panel.style.top = `${finalTop}px`;
 }
 
+/** The popup-lifecycle option keys forwarded from a PopoverOptions object /
+ *  patch to the underlying popup controller. Placement keys stay local. */
+const POPUP_OPTION_KEYS = [
+  "closeOnOutside",
+  "closeOnEscape",
+  "isolateEscape",
+  "group",
+  "initialFocus",
+  "returnFocus",
+  "haspopup",
+  "onOpen",
+  "onClose",
+] as const;
+
+/** Pick the popup-relevant keys PRESENT in `patch` (preserving merge-patch
+ *  semantics: an absent key is not forwarded, an explicit undefined is). */
+function popupSubset(patch: PopoverOptionsPatch): PopupOptionsPatch {
+  const out: Record<string, unknown> = {};
+  const source: Record<string, unknown> = patch;
+  for (const key of POPUP_OPTION_KEYS) {
+    if (key in source) {
+      out[key] = source[key];
+    }
+  }
+  return out;
+}
+
 /**
  * Wire `anchor` and a caller-supplied `panel` into an anchored, dismissible
  * popover. The controller reveals + positions the panel, tracks the anchor on
  * scroll/resize, and dismisses on outside-click / Escape. It does not build the
  * panel and never removes it from the DOM — the caller owns that element.
+ *
+ * Built on the popup primitive: popup owns the reveal / light-dismiss
+ * lifecycle; this layer adds placeAnchored placement on reveal, rAF-throttled
+ * anchor tracking (scroll / resize / visualViewport), and the `is-stretched`
+ * full-bleed marker.
  */
 export function createPopover(
   anchor: PopoverAnchor,
   panel: HTMLElement,
   opts?: PopoverOptions,
 ): PopoverController {
-  const closeOnOutside = opts?.closeOnOutside ?? true;
-  const closeOnEscape = opts?.closeOnEscape ?? true;
   // Element-only operations (ARIA on the trigger, anchor-contains for the
-  // outside-click guard) are gated on this: a virtual/point anchor has no
-  // element to annotate or hit-test, so they no-op for it. Positioning via
-  // placeAnchored works for both anchor kinds — it only reads
-  // getBoundingClientRect(), which both HTMLElement and VirtualAnchor provide.
+  // outside-click guard) are the popup layer's, gated on a real element:
+  // a virtual/point anchor has no element to annotate or hit-test.
+  // Positioning via placeAnchored works for both anchor kinds.
   const anchorEl = anchor instanceof HTMLElement ? anchor : null;
 
-  let open = false;
-  let listening = false;
-  let installTimer: ReturnType<typeof setTimeout> | null = null;
+  // Mutable option state — setOptions() merge-patches this. placeAnchored
+  // reads it fresh on every call, so a patch takes effect on the next
+  // (immediate, for an open popover) reposition.
+  const current: PopoverOptions = { ...opts };
+
   let trackingFrame: number | null = null;
-  // Focus-restore target, captured at show() time when `returnFocus` is set OR
-  // when the controller is about to move focus into the panel (initialFocus).
-  let restoreFocus: HTMLElement | null = null;
-  // Whether show() moved focus INTO the panel (an initialFocus was applied). On
-  // hide() this forces focus back out even without returnFocus, so it is never
-  // stranded on the now-hidden panel (WCAG 2.4.3 focus-loss).
-  let movedFocusIn = false;
-  // While a leave animation is in flight this holds afterTransition's cancel
-  // handle (else null). The panel stays in the DOM with `is-leaving` until the
-  // transition ends (or the fallback fires); a re-show cancels it.
-  let cancelLeave: (() => void) | null = null;
 
-  // Whether the panel is opened full-bleed. Drives the `is-stretched` skin hook
-  // (a marker class the app can target to square edges / drop side borders on
-  // the full-width variant); positioning itself is done inline by placeAnchored.
-  const placement = opts?.placement ?? "bottom";
-  const stretched = opts?.stretch === "viewport" && (placement === "top" || placement === "bottom");
+  // Whether the CURRENT options put the panel in full-bleed mode. Drives the
+  // `is-stretched` skin hook; positioning itself is inline via placeAnchored.
+  const isStretched = (): boolean => {
+    const placement = current.placement ?? "bottom";
+    return current.stretch === "viewport" && (placement === "top" || placement === "bottom");
+  };
 
-  // Cancel a pending leave synchronously WITHOUT running its callback: detach
-  // the transition listener + clear the fallback timer, then drop the leaving
-  // state. Used by show() so a re-show mid-fade re-reveals cleanly rather than
-  // letting the stale leave fire and hide the panel again. (dispose() does NOT
-  // call this — it runs the animated leave via hide(), per the leave contract.)
-  const clearLeave = (): void => {
-    if (cancelLeave !== null) {
-      cancelLeave();
-      cancelLeave = null;
-    }
-    panel.classList.remove("is-leaving");
+  const place = (): void => {
+    placeAnchored(panel, anchor, current);
   };
 
   // Public reposition: synchronous. Callers invoke it after a content change
   // and expect an immediate re-measure + re-clamp.
   const reposition = (): void => {
-    if (open) {
-      placeAnchored(panel, anchor, opts);
+    if (popup.isOpen) {
+      place();
     }
   };
 
@@ -387,52 +401,11 @@ export function createPopover(
     });
   };
 
-  const cancelTrackingFrame = (): void => {
-    if (trackingFrame !== null) {
-      cancelAnimationFrame(trackingFrame);
-      trackingFrame = null;
-    }
-  };
-
-  const onDocClick = (e: MouseEvent): void => {
-    const target = e.target;
-    // A click on the anchor keeps the popover open only when the anchor is a
-    // real element. For a virtual/point anchor (anchorEl === null) there is no
-    // anchor element, so only a click inside the panel keeps it open — a click
-    // anywhere else (including where the right-click happened) closes it.
-    if (target instanceof Node && (panel.contains(target) || anchorEl?.contains(target) === true)) {
-      return;
-    }
-    hide();
-  };
-
-  const onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") {
-      // Isolate Escape: a popover opened inside a modal consumes the key so the
-      // same keystroke doesn't also close the modal underneath. Deeper Escape
-      // coordination (nested document-level handlers) stays the caller's
-      // concern.
-      e.stopPropagation();
-      hide();
-    }
-  };
-
-  const addListeners = (): void => {
-    installTimer = null;
-    if (!open) {
-      return;
-    }
-    listening = true;
-    if (closeOnOutside) {
-      document.addEventListener("click", onDocClick);
-    }
-    if (closeOnEscape) {
-      document.addEventListener("keydown", onKeyDown);
-    }
-    // Track the anchor: capture-phase scroll catches scrolling in any ancestor,
-    // resize covers layout changes, and visualViewport events cover pinch-zoom
-    // and the mobile keyboard. All route through the rAF throttle so a burst of
-    // events coalesces into one reposition per frame.
+  // Track the anchor: capture-phase scroll catches scrolling in any ancestor,
+  // resize covers layout changes, and visualViewport events cover pinch-zoom
+  // and the mobile keyboard. Armed/disarmed alongside the popup's dismissal
+  // listeners (so the tracking also waits out the opening click's tick).
+  const addTracking = (): void => {
     document.addEventListener("scroll", scheduleReposition, true);
     window.addEventListener("resize", scheduleReposition);
     const vv = window.visualViewport;
@@ -442,19 +415,11 @@ export function createPopover(
     }
   };
 
-  const removeListeners = (): void => {
-    if (installTimer !== null) {
-      clearTimeout(installTimer);
-      installTimer = null;
+  const removeTracking = (): void => {
+    if (trackingFrame !== null) {
+      cancelAnimationFrame(trackingFrame);
+      trackingFrame = null;
     }
-    // Drop any pending tracking frame regardless of listener state.
-    cancelTrackingFrame();
-    if (!listening) {
-      return;
-    }
-    listening = false;
-    document.removeEventListener("click", onDocClick);
-    document.removeEventListener("keydown", onKeyDown);
     document.removeEventListener("scroll", scheduleReposition, true);
     window.removeEventListener("resize", scheduleReposition);
     const vv = window.visualViewport;
@@ -464,143 +429,66 @@ export function createPopover(
     }
   };
 
-  const show = (): void => {
-    // A show() during the leave fade cancels it and re-reveals immediately, so a
-    // rapid hide→show (or toggle) doesn't strand the panel half-faded.
-    clearLeave();
-    if (open) {
-      // Idempotent: a show() while open just repositions.
-      placeAnchored(panel, anchor, opts);
-      return;
-    }
-    open = true;
-    panel.classList.add("uip-popover");
-    panel.hidden = false;
-    panel.classList.add("is-open");
-    if (stretched) {
-      // Skin hook for the full-bleed variant (positioning is done inline by
-      // placeAnchored; this only lets the app square edges / drop side borders).
-      panel.classList.add("is-stretched");
-    }
-    if (!panel.isConnected) {
-      // Host the panel in the nearest open <dialog> ancestor of the anchor when
-      // there is one, so a popover opened from within a native-<dialog> modal
-      // renders in that dialog's top layer (above it) rather than the base layer
-      // (behind it). Mirrors the tooltip's dialog-hosting. A virtual/point
-      // anchor (anchorEl === null), or an anchor outside any dialog, falls back
-      // to <body>. A caller-connected panel is left where the caller put it.
-      const host = anchorEl?.closest("dialog[open]") ?? document.body;
-      host.appendChild(panel);
-    }
-    placeAnchored(panel, anchor, opts);
-    // ARIA is set only on a real element; a virtual/point anchor has none.
-    anchorEl?.setAttribute("aria-expanded", "true");
-    anchorEl?.setAttribute("aria-haspopup", String(opts?.haspopup ?? "true"));
-    // Focus management is opt-in — with neither initialFocus nor returnFocus the
-    // controller leaves focus untouched at both ends (the caller owns focus).
-    // Capture the restore target BEFORE moving initial focus, so it records
-    // whatever was focused when we opened rather than the initialFocus element.
-    const returnFocus = opts?.returnFocus;
-    const initialFocus = opts?.initialFocus;
-    const willMoveFocusIn = initialFocus?.isConnected === true;
-    if (returnFocus instanceof HTMLElement) {
-      restoreFocus = returnFocus;
-    } else if (returnFocus === true || willMoveFocusIn) {
-      // `returnFocus: true` records the pre-show active element to refocus on
-      // close. We ALSO capture it implicitly whenever the controller is about to
-      // move focus INTO the panel (initialFocus), so hide() can move focus back
-      // out — otherwise it strands on the now-hidden panel and the browser drops
-      // it to <body>. This branch never runs for the omit-both default.
-      const active = document.activeElement;
-      restoreFocus = active instanceof HTMLElement ? active : null;
-    }
-    if (initialFocus?.isConnected === true) {
-      initialFocus.focus();
-      movedFocusIn = true;
-    }
-    // Defer listener install one tick so the click that opened us doesn't
-    // immediately trip the outside-click handler and self-close.
-    installTimer = setTimeout(addListeners, 0);
-    opts?.onOpen?.();
-  };
-
-  const hide = (): void => {
-    if (!open) {
-      // Idempotent: already closed, or a leave animation is already running
-      // (open flips to false the instant hide() begins).
-      return;
-    }
-    open = false;
-    removeListeners();
-    anchorEl?.setAttribute("aria-expanded", "false");
-    // Restore focus to the target captured/supplied at show() time if it is
-    // still connected. If the controller moved focus INTO the panel but that
-    // target is gone, blur the panel so focus is not stranded on the now-hidden
-    // node (falls to <body>). With neither initialFocus nor returnFocus both are
-    // null/false, so focus is left untouched. Done synchronously — focus must
-    // not wait for the fade-out.
-    const target = restoreFocus;
-    const didMoveFocusIn = movedFocusIn;
-    restoreFocus = null;
-    movedFocusIn = false;
-    if (target?.isConnected) {
-      target.focus();
-    } else if (didMoveFocusIn) {
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && panel.contains(active)) {
-        active.blur();
+  // The cast is sound: `current` is a spread of an exact-optional options
+  // object, so the subset never carries an explicitly-undefined value here
+  // (only setOptions patches can, and those go to popup.setOptions instead).
+  const popup = createPopup(panel, { ...popupSubset(current), trigger: anchorEl } as PopupOptions, {
+    stateClass: "uip-popover",
+    onReveal: (): void => {
+      if (isStretched()) {
+        // Skin hook for the full-bleed variant (positioning is inline via
+        // placeAnchored; this only lets the app square edges / drop borders).
+        panel.classList.add("is-stretched");
       }
-    }
-    // Leave lifecycle: swap is-open → is-leaving and keep the panel in the DOM
-    // (still the caller's element) until its transition ends — or the fallback
-    // fires when there is no transition / reduced motion / an interruption —
-    // then set [hidden] and drop the state classes. Mirrors dialog/modal/toast.
-    panel.classList.remove("is-open");
-    panel.classList.add("is-leaving");
-    cancelLeave = afterTransition(
-      panel,
-      () => {
-        cancelLeave = null;
-        // A re-show during the fade clears is-leaving; only finalize if we're
-        // still leaving, so we never yank a freshly re-shown panel shut.
-        if (panel.classList.contains("is-leaving")) {
-          panel.classList.remove("is-leaving");
-          panel.classList.remove("is-stretched");
-          panel.hidden = true;
-        }
-      },
-      LEAVE_FALLBACK_MS,
-    );
-    opts?.onClose?.();
-  };
+      place();
+    },
+    // A show() while open just repositions (idempotent).
+    onShowWhileOpen: place,
+    onListeners: (armed: boolean): void => {
+      if (armed) {
+        addTracking();
+      } else {
+        removeTracking();
+      }
+    },
+    onLeaveEnd: (): void => {
+      panel.classList.remove("is-stretched");
+    },
+  });
 
   return {
-    show,
-    hide,
+    show(): void {
+      popup.show();
+    },
+    hide(): void {
+      popup.hide();
+    },
     toggle(): void {
-      if (open) {
-        hide();
-      } else {
-        show();
-      }
+      popup.toggle();
     },
     reposition,
     get isOpen(): boolean {
-      return open;
+      return popup.isOpen;
     },
     get el(): HTMLElement {
       return panel;
     },
+    setOptions(patch: PopoverOptionsPatch): void {
+      Object.assign(current, patch);
+      const sub = popupSubset(patch);
+      if (Object.keys(sub).length > 0) {
+        popup.setOptions(sub);
+      }
+      if (popup.isOpen) {
+        // Apply the new placement immediately: recompute the stretch marker
+        // and re-place. placeAnchored clears the inline styles the other mode
+        // wrote (stretch pins left+right; content-sized restores width).
+        panel.classList.toggle("is-stretched", isStretched());
+        place();
+      }
+    },
     dispose(): void {
-      hide();
-      // Defensive: drop any listeners / pending install even if already hidden.
-      // The panel is the caller's — never removed from the DOM here.
-      removeListeners();
-      // The controller is gone: the anchor no longer owns a popover, so drop the
-      // ARIA it advertised (hide() only flips aria-expanded to "false"). No-op
-      // for a virtual/point anchor, which never had ARIA set.
-      anchorEl?.removeAttribute("aria-haspopup");
-      anchorEl?.removeAttribute("aria-expanded");
+      popup.dispose();
     },
   };
 }

@@ -309,3 +309,30 @@ describe("toast", () => {
     expect(node.classList.contains("is-leaving")).toBe(false);
   });
 });
+
+describe("createToaster: container option", () => {
+  it("mounts the stack inside the given host instead of document.body", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const t = createToaster({ container: host });
+    t.info("scoped");
+    const scoped = host.querySelector(".uip-toast-stack");
+    expect(scoped).not.toBeNull();
+    // Not a second stack on body: the only stack lives under the host.
+    expect(document.querySelectorAll(".uip-toast-stack")).toHaveLength(1);
+    t.dispose();
+    expect(host.querySelector(".uip-toast-stack")).toBeNull();
+  });
+
+  it("replace mode swaps the visible toast in place", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const t = createToaster({ container: host, mode: "replace" });
+    t.info("first");
+    t.info("second");
+    const toasts = host.querySelectorAll(".uip-toast");
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]?.querySelector(".uip-toast-msg")?.textContent).toBe("second");
+    t.dispose();
+  });
+});

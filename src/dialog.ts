@@ -14,6 +14,12 @@ export interface DialogOptions {
   closeOnBackdrop?: boolean;
   /** Close on Escape. Default `true`. */
   closeOnEscape?: boolean;
+  /** Dismiss guard, consulted on every USER dismissal attempt (backdrop click,
+   *  Escape): return `false` to refuse it and keep the dialog open. The wiring
+   *  stays armed, so later attempts re-consult the guard. Perform any "why
+   *  not" feedback (a toast, a shake) inside the guard before returning.
+   *  Programmatic `close()` is unaffected. Omitted = always dismissible. */
+  canDismiss?: () => boolean;
   /** Invoked after the dialog has finished closing. */
   onClose?: () => void;
 }
@@ -28,6 +34,11 @@ export interface DialogController {
 /** Open a native <dialog> as a modal. happy-dom / older engines may lack
  *  `showModal()`; fall back to the `open` property so behavior degrades. */
 export function openDialog(dialog: HTMLDialogElement): void {
+  // A reopen inside the leave fade cancels it: dropping is-leaving makes the
+  // pending close finalizer a no-op (it is guarded on the class), so a reused
+  // dialog is not yanked shut by the stale timer moments after reopening.
+  // Mirrors popup's clearLeave-on-show.
+  dialog.classList.remove("is-leaving");
   if (dialog.open) {
     return;
   }
@@ -112,14 +123,24 @@ export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): D
     closeDialog(dialog, onClose);
   };
 
-  const cleanupBackdrop = closeOnBackdrop ? wireBackdropDismiss(dialog, doClose) : null;
+  // User dismissals (backdrop, Escape) route through the guard; programmatic
+  // close() calls doClose directly and always closes.
+  const dismiss = (): void => {
+    if (opts?.canDismiss?.() === false) {
+      return;
+    }
+    doClose();
+  };
+
+  const cleanupBackdrop = closeOnBackdrop ? wireBackdropDismiss(dialog, dismiss) : null;
 
   const onCancel = (e: Event): void => {
     // The platform fires `cancel` on Escape then closes instantly. Intercept
-    // it so the fade-out lifecycle runs (or so Escape is ignored entirely).
+    // it so the fade-out lifecycle runs (or so Escape is ignored entirely, or
+    // refused by the guard).
     e.preventDefault();
     if (closeOnEscape) {
-      doClose();
+      dismiss();
     }
   };
 

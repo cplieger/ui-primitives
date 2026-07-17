@@ -37,6 +37,11 @@ export interface ModalOptions {
   /** Element to focus on open. Omit to leave focus to the platform (the first
    *  focusable / an `autofocus` element inside the dialog). */
   initialFocus?: HTMLElement | null;
+  /** Dismiss guard, consulted on every USER dismissal attempt (backdrop click,
+   *  Escape): return `false` to refuse it and keep the modal open. The wiring
+   *  stays armed, so later attempts re-consult the guard. Programmatic
+   *  `close()` is unaffected. Omitted = always dismissible. */
+  canDismiss?: () => boolean;
   /** Lock background page scroll while open, ref-counted across nested modals.
    *  iOS-safe (position:fixed body + scroll restore). Default `true`. */
   scrollLock?: boolean;
@@ -174,13 +179,23 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
     });
   };
 
-  const cleanupBackdrop = closeOnBackdrop ? wireBackdropDismiss(dialog, doClose) : null;
+  // User dismissals (backdrop, Escape) route through the guard; programmatic
+  // close() calls doClose directly and always closes.
+  const dismiss = (): void => {
+    if (opts?.canDismiss?.() === false) {
+      return;
+    }
+    doClose();
+  };
+
+  const cleanupBackdrop = closeOnBackdrop ? wireBackdropDismiss(dialog, dismiss) : null;
   const onCancel = (e: Event): void => {
     // The platform fires `cancel` on Escape then closes instantly. Intercept it
-    // so the fade-out lifecycle runs (or so Escape is ignored entirely).
+    // so the fade-out lifecycle runs (or so Escape is ignored entirely, or
+    // refused by the guard).
     e.preventDefault();
     if (closeOnEscape) {
-      doClose();
+      dismiss();
     }
   };
   dialog.addEventListener("cancel", onCancel);

@@ -237,3 +237,41 @@ describe("leave lifecycle", () => {
     expect(m.isOpen).toBe(false);
   });
 });
+
+describe("createModal: canDismiss guard", () => {
+  it("refuses backdrop and Escape dismissal while the guard returns false, and stays armed", () => {
+    const { content } = makeContent();
+    let allowed = false;
+    const canDismiss = vi.fn(() => allowed);
+    const m = createModal(content, { canDismiss });
+    m.open();
+
+    m.el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    m.el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    expect(m.isOpen).toBe(true);
+
+    const cancel = new Event("cancel", { cancelable: true });
+    m.el.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(m.isOpen).toBe(true);
+    expect(canDismiss).toHaveBeenCalledTimes(2);
+
+    allowed = true;
+    m.el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    m.el.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    vi.advanceTimersByTime(400);
+    expect(m.el.open).toBe(false);
+    expect(canDismiss).toHaveBeenCalledTimes(3);
+  });
+
+  it("programmatic close() ignores the guard", () => {
+    const { content } = makeContent();
+    const canDismiss = vi.fn(() => false);
+    const m = createModal(content, { canDismiss });
+    m.open();
+    m.close();
+    vi.advanceTimersByTime(400);
+    expect(m.el.open).toBe(false);
+    expect(canDismiss).not.toHaveBeenCalled();
+  });
+});
