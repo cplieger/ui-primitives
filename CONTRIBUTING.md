@@ -10,28 +10,37 @@ For org-wide defaults not repeated here, see the
 
 Each primitive is a focused module under `src/`, paired with a colocated
 `*.test.ts`. The one runtime dependency is
-[`@cplieger/reactive`](https://github.com/cplieger/reactive) — its `el` factory
+[`@cplieger/reactive`](https://github.com/cplieger/reactive): its `el` factory
 builds every DOM node (CSP-safe, no `innerHTML`).
 
-- `view-transition.ts` — queued, feature-detected wrapper over `document.startViewTransition`.
-- `focus-trap.ts` — Tab/Shift+Tab containment per the WAI-ARIA dialog pattern.
-- `announce.ts` — shared visually-hidden ARIA live regions.
-- `theme.ts` — persisted tri-state theme + a paint-time init-snippet string generator.
-- `dialog.ts` — native `<dialog>` backdrop/Escape dismissal + fade-out lifecycle.
-- `confirm.ts` — promise-based confirmation dialog (composes `focus-trap` + `dialog`).
-- `tooltip.ts` — one delegated tooltip controller.
-- `toast/` — the flagship, split three ways:
-  - `engine.ts` — a **pure, DOM-free** timer/queue/promotion state machine driven by an injected `ToastView` port. Testable headless.
-  - `view.ts` — the DOM implementation of `ToastView` (built with `el`).
+- `view-transition.ts`: queued, feature-detected wrapper over `document.startViewTransition`.
+- `focus-trap.ts`: Tab/Shift+Tab containment per the WAI-ARIA dialog pattern.
+- `roving-focus.ts`: WAI-ARIA roving-tabindex keyboard navigation for composite widgets.
+- `announce.ts`: shared visually-hidden ARIA live regions.
+- `theme.ts`: persisted tri-state theme + a paint-time init-snippet string generator.
+- `dialog.ts`: native `<dialog>` backdrop/Escape dismissal + fade-out lifecycle.
+- `modal.ts`: native-`<dialog>` modal built from caller content (the sibling to `dialog`, which wraps an existing element).
+- `ask.ts`: the Promise-shaped question dialog replacing `confirm` and `prompt` (native `<dialog>` + `showModal()`; composes `dialog`).
+- `tooltip.ts`: one delegated tooltip controller.
+- `popover.ts`: anchored floating panel + the placement engine under it; layers placement on `popup-core` through its hooks seam.
+- `popup.ts`: reveal + light-dismiss lifecycle without placement; a hook-less facade over `popup-core`.
+- `popup-core.ts`: INTERNAL lifecycle core shared by popup and popover (not a subpath export). One reveal + light-dismiss implementation, two public shapes.
+- `modal-host.ts`: INTERNAL helper (not a subpath export) resolving the open `<dialog>` that page-level chrome (the toast stack, the announce regions) must host into to stay usable while a modal is open.
+- `disclosure.ts`: animated collapsible region per the WAI-ARIA disclosure pattern.
+- `skeleton.ts`: anti-flicker timing for skeleton loads. Pure timing, no DOM.
+- `transition.ts`: shared "run after the CSS transition, or a fallback" helper behind the leave lifecycles.
+- `toast/`: the flagship, split three ways:
+  - `engine.ts`: a **pure, DOM-free** timer/queue/promotion state machine driven by an injected `ToastView` port. Testable headless.
+  - `view.ts`: the DOM implementation of `ToastView` (built with `el`).
     Delegates screen-reader announcement to `announce()` and creates its visual
     `.uip-toast-stack` lazily, so the module has no import-time DOM side effect
     and no live region ever nests inside another.
-  - `index.ts` — the public `Toaster` factory + a default singleton.
-- `index.ts` — the barrel that re-exports every primitive's public surface.
-- `css/ui-primitives.css` — the structural + behavioral base stylesheet.
+  - `index.ts`: the public `Toaster` factory + a default singleton.
+- `index.ts`: the barrel that re-exports every primitive's public surface.
+- `css/ui-primitives.css`: the structural + behavioral base stylesheet.
 
 **Headless boundary (protect this).** The library owns behavior, ARIA, DOM, and
-a documented CSS class / custom-property contract — never a skin. Do not add
+a documented CSS class / custom-property contract, never a skin. Do not add
 colors, radii, fonts, shadows, business logic, or app-specific icons. Anything
 themeable is a `--uip-*` custom property with a sane default; anything an app
 needs to target is a namespaced `.uip-*` class.
@@ -54,8 +63,52 @@ remove an export:
 
 - re-export it from `src/index.ts`,
 - add/adjust its subpath in **both** `package.json` and `jsr.json`,
-- update the README (the primitive section, the subpath table, and — if it
-  touches CSS — the class/custom-property contract tables).
+- update the primitive's reference page in `docs/` (or create one from the
+  template below), its row in the README index, and, if it touches CSS, the
+  README's global CSS contract.
+
+## Primitive reference pages (docs/)
+
+Each primitive has one reference page at `docs/<subpath>.md` (kebab-case,
+matching its subpath: `docs/toast.md`, `docs/roving-focus.md`), linked from its
+README index row. The README carries only the index, Quick start, the
+skin-vs-behavior contract, and the global CSS tokens; everything
+primitive-specific lives on the page. Pages follow this template exactly; omit
+a section only when it would be empty:
+
+```markdown
+# <primitive>
+
+`@cplieger/ui-primitives/<subpath>`
+
+One paragraph: what it does and when to use it.
+
+## Usage
+
+Minimal working snippet (imports plus the common case). A second snippet only
+for a second genuinely common pattern.
+
+## API
+
+The exported functions, options, and returned handles: one-line bullets or a
+`| Option | Description | Default |` table (same cell conventions as the
+README tables).
+
+## CSS
+
+The classes, state classes, and custom properties this primitive OWNS:
+`| Property / class | Description | Default |`. Global `--uip-*` tokens stay
+in the README's CSS contract.
+
+## Notes
+
+Behavior caveats a consumer acts on, one line each: focus handling, dismissal
+semantics, stacking/hosting, reduced motion, accessibility.
+```
+
+Page rules: no Disclaimer/License blocks (the README carries them), relative
+links only, prettier owns the formatting, and the delete-by-default bar
+applies (behavior contracts yes, implementation mechanics no).
 
 ## The CSS contract
 
@@ -73,7 +126,7 @@ stylelint-clean under `stylelint-config-standard`. Rules:
   / `animationend` still fire; this is below `time-min-milliseconds` on purpose,
   hence the single scoped, described `stylelint-disable-next-line`.
 - The toast countdown reads `--uip-toast-duration`, which the view sets inline
-  per toast — never hard-code the progress timing in CSS.
+  per toast; never hard-code the progress timing in CSS.
 
 ## Local development
 
@@ -104,7 +157,7 @@ publish contract:
 npm install --no-save ../reactive
 ```
 
-Keep the `^1.2.2` range in `package.json` `dependencies` — that is the publish
+Keep the `^1.2.2` range in `package.json` `dependencies`: that is the publish
 contract, independent of any local overlay.
 
 ## Conventions and gotchas
@@ -122,7 +175,7 @@ contract, independent of any local overlay.
 - **Tests are colocated** as `src/**/*.test.ts` (the only pattern vitest
   includes). Pure logic runs in the `node` environment; DOM tests opt in with
   `// @vitest-environment happy-dom` on the first line.
-- **Reset module singletons between tests.** `announce`, `confirm`, `tooltip`,
+- **Reset module singletons between tests.** `announce`, `ask`, `tooltip`,
   and the default `toast` are module singletons; call their `_resetForTest()`
   (and clear `document.body`) in `afterEach`.
 - **happy-dom limits.** happy-dom does no layout (`offsetParent` is `null`,
@@ -133,8 +186,8 @@ contract, independent of any local overlay.
   never exceeds `maxVisible + maxQueue`); keep new invariant coverage in that
   idiom where it fits.
 - **Don't edit `.github/workflows/*`** or the synced configs (eslint base,
-  prettier/stylelint/htmlvalidate, `cliff.toml`, LICENSE) — they arrive from
-  `cplieger/ci`; behavior changes belong upstream.
+  prettier/stylelint/htmlvalidate, `cliff.toml`, LICENSE); they arrive from
+  `cplieger/ci`, so behavior changes belong upstream.
 
 ## Commits and PRs
 
@@ -150,5 +203,5 @@ skipped.
 By participating you agree to the
 [Code of Conduct](https://github.com/cplieger/.github/blob/main/CODE_OF_CONDUCT.md).
 Report vulnerabilities through the
-[security policy](https://github.com/cplieger/.github/blob/main/SECURITY.md) —
+[security policy](https://github.com/cplieger/.github/blob/main/SECURITY.md),
 never in a public issue.
