@@ -71,6 +71,24 @@
     "type": "git",
     "url": "git+https://github.com/cplieger/ui-primitives.git"
   },
+  "homepage": "https://github.com/cplieger/ui-primitives",
+  "bugs": {
+    "url": "https://github.com/cplieger/ui-primitives/issues"
+  },
+  "author": "cplieger <917744+cplieger@users.noreply.github.com>",
+  "keywords": [
+    "headless-ui",
+    "accessibility",
+    "aria",
+    "toast",
+    "tooltip",
+    "popover",
+    "dialog",
+    "modal",
+    "disclosure",
+    "focus-trap",
+    "typescript"
+  ],
   "files": [
     "src/",
     "css/",
