@@ -1,6 +1,7 @@
 {
   "name": "@cplieger/ui-primitives",
   "version": "1.0.0",
+  "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
     "./toast": "./src/toast/index.ts",
