@@ -4,7 +4,13 @@
 // pointerover/pointerout (which bubble) + focusin/focusout drive a single
 // delegated listener; Escape / capture-phase scroll / window blur hide. The
 // first tooltip in a group waits `delayCold`; peers show after `delayWarm`
-// while the group stays warm (`cooldown`). The trigger text is wired to the
+// while the group stays warm (`cooldown`). BY DEFAULT `delayWarm` IS
+// `delayCold`, so every hover waits the same time and the warm window is
+// unobservable — that is what a native `title` does, and it is what a reader
+// expects from a tooltip. A warm group (peers appearing faster once one has
+// shown) is opt-in through an explicit smaller `delayWarm`: it reads as help
+// arriving with no hover time at all on a dense pill row or toolbar, where
+// every neighbour inherits the first tooltip's warmth. The trigger text is wired to the
 // anchor via `aria-describedby` so AT announces it, and `\n` splits into
 // <br>-separated lines. Placement is `position: fixed` via getBoundingClientRect
 // with viewport clamping and above→below flip when there is no room above.
@@ -23,11 +29,16 @@ import { afterTransition } from "./transition.js";
 export interface TooltipOptions {
   /** Trigger attribute holding the tooltip text. Default `data-uip-tooltip`. */
   attribute?: string;
-  /** Delay (ms) before the first tooltip of a cold group. Default 1000. */
+  /** Delay (ms) before the first tooltip of a cold group. Default 500, the
+   *  hover time a native `title` waits out (Firefox's `ui.tooltipDelay`
+   *  default; the Windows mouse-hover time is 400). */
   delayCold?: number;
-  /** Delay (ms) before tooltips while the group is warm. Default 0. */
+  /** Delay (ms) before tooltips while the group is warm. Defaults to
+   *  `delayCold`, so every hover costs the same wait. Set it lower to opt into
+   *  a warm group, where a peer shows faster once one tooltip has. */
   delayWarm?: number;
-  /** Warm window (ms) after a tooltip hides. Default 500. */
+  /** Warm window (ms) after a tooltip hides. Default 500. Inert while
+   *  `delayWarm` equals `delayCold`. */
   cooldown?: number;
 }
 
@@ -89,8 +100,11 @@ class TooltipController {
   constructor(opts: TooltipOptions) {
     this.attribute = opts.attribute ?? "data-uip-tooltip";
     this.selector = `[${this.attribute}]`;
-    this.delayCold = opts.delayCold ?? 1000;
-    this.delayWarm = opts.delayWarm ?? 0;
+    this.delayCold = opts.delayCold ?? 500;
+    // Warm defaults to the cold delay rather than to a constant: a consumer
+    // that only sets `delayCold` gets that one wait on every hover, instead of
+    // a warm path faster than the delay it asked for.
+    this.delayWarm = opts.delayWarm ?? this.delayCold;
     this.cooldown = opts.cooldown ?? 500;
   }
 

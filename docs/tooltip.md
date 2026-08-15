@@ -20,7 +20,7 @@ initTooltips(); // idempotent; installs one delegated controller
 
 ## API
 
-- `initTooltips(opts?)`: install once. `TooltipOptions` = `{ attribute?; delayCold?; delayWarm?; cooldown? }` (defaults `data-uip-tooltip`, 1000ms, 0ms, 500ms).
+- `initTooltips(opts?)`: install once. `TooltipOptions` = `{ attribute?; delayCold?; delayWarm?; cooldown? }` (defaults `data-uip-tooltip`, 500ms, `delayCold`, 500ms).
 
 ## CSS
 
@@ -34,7 +34,7 @@ initTooltips(); // idempotent; installs one delegated controller
 
 ## Notes
 
-- One delegated controller handles every trigger. The first tooltip of a "cold" group waits `delayCold`; peers show instantly while the group is warm.
+- One delegated controller handles every trigger. Every hover waits `delayCold` (500ms, the hover time a native `title` waits out), because `delayWarm` defaults to `delayCold`. Set `delayWarm` lower to opt into a warm group, where a peer shows faster while the group stays warm (`cooldown`) — quick to scan, but on a dense toolbar it reads as tooltips appearing with no hover time at all.
 - The trigger text is appended to the anchor's `aria-describedby` (any token the app already set is preserved); `\n` in the value splits into `<br>`-separated lines.
 - Escape, scroll, and window blur hide it; on scroll a tooltip vanishes like a native `title`, where [popover](popover.md), an opened surface, tracks and repositions instead.
 - Positioned `fixed` above the anchor (flips below when there is no room), clamped to the viewport.
