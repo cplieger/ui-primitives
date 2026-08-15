@@ -108,7 +108,7 @@ caveats.
 | Primitive       | What it does                                                                             | Reference                                          |
 | --------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------- |
 | toast           | Stacked, queued, auto-dismissing notifications with a shared default singleton           | [docs/toast.md](docs/toast.md)                     |
-| tooltip         | Delegated, attribute-driven tooltips with cold/warm delay grouping                       | [docs/tooltip.md](docs/tooltip.md)                 |
+| tooltip         | Delegated, attribute-driven tooltips with a native `title` hover delay                   | [docs/tooltip.md](docs/tooltip.md)                 |
 | popover         | Anchored floating panel with a placement engine; the substrate for menus and pickers     | [docs/popover.md](docs/popover.md)                 |
 | popup           | The reveal + light-dismiss lifecycle without placement, for in-flow panels               | [docs/popup.md](docs/popup.md)                     |
 | dialog          | Behavior helpers for native `<dialog>` elements you already have                         | [docs/dialog.md](docs/dialog.md)                   |

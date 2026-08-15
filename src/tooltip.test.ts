@@ -41,8 +41,9 @@ describe("initTooltips", () => {
     initTooltips();
     const a = anchor("Hello");
     pointerOver(a);
-    expect(tip()).toBeNull(); // still pending during the cold delay
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(499);
+    expect(tip()).toBeNull(); // still pending during the 500ms default delay
+    vi.advanceTimersByTime(1);
     const t = tip();
     expect(t).not.toBeNull();
     expect(t!.getAttribute("role")).toBe("tooltip");
@@ -78,17 +79,53 @@ describe("initTooltips", () => {
     expect(tip()!.classList.contains("is-leaving")).toBe(false);
   });
 
-  it("uses the warm (instant) delay for a peer within the cooldown window", () => {
+  it("makes every hover wait the same delay by default — no instant peer", () => {
+    // The default a native `title` sets: warm defaults to the cold delay, so a
+    // peer hovered right after a tooltip hid still costs the full wait. An
+    // instant peer here is what makes a pill row or a toolbar read as popping
+    // tooltips with no hover time at all.
     initTooltips();
     const a = anchor("A");
     const b = anchor("B");
     pointerOver(a);
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(500);
+    expect(tip()!.textContent).toBe("A");
+    pointerOut(a, null);
+    vi.advanceTimersByTime(150); // remove A; the cooldown window is open
+    pointerOver(b);
+    vi.advanceTimersByTime(499);
+    expect(tip()).toBeNull();
+    vi.advanceTimersByTime(1);
+    expect(tip()!.textContent).toBe("B");
+  });
+
+  it("uses the warm delay for a peer within the cooldown window when opted into", () => {
+    initTooltips({ delayWarm: 0 });
+    const a = anchor("A");
+    const b = anchor("B");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
     expect(tip()!.textContent).toBe("A");
     pointerOut(a, null);
     vi.advanceTimersByTime(150); // remove A; group is now warm
     pointerOver(b);
-    vi.advanceTimersByTime(1); // warm delay is 0
+    vi.advanceTimersByTime(1); // opted-in warm delay is 0
+    expect(tip()!.textContent).toBe("B");
+  });
+
+  it("takes the cold delay as the warm delay when only delayCold is given", () => {
+    initTooltips({ delayCold: 2000 });
+    const a = anchor("A");
+    const b = anchor("B");
+    pointerOver(a);
+    vi.advanceTimersByTime(2000);
+    expect(tip()!.textContent).toBe("A");
+    pointerOut(a, null);
+    vi.advanceTimersByTime(150);
+    pointerOver(b);
+    vi.advanceTimersByTime(1999);
+    expect(tip()).toBeNull(); // never faster than the delay the caller asked for
+    vi.advanceTimersByTime(1);
     expect(tip()!.textContent).toBe("B");
   });
 
