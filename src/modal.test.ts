@@ -275,3 +275,60 @@ describe("createModal: canDismiss guard", () => {
     expect(canDismiss).not.toHaveBeenCalled();
   });
 });
+
+describe("createModal — default role", () => {
+  it("leaves a plain modal on the <dialog> implicit role, with no alert modifier", () => {
+    const m = createModal(makeContent().content);
+    expect(m.el.hasAttribute("role")).toBe(false);
+    expect(m.el.classList.contains("uip-modal--alert")).toBe(false);
+  });
+});
+
+describe("scroll-lock ref-counting across mixed and revived modals", () => {
+  it("a nested scrollLock:false modal does not release the outer modal's lock", () => {
+    const outer = createModal(makeContent().content);
+    const inner = createModal(makeContent().content, { scrollLock: false });
+    outer.open();
+    inner.open();
+    expect(document.body.style.position).toBe("fixed");
+
+    inner.close();
+    vi.advanceTimersByTime(400);
+    expect(document.body.style.position).toBe("fixed");
+  });
+
+  it("disposing a nested modal after closing it does not release the outer lock twice", () => {
+    const outer = createModal(makeContent().content);
+    const inner = createModal(makeContent().content);
+    outer.open();
+    inner.open();
+
+    inner.close();
+    vi.advanceTimersByTime(400);
+    expect(document.body.style.position).toBe("fixed");
+
+    inner.dispose();
+    expect(document.body.style.position).toBe("fixed");
+  });
+
+  it("reopening mid fade-out does not stack a second scroll-lock", () => {
+    const m = createModal(makeContent().content);
+    m.open();
+    m.close();
+    m.open(); // revived inside the fade window
+    vi.advanceTimersByTime(400);
+
+    m.close();
+    vi.advanceTimersByTime(400);
+    expect(document.body.style.position).toBe("");
+  });
+
+  it("_resetForTest releases a scroll-lock left active by an open modal", () => {
+    const m = createModal(makeContent().content);
+    m.open();
+    expect(document.body.style.position).toBe("fixed");
+
+    _resetForTest();
+    expect(document.body.style.position).toBe("");
+  });
+});

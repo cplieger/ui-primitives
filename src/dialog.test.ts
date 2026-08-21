@@ -181,3 +181,109 @@ describe("openDialog: reopen during the leave fade", () => {
     expect(d.open).toBe(true);
   });
 });
+
+describe("openDialog / closeDialog: platform calls and degradation", () => {
+  it("closes through the native close() so the dialog's own close event fires", () => {
+    const d = makeDialog();
+    openDialog(d);
+    const onNativeClose = vi.fn();
+    d.addEventListener("close", onNativeClose);
+
+    closeDialog(d);
+    vi.advanceTimersByTime(400);
+    expect(onNativeClose).toHaveBeenCalledOnce();
+  });
+
+  it("openDialog falls back to the open property when showModal() is unavailable", () => {
+    const d = makeDialog();
+    vi.spyOn(d, "showModal").mockImplementation(() => {
+      throw new Error("showModal is not implemented");
+    });
+
+    openDialog(d);
+    expect(d.open).toBe(true);
+  });
+
+  it("closeDialog falls back to the open property when close() is unavailable", () => {
+    const d = makeDialog();
+    openDialog(d);
+    vi.spyOn(d, "close").mockImplementation(() => {
+      throw new Error("close is not implemented");
+    });
+
+    closeDialog(d);
+    vi.advanceTimersByTime(400);
+    expect(d.open).toBe(false);
+  });
+});
+
+describe("wireBackdropDismiss: a dismissal needs its own complete press", () => {
+  it("ignores a release with no press before it (a drag that began off-window)", () => {
+    const d = makeDialog();
+    const ctrl = createDialog(d);
+    ctrl.open();
+
+    d.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    expect(d.classList.contains("is-leaving")).toBe(false);
+    expect(d.open).toBe(true);
+    ctrl.dispose();
+  });
+
+  it("does not close when the press starts on the backdrop but ends on content", () => {
+    const d = makeDialog();
+    const inner = document.createElement("button");
+    d.appendChild(inner);
+    const ctrl = createDialog(d);
+    ctrl.open();
+
+    d.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    inner.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    expect(d.classList.contains("is-leaving")).toBe(false);
+    expect(d.open).toBe(true);
+    ctrl.dispose();
+  });
+
+  it("consumes the press, so the next release alone does not dismiss", () => {
+    const d = makeDialog();
+    const inner = document.createElement("button");
+    d.appendChild(inner);
+    const ctrl = createDialog(d);
+    ctrl.open();
+
+    d.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    inner.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    d.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    expect(d.classList.contains("is-leaving")).toBe(false);
+    expect(d.open).toBe(true);
+    ctrl.dispose();
+  });
+});
+
+describe("createDialog: a refused dismissal changes nothing", () => {
+  it("does not start the leave fade when the guard refuses", () => {
+    const d = makeDialog();
+    const ctl = createDialog(d, { canDismiss: () => false });
+    ctl.open();
+
+    d.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    d.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    expect(d.classList.contains("is-leaving")).toBe(false);
+
+    vi.advanceTimersByTime(400);
+    expect(d.open).toBe(true);
+    ctl.dispose();
+  });
+
+  it("ignores the cancel event when closeOnEscape is false (still preventDefaults it)", () => {
+    const d = makeDialog();
+    const ctl = createDialog(d, { closeOnEscape: false });
+    ctl.open();
+
+    const cancel = new Event("cancel", { cancelable: true });
+    d.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(d.classList.contains("is-leaving")).toBe(false);
+    expect(d.open).toBe(true);
+    ctl.dispose();
+  });
+});

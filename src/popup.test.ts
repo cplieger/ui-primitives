@@ -382,3 +382,83 @@ describe("disconnected-panel hosting under a modal (no trigger to derive it from
     outer.remove();
   });
 });
+
+describe("popup: hide() is idempotent", () => {
+  it("hiding an already-closed popup does not fire onClose again", () => {
+    const { panel } = fixture();
+    const onClose = vi.fn();
+    const pop = createPopup(panel, { onClose });
+
+    pop.show();
+    pop.hide();
+    expect(onClose).toHaveBeenCalledOnce();
+
+    pop.hide();
+    finishLeave();
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("a cancelled leave cannot cut a later leave short", () => {
+    const { panel } = fixture();
+    const pop = createPopup(panel);
+
+    pop.show();
+    pop.hide(); // fade 1
+    vi.advanceTimersByTime(300);
+    pop.show(); // cancels fade 1
+    pop.hide(); // fade 2, with its own full window
+
+    vi.advanceTimersByTime(100); // fade 1's old deadline
+    expect(panel.hidden).toBe(false);
+    vi.advanceTimersByTime(300); // fade 2's deadline
+    expect(panel.hidden).toBe(true);
+  });
+});
+
+describe("popup: focus the controller never moved", () => {
+  it("leaves focus inside the panel alone when the app put it there", () => {
+    const { panel } = fixture();
+    const input = document.createElement("input");
+    panel.appendChild(input);
+    const pop = createPopup(panel);
+
+    pop.show();
+    input.focus(); // the app moves focus in, not the controller
+    pop.hide();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("stops forcing focus out once initialFocus is cleared", () => {
+    const { panel, trigger } = fixture();
+    const input = document.createElement("input");
+    panel.appendChild(input);
+    trigger.focus();
+    const pop = createPopup(panel, { trigger, initialFocus: input });
+
+    pop.show(); // the controller moves focus in...
+    pop.hide(); // ...so it also takes it back out
+    expect(document.activeElement).toBe(trigger);
+
+    pop.setOptions({ initialFocus: undefined });
+    pop.show();
+    input.focus(); // this time the app owns the focus move
+    pop.hide();
+    expect(document.activeElement).toBe(input);
+  });
+});
+
+describe("popup: groups, on leaving one", () => {
+  it("stops coordinating with the old group when setOptions moves it", () => {
+    const a = createPopup(fixture().panel, { group: "g1" });
+    const b = createPopup(fixture().panel, { group: "g1" });
+
+    b.setOptions({ group: "g2" });
+    b.show();
+    a.show(); // a is alone in g1 now: it must not close b
+    expect(b.isOpen).toBe(true);
+    expect(a.isOpen).toBe(true);
+
+    a.dispose();
+    b.dispose();
+  });
+});

@@ -19,6 +19,10 @@ interface FakeToast {
   left: boolean;
   removed: boolean;
   paused: boolean;
+  /** How many times the engine asked the view to run this toast's leave. */
+  leaves: number;
+  /** How many times the engine asked the view to resume this toast's progress. */
+  resumes: number;
   done: (() => void) | null;
 }
 
@@ -32,6 +36,8 @@ function makeFakeView(autoLeave = true): { view: ToastView<FakeToast>; mounts: F
         left: false,
         removed: false,
         paused: false,
+        leaves: 0,
+        resumes: 0,
         done: null,
       };
       mounts.push(handle);
@@ -39,6 +45,7 @@ function makeFakeView(autoLeave = true): { view: ToastView<FakeToast>; mounts: F
     },
     scheduleLeave(handle, done) {
       handle.left = true;
+      handle.leaves++;
       if (autoLeave) {
         done();
       } else {
@@ -53,6 +60,7 @@ function makeFakeView(autoLeave = true): { view: ToastView<FakeToast>; mounts: F
     },
     resumeProgress(handle) {
       handle.paused = false;
+      handle.resumes++;
     },
     dispose() {
       /* no-op */
@@ -283,5 +291,124 @@ describe("ToastEngine: mode replace (single-slot latest-wins)", () => {
     expect(engine.visibleCount).toBe(1);
     expect(mounts[1]?.left).toBe(false);
     expect(mounts[1]?.removed).toBe(false);
+  });
+});
+
+describe("ToastEngine: dismissing a queued toast", () => {
+  it("a queued toast keeps its retry action when it is promoted", () => {
+    const { view, mounts } = makeFakeView(true);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1, defaultDuration: 0 });
+    const onClick = vi.fn();
+    const dismissVisible = engine.show("visible");
+    engine.show("queued", { level: "error", retry: { label: "Try again", onClick } });
+    expect(mounts).toHaveLength(1);
+
+    dismissVisible();
+    expect(mounts[1]!.data.message).toBe("queued");
+    expect(mounts[1]!.data.retry?.label).toBe("Try again");
+  });
+
+  it("dismissing a still-queued toast drops it from the queue so it never mounts", () => {
+    const { view, mounts } = makeFakeView(true);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1, defaultDuration: 0 });
+    const dismissVisible = engine.show("visible");
+    const dismissQueued = engine.show("queued");
+    expect(engine.queuedCount).toBe(1);
+
+    dismissQueued();
+    expect(engine.queuedCount).toBe(0);
+
+    // The freed slot must stay empty: the queued toast is gone, not deferred.
+    dismissVisible();
+    expect(mounts).toHaveLength(1);
+  });
+
+  it("the dismiss fn of a queued toast still dismisses it after promotion", () => {
+    const { view, mounts } = makeFakeView(false);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1, defaultDuration: 0 });
+    const dismissVisible = engine.show("visible");
+    const dismissQueued = engine.show("queued");
+
+    dismissVisible();
+    mounts[0]!.done?.(); // leave finished -> the queued toast is promoted
+    expect(mounts[1]!.data.message).toBe("queued");
+
+    dismissQueued();
+    expect(mounts[1]!.left).toBe(true);
+  });
+});
+
+describe("ToastEngine: per-toast targeting", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("dismissing a middle toast removes that toast and frees exactly one slot", () => {
+    const { view, mounts } = makeFakeView(true);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 3, defaultDuration: 0 });
+    engine.show("a");
+    const dismissB = engine.show("b");
+    engine.show("c");
+
+    dismissB();
+    expect(engine.visibleCount).toBe(2);
+    expect(mounts[1]!.left).toBe(true);
+    expect(mounts[2]!.left).toBe(false);
+  });
+
+  it("pause acts on the toast whose callback ran, not the first visible one", () => {
+    vi.useFakeTimers();
+    const { view, mounts } = makeFakeView(true);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 2, defaultDuration: 1000 });
+    engine.show("first");
+    engine.show("second");
+
+    mounts[1]!.ctx.pause();
+    expect(mounts[1]!.paused).toBe(true);
+    expect(mounts[0]!.paused).toBe(false);
+
+    // Only the first toast's timer is still running.
+    vi.advanceTimersByTime(1000);
+    expect(mounts[0]!.left).toBe(true);
+    expect(mounts[1]!.left).toBe(false);
+  });
+
+  it("a resume without a preceding pause leaves the progress animation alone", () => {
+    vi.useFakeTimers();
+    const { view, mounts } = makeFakeView(true);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1, defaultDuration: 1000 });
+    engine.show("t");
+
+    vi.advanceTimersByTime(600);
+    mounts[0]!.ctx.resume(); // never paused: nothing to resume
+    expect(mounts[0]!.resumes).toBe(0);
+
+    // ...and the original deadline still stands.
+    vi.advanceTimersByTime(400);
+    expect(engine.visibleCount).toBe(0);
+  });
+
+  it("dismissing the same toast twice runs the leave lifecycle once", () => {
+    const { view, mounts } = makeFakeView(false);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1, defaultDuration: 0 });
+    const dismiss = engine.show("t");
+
+    dismiss();
+    dismiss();
+    expect(mounts[0]!.leaves).toBe(1);
+  });
+
+  it("a view that finishes a leave twice does not evict another visible toast", () => {
+    const { view, mounts } = makeFakeView(false);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 2, defaultDuration: 0 });
+    const dismissA = engine.show("a");
+    engine.show("b");
+
+    dismissA();
+    const finish = mounts[0]!.done;
+    expect(finish).not.toBeNull();
+    finish?.();
+    finish?.();
+    expect(engine.visibleCount).toBe(1);
   });
 });
