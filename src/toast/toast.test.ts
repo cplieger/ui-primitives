@@ -438,3 +438,84 @@ describe("toast: default toaster laziness", () => {
     spy.mockRestore();
   });
 });
+
+describe("createToaster: option pass-through", () => {
+  /** An isolated toaster in its own host, so the default singleton is untouched. */
+  function scoped(opts: Parameters<typeof createToaster>[0]): {
+    t: ReturnType<typeof createToaster>;
+    host: HTMLElement;
+  } {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    return { t: createToaster({ ...opts, container: host }), host };
+  }
+
+  function messages(host: HTMLElement): (string | null)[] {
+    return [...host.querySelectorAll(".uip-toast-msg")].map((n) => n.textContent);
+  }
+
+  it("honors maxVisible, holding the overflow back", () => {
+    const { t, host } = scoped({ maxVisible: 1 });
+    t.info("one");
+    t.info("two");
+    expect(messages(host)).toEqual(["one"]);
+    t.dispose();
+  });
+
+  it("honors maxQueue, dropping the oldest queued toast", () => {
+    const { t, host } = scoped({ maxVisible: 1, maxQueue: 1 });
+    const dismiss = t.info("one"); // visible
+    t.info("two"); // queued
+    t.info("three"); // queued — evicts "two" at the cap of 1
+
+    dismiss();
+    endTransition(host.querySelector<HTMLElement>(".uip-toast")!);
+    expect(messages(host)).toEqual(["three"]);
+    t.dispose();
+  });
+
+  it("honors defaultDuration for the auto-dismiss window", () => {
+    const { t, host } = scoped({ defaultDuration: 100 });
+    t.info("timed");
+    const node = host.querySelector<HTMLElement>(".uip-toast")!;
+    // The countdown the CSS animates from — written inline per timed toast.
+    expect(node.style.getPropertyValue("--uip-toast-duration")).toBe("100ms");
+    t.dispose();
+  });
+
+  it("raises success() at the success level, not the default", () => {
+    const { t, host } = scoped({});
+    t.success("Saved");
+    const node = host.querySelector<HTMLElement>(".uip-toast")!;
+    expect(node.classList.contains("uip-toast--success")).toBe(true);
+    t.dispose();
+  });
+
+  it("clear() empties an isolated toaster's stack", () => {
+    const { t, host } = scoped({});
+    t.info("one");
+    t.info("two");
+    expect(messages(host)).toHaveLength(2);
+    t.clear();
+    expect(messages(host)).toHaveLength(0);
+    t.dispose();
+  });
+});
+
+describe("the default toaster's teardown seams", () => {
+  it("toast.dispose() removes the stack it built", () => {
+    info("hi");
+    expect(stack()).not.toBeNull();
+    toast.dispose();
+    expect(stack()).toBeNull();
+  });
+
+  it("_resetForTest() disposes the singleton so the next use rebuilds it", () => {
+    info("hi");
+    expect(stack()).not.toBeNull();
+    _resetForTest();
+    expect(stack()).toBeNull();
+    info("again"); // lazily rebuilt
+    expect(stack()).not.toBeNull();
+  });
+});
