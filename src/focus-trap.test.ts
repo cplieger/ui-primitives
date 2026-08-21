@@ -1,12 +1,14 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 
 import { trapFocus } from "./focus-trap.js";
 
 // happy-dom does no layout, but `getClientRects()` returns a single rect for
-// any *connected* element, so the trap's getClientRects()-based visibility
-// filter treats connected elements as focusable with no stubbing. And
-// `checkVisibility` is not implemented in happy-dom, so that guard is a no-op.
+// every element, so the trap's getClientRects()-based visibility filter treats
+// them all as focusable with no stubbing; a hidden element is expressed by
+// stubbing `getClientRects` to return none. happy-dom DOES implement
+// `checkVisibility`, and it always answers `true`, so that guard is a no-op
+// unless a test overrides it per element.
 // We therefore use real, connected elements — no offsetParent/getClientRects
 // stub is needed (unlike the previous offsetParent-based filter).
 function makeButton(label: string): HTMLButtonElement {
@@ -163,12 +165,136 @@ describe("trapFocus", () => {
   it("initialFocus that is detached is a safe no-op (does not throw or focus it)", () => {
     const detached = makeButton("detached"); // never appended → not connected
     const { container } = mount("a", "b");
+    const focusSpy = vi.spyOn(detached, "focus");
     let release: () => void = () => undefined;
     expect(() => {
       release = trapFocus(container, { initialFocus: detached });
     }).not.toThrow();
     // The detached target is never focused (would throw in some engines).
     expect(document.activeElement).not.toBe(detached);
+    expect(focusSpy).not.toHaveBeenCalled();
     release();
+  });
+
+  it("skips an element with no client rects (display:none) when choosing focus", () => {
+    const container = document.createElement("div");
+    const unrendered = makeButton("unrendered");
+    // `display: none` in a real engine: laid out nowhere, so no client rects.
+    unrendered.getClientRects = (): DOMRectList => [] as unknown as DOMRectList;
+    const rendered = makeButton("rendered");
+    container.append(unrendered, rendered);
+    document.body.appendChild(container);
+    const release = trapFocus(container);
+    expect(document.activeElement).toBe(rendered);
+    release();
+  });
+
+  it("skips an element checkVisibility rejects on the visibility property", () => {
+    const container = document.createElement("div");
+    const invisible = makeButton("invisible");
+    // Model the platform contract: a `visibility: hidden` element is laid out
+    // (it has client rects) and only reports itself invisible when
+    // checkVisibility is asked with `{ visibilityProperty: true }`.
+    invisible.checkVisibility = (options?: CheckVisibilityOptions): boolean =>
+      options?.visibilityProperty !== true;
+    const shown = makeButton("shown");
+    container.append(invisible, shown);
+    document.body.appendChild(container);
+    const release = trapFocus(container);
+    expect(document.activeElement).toBe(shown);
+    release();
+  });
+
+  it("treats an element as focusable in an engine without checkVisibility", () => {
+    const container = document.createElement("div");
+    const btn = makeButton("only");
+    // Older engines have no checkVisibility; the guard must not call it.
+    Object.defineProperty(btn, "checkVisibility", { value: undefined, configurable: true });
+    container.appendChild(btn);
+    document.body.appendChild(container);
+    let release: () => void = () => undefined;
+    expect(() => {
+      release = trapFocus(container);
+    }).not.toThrow();
+    expect(document.activeElement).toBe(btn);
+    release();
+  });
+
+  it("ignores a key other than Tab", () => {
+    const { container, buttons } = mount("a", "b");
+    const release = trapFocus(container);
+    buttons[1]!.focus(); // the end edge, where Tab would wrap
+    const evt = new KeyboardEvent("keydown", {
+      key: "ArrowDown",
+      bubbles: true,
+      cancelable: true,
+    });
+    container.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(buttons[1]); // focus untouched
+    release();
+  });
+
+  it("does not intercept Shift+Tab in the middle of the list", () => {
+    const { container, buttons } = mount("a", "b", "c");
+    const release = trapFocus(container);
+    buttons[1]!.focus();
+    const evt = tabEvent(true);
+    container.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(buttons[1]);
+    release();
+  });
+
+  it("pulls focus back to an empty container when Tab is pressed from outside it", () => {
+    const outside = makeButton("outside");
+    document.body.appendChild(outside);
+    const container = document.createElement("div");
+    document.body.appendChild(container); // no focusable descendants
+    const release = trapFocus(container);
+    outside.focus(); // focus escaped the trap
+    expect(document.activeElement).toBe(outside);
+
+    const evt = tabEvent();
+    outside.dispatchEvent(evt);
+    expect(document.activeElement).toBe(container); // re-pinned, not left outside
+    release();
+  });
+
+  it("sees Tab even when a handler between the target and document stops propagation", () => {
+    const { container, buttons } = mount("a", "b");
+    const release = trapFocus(container);
+    buttons[1]!.focus();
+    container.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+    });
+    const evt = tabEvent();
+    buttons[1]!.dispatchEvent(evt);
+    expect(document.activeElement).toBe(buttons[0]); // still wrapped
+    release();
+  });
+
+  it("release() stops intercepting Tab", () => {
+    const outside = makeButton("outside");
+    document.body.appendChild(outside);
+    const { container } = mount("a", "b");
+    const release = trapFocus(container);
+    release();
+    outside.focus();
+    const evt = tabEvent();
+    outside.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(outside); // no longer pulled back in
+  });
+
+  it("restores the previously-focused element when returnFocus is omitted", () => {
+    const outside = makeButton("outside");
+    document.body.appendChild(outside);
+    outside.focus();
+    const { container, buttons } = mount("a");
+    const release = trapFocus(container); // no options at all
+    expect(document.activeElement).toBe(buttons[0]);
+    release();
+    expect(document.activeElement).toBe(outside);
   });
 });

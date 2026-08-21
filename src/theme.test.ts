@@ -118,6 +118,28 @@ describe("createTheme", () => {
     t.dispose();
   });
 
+  it("honors a persisted light preference over a dark OS preference", () => {
+    media.matches = true; // OS = dark
+    const storage = memoryStorage();
+    storage.set("light");
+    const t = createTheme({ storageKey: "k", storage });
+    expect(t.get()).toBe("light");
+    expect(t.resolved()).toBe("light");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    t.dispose();
+  });
+
+  it("ignores an OS change once a concrete choice is pinned", () => {
+    const onChange = vi.fn();
+    const t = createTheme({ storageKey: "k", storage: memoryStorage(), onChange });
+    t.set("light"); // pin
+    onChange.mockClear();
+    fireSystemChange(true); // OS flips to dark
+    expect(onChange).not.toHaveBeenCalled();
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    t.dispose();
+  });
+
   it("dispose removes the matchMedia listener", () => {
     const t = createTheme({ storageKey: "k", storage: memoryStorage() });
     expect(media.listeners.size).toBe(1);

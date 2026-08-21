@@ -217,6 +217,173 @@ describe("placeAnchored — flip", () => {
   });
 });
 
+// ===== placeAnchored: flip boundaries =====================================
+
+// The flip engine decides per axis: does the panel overflow the viewport edge
+// (beyond `margin`), AND does the opposite side have strictly more room? These
+// pin both halves and the exact edge of the overflow test, which the coarse
+// cases above (huge overflows, huge asymmetries) cannot distinguish.
+// offset 4 and margin 8 are the defaults throughout.
+
+interface FlipBoundaryCase {
+  readonly name: string;
+  readonly vpWidth: number;
+  readonly vpHeight: number;
+  readonly rect: readonly [left: number, top: number, width: number, height: number];
+  readonly placement: PopoverPlacement;
+  readonly expected: number;
+}
+
+describe("placeAnchored — flip boundaries (vertical)", () => {
+  const cases: readonly FlipBoundaryCase[] = [
+    {
+      name: "keeps a bottom placement that fits, even when there is more room above",
+      vpWidth: 1000,
+      vpHeight: 800,
+      rect: [100, 500, 50, 20], // bottom 520 + 4 + 40 = 564, well inside 792
+      placement: "bottom",
+      expected: 524,
+    },
+    {
+      name: "keeps a bottom placement whose panel exactly fits inside the bottom margin",
+      vpWidth: 1000,
+      vpHeight: 200,
+      rect: [100, 128, 50, 20], // 148 + 4 + 40 = 192 = 200 - margin 8 → not over
+      placement: "bottom",
+      expected: 152,
+    },
+    {
+      name: "flips a bottom placement that overflows the bottom margin by one pixel",
+      vpWidth: 1000,
+      vpHeight: 200,
+      rect: [100, 129, 50, 20], // 149 + 44 = 193 > 192 → over by 1
+      placement: "bottom",
+      expected: 85, // above: 129 - 40 - 4
+    },
+    {
+      name: "keeps a top placement when the room above and below is equal",
+      vpWidth: 1000,
+      vpHeight: 200,
+      rect: [100, 5, 50, 190], // spaceAbove 5, spaceBelow 5 → no strictly-more room
+      placement: "top",
+      expected: -39,
+    },
+    {
+      name: "keeps a top placement whose panel exactly reaches the top margin",
+      vpWidth: 1000,
+      vpHeight: 800,
+      rect: [100, 52, 50, 20], // 52 - 4 - 40 = 8 = margin → not over
+      placement: "top",
+      expected: 8,
+    },
+    {
+      name: "flips a top placement that overflows the top margin by one pixel",
+      vpWidth: 1000,
+      vpHeight: 800,
+      rect: [100, 51, 50, 20], // 51 - 44 = 7 < 8 → over by 1
+      placement: "top",
+      expected: 75, // below: 71 + 4
+    },
+  ];
+
+  for (const c of cases) {
+    it(c.name, () => {
+      const anchor = document.createElement("button");
+      const panel = document.createElement("div");
+      document.body.append(anchor, panel);
+      vi.stubGlobal("innerWidth", c.vpWidth);
+      vi.stubGlobal("innerHeight", c.vpHeight);
+      stubRect(anchor, c.rect[0], c.rect[1], c.rect[2], c.rect[3]);
+      stubSize(panel, 80, 40);
+      placeAnchored(panel, anchor, { placement: c.placement });
+      expect(topOf(panel)).toBe(c.expected);
+    });
+  }
+});
+
+describe("placeAnchored — flip boundaries (horizontal)", () => {
+  const cases: readonly FlipBoundaryCase[] = [
+    {
+      name: "keeps a right placement that fits, even when there is more room left",
+      vpWidth: 1000,
+      vpHeight: 1000,
+      rect: [500, 100, 50, 20], // right 550 + 4 + 80 = 634, well inside 992
+      placement: "right",
+      expected: 554,
+    },
+    {
+      name: "keeps a right placement when the room left and right is equal",
+      vpWidth: 200,
+      vpHeight: 1000,
+      rect: [5, 100, 190, 20], // spaceLeft 5, spaceRight 5 → no strictly-more room
+      placement: "right",
+      expected: 199,
+    },
+    {
+      name: "keeps a right placement whose panel exactly fits inside the right margin",
+      vpWidth: 1000,
+      vpHeight: 1000,
+      rect: [858, 100, 50, 20], // 908 + 4 + 80 = 992 = 1000 - margin 8 → not over
+      placement: "right",
+      expected: 912,
+    },
+    {
+      name: "flips a right placement that overflows the right margin by one pixel",
+      vpWidth: 1000,
+      vpHeight: 1000,
+      rect: [859, 100, 50, 20], // 909 + 84 = 993 > 992 → over by 1
+      placement: "right",
+      expected: 775, // left: 859 - 80 - 4
+    },
+    {
+      name: "keeps a left placement that fits, even when there is more room right",
+      vpWidth: 1000,
+      vpHeight: 1000,
+      rect: [200, 100, 50, 20], // 200 - 4 - 80 = 116, well inside the margin
+      placement: "left",
+      expected: 116,
+    },
+    {
+      name: "keeps a left placement when the room right and left is equal",
+      vpWidth: 200,
+      vpHeight: 1000,
+      rect: [5, 100, 190, 20],
+      placement: "left",
+      expected: -79,
+    },
+    {
+      name: "keeps a left placement whose panel exactly reaches the left margin",
+      vpWidth: 1000,
+      vpHeight: 1000,
+      rect: [92, 100, 50, 20], // 92 - 4 - 80 = 8 = margin → not over
+      placement: "left",
+      expected: 8,
+    },
+    {
+      name: "flips a left placement that overflows the left margin by one pixel",
+      vpWidth: 1000,
+      vpHeight: 1000,
+      rect: [91, 100, 50, 20], // 91 - 84 = 7 < 8 → over by 1
+      placement: "left",
+      expected: 145, // right: 141 + 4
+    },
+  ];
+
+  for (const c of cases) {
+    it(c.name, () => {
+      const anchor = document.createElement("button");
+      const panel = document.createElement("div");
+      document.body.append(anchor, panel);
+      vi.stubGlobal("innerWidth", c.vpWidth);
+      vi.stubGlobal("innerHeight", c.vpHeight);
+      stubRect(anchor, c.rect[0], c.rect[1], c.rect[2], c.rect[3]);
+      stubSize(panel, 80, 40);
+      placeAnchored(panel, anchor, { placement: c.placement });
+      expect(leftOf(panel)).toBe(c.expected);
+    });
+  }
+});
+
 // ===== placeAnchored: clamp ===============================================
 
 describe("placeAnchored — clamp", () => {
@@ -286,6 +453,19 @@ describe("placeAnchored — clamp", () => {
     placeAnchored(panel, anchor, { placement: "bottom", align: "start", flip: false, margin: 8 });
     // hi = 100 - 200 - 8 = -108 < lo (8) → pinned to the leading margin.
     expect(leftOf(panel)).toBe(8);
+  });
+
+  it("clamps the cross-axis left for a top placement too, not the main axis", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    vi.stubGlobal("innerWidth", 200);
+    vi.stubGlobal("innerHeight", 800);
+    stubRect(anchor, 180, 400, 50, 20); // start-align left would be 180
+    stubSize(panel, 80, 40);
+    placeAnchored(panel, anchor, { placement: "top", align: "start", flip: false, margin: 8 });
+    expect(leftOf(panel)).toBe(112); // hi = 200 - 80 - 8
+    expect(topOf(panel)).toBe(356); // main axis untouched: 400 - 40 - 4
   });
 });
 
@@ -359,6 +539,34 @@ describe("placeAnchored — visualViewport box", () => {
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom" });
     expect(topOf(panel)).toBe(126); // flipped above
+  });
+
+  it("measures the room above from the visualViewport's top edge, not the document's", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    // Pinch-zoomed / keyboard-shifted: the visible box starts 100px down.
+    fakeVisualViewport({ offsetLeft: 0, offsetTop: 100, width: 1000, height: 200 });
+    stubRect(anchor, 100, 110, 50, 10); // bottom 120; only 10px of visible room above
+    stubSize(panel, 80, 180);
+    placeAnchored(panel, anchor, { placement: "bottom" });
+    // Overflows below (120 + 4 + 180 > 292), but the room above is 110 - 100 =
+    // 10px, less than the 180px below — measuring from the document top (210)
+    // would flip it into the hidden strip above the visible box.
+    expect(topOf(panel)).toBe(124);
+  });
+
+  it("measures the room to the left from the visualViewport's left edge, not the document's", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    fakeVisualViewport({ offsetLeft: 100, offsetTop: 0, width: 200, height: 1000 });
+    stubRect(anchor, 110, 100, 10, 20); // right 120; only 10px of visible room left
+    stubSize(panel, 180, 40);
+    placeAnchored(panel, anchor, { placement: "right" });
+    // Overflows right (120 + 4 + 180 > 292), but the visible room left is 10px
+    // against 180px right, so it stays right.
+    expect(leftOf(panel)).toBe(124);
   });
 });
 
@@ -672,6 +880,34 @@ describe("createPopover — reposition tracking", () => {
     document.dispatchEvent(new Event("scroll"));
     vi.advanceTimersToNextFrame(); // tracking is rAF-throttled — flush the frame
     expect(topOf(panel)).toBe(74);
+  });
+
+  it("a scroll in an ancestor container repositions (non-bubbling, so capture-phase)", () => {
+    const scroller = document.createElement("div");
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    scroller.appendChild(anchor);
+    document.body.append(scroller, panel);
+    vi.stubGlobal("innerWidth", 1000);
+    vi.stubGlobal("innerHeight", 800);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const c = createPopover(anchor, panel, {
+      placement: "bottom",
+      align: "start",
+      flip: false,
+      clamp: false,
+    });
+    c.show();
+    vi.advanceTimersByTime(1);
+    expect(topOf(panel)).toBe(124);
+    stubRect(anchor, 100, 50, 50, 20); // the container scrolled the anchor up
+    // A real element scroll event does NOT bubble, so only a capture-phase
+    // listener on document sees it.
+    scroller.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersToNextFrame();
+    expect(topOf(panel)).toBe(74);
+    c.dispose();
   });
 
   it("a window resize repositions", () => {
@@ -1463,6 +1699,18 @@ describe("createPopover — leave animation lifecycle", () => {
     expect(panel.classList.contains("is-stretched")).toBe(false);
   });
 
+  it("marks a top-placed stretch popover is-stretched too (both vertical sides)", () => {
+    const { c, panel } = mountPopover({ stretch: "viewport", placement: "top" });
+    c.show();
+    expect(panel.classList.contains("is-stretched")).toBe(true);
+  });
+
+  it("does not mark a left/right-placed stretch popover is-stretched (full-bleed is vertical only)", () => {
+    const { c, panel } = mountPopover({ stretch: "viewport", placement: "right" });
+    c.show();
+    expect(panel.classList.contains("is-stretched")).toBe(false);
+  });
+
   it("dispose() runs the leave and leaves the caller's panel in the DOM", () => {
     const { c, panel } = mountPopover();
     c.show();
@@ -1532,6 +1780,41 @@ describe("createPopover: setOptions (responsive placement)", () => {
     expect(pop.isOpen).toBe(false);
 
     pop.dispose();
+  });
+
+  it("a placement-only patch leaves the popup lifecycle options untouched", () => {
+    const { c, panel } = mountPopover({ closeOnEscape: false });
+    c.show();
+    vi.advanceTimersByTime(1);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(c.isOpen).toBe(true); // closeOnEscape:false honored
+
+    c.setOptions({ offset: 12 }); // placement-only: no popup keys present
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(c.isOpen).toBe(true); // still honored — the patch forwarded nothing
+    expect(topOf(panel)).toBe(132); // and the new offset did apply: 120 + 12
+    c.dispose();
+  });
+
+  it("a placement-only patch does not disarm the armed dismissal listeners", () => {
+    const { c } = mountPopover();
+    c.show();
+    vi.advanceTimersByTime(1); // deferred install done: an outside click closes
+
+    c.setOptions({ offset: 12 }); // forwards nothing to the popup layer
+    // No re-arm happened, so the listeners are live in this very tick.
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(c.isOpen).toBe(false);
+    c.dispose();
+  });
+
+  it("setOptions on a closed popover writes nothing to the panel", () => {
+    const { c, panel } = mountPopover();
+    c.setOptions({ stretch: "viewport" }); // never shown
+    expect(panel.classList.contains("is-stretched")).toBe(false);
+    expect(panel.style.left).toBe("");
+    expect(panel.style.top).toBe("");
+    c.dispose();
   });
 });
 
