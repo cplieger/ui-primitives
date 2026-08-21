@@ -140,3 +140,98 @@ describe("rovingFocus", () => {
     nav.dispose();
   });
 });
+
+/** A cancelable keydown, so `defaultPrevented` reports what the handler did. */
+function pressKey(container: HTMLElement, k: string): KeyboardEvent {
+  const e = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
+  container.dispatchEvent(e);
+  return e;
+}
+
+describe("rovingFocus: options that turn behavior off", () => {
+  it("homeEnd: false leaves Home and End alone", () => {
+    const { container, items } = menu(["a", "b", "c"]);
+    rovingFocus(container, ".item", { homeEnd: false });
+    items[1]?.focus();
+    key(container, "Home");
+    expect(document.activeElement).toBe(items[1]);
+    key(container, "End");
+    expect(document.activeElement).toBe(items[1]);
+  });
+});
+
+describe("rovingFocus: which keys get their default suppressed", () => {
+  it("suppresses the arrow key's default so it cannot also scroll the page", () => {
+    const { container, items } = menu(["a", "b"]);
+    rovingFocus(container, ".item");
+    items[0]?.focus();
+    expect(pressKey(container, "ArrowDown").defaultPrevented).toBe(true);
+  });
+
+  it("suppresses Enter's default so the item is activated exactly once", () => {
+    const { container, items } = menu(["a"]);
+    rovingFocus(container, ".item");
+    items[0]?.focus();
+    expect(pressKey(container, "Enter").defaultPrevented).toBe(true);
+  });
+
+  it("leaves Enter's default alone when no item holds focus", () => {
+    // Nothing to activate, so the key belongs to whatever else is focused.
+    const { container } = menu(["a"]);
+    rovingFocus(container, ".item");
+    document.body.focus();
+    expect(pressKey(container, "Enter").defaultPrevented).toBe(false);
+  });
+
+  it("leaves an arrow key's default alone on an empty container", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    rovingFocus(container, ".item");
+    expect(pressKey(container, "ArrowDown").defaultPrevented).toBe(false);
+  });
+});
+
+describe("rovingFocus: activation past the first item", () => {
+  it("activates whichever item holds focus, not only the first", () => {
+    const { container, items } = menu(["a", "b"]);
+    rovingFocus(container, ".item");
+    const clicked = vi.fn();
+    items[1]?.addEventListener("click", clicked);
+    items[1]?.focus();
+    key(container, "Enter");
+    expect(clicked).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("rovingFocus: refresh() with focus outside the widget", () => {
+  it("keeps the Tab stop on the previously-marked item and adopts new ones", () => {
+    // The documented fallback: with focus elsewhere, the item still carrying
+    // tabindex=0 keeps the stop, and items added by a re-render join at -1.
+    const { container, items } = menu(["a", "b", "c"]);
+    const nav = rovingFocus(container, ".item");
+    items[2]?.focus();
+    items[2]?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(items[2]?.getAttribute("tabindex")).toBe("0");
+
+    const added = document.createElement("button");
+    added.className = "item";
+    container.appendChild(added);
+    const outside = document.createElement("button");
+    document.body.appendChild(outside);
+    outside.focus();
+
+    nav.refresh();
+    expect(added.getAttribute("tabindex")).toBe("-1");
+    expect(items[2]?.getAttribute("tabindex")).toBe("0");
+  });
+});
+
+describe("rovingFocus: dispose", () => {
+  it("stops focus from rolling the Tab stop", () => {
+    const { container, items } = menu(["a", "b"]);
+    const nav = rovingFocus(container, ".item");
+    nav.dispose();
+    items[1]?.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    expect(items.map((i) => i.getAttribute("tabindex"))).toEqual(["0", "-1"]);
+  });
+});

@@ -24,6 +24,30 @@ function tip(): HTMLElement | null {
   return document.querySelector(".uip-tooltip");
 }
 
+/** The tooltip that is not fading out — the one a user would read. */
+function liveTip(): HTMLElement | null {
+  return document.querySelector(".uip-tooltip:not(.is-leaving)");
+}
+
+function tipCount(): number {
+  return document.querySelectorAll(".uip-tooltip").length;
+}
+
+function anchorRect(el: HTMLElement, left: number, top: number, w: number, h: number): void {
+  el.getBoundingClientRect = (): DOMRect =>
+    ({
+      x: left,
+      y: top,
+      left,
+      top,
+      width: w,
+      height: h,
+      right: left + w,
+      bottom: top + h,
+      toJSON: () => ({}),
+    }) as DOMRect;
+}
+
 function pointerOver(el: HTMLElement): void {
   el.dispatchEvent(new Event("pointerover", { bubbles: true }));
 }
@@ -287,5 +311,231 @@ describe("focus-triggered tooltips (:focus-visible gate)", () => {
     a.dispatchEvent(out);
     vi.advanceTimersByTime(500);
     expect(document.querySelector(".uip-tooltip:not(.is-leaving)")).toBeNull();
+  });
+});
+
+describe("dismissal triggers are specific", () => {
+  it("leaves the tooltip up for a keydown that is not Escape", () => {
+    // Only Escape dismisses: a tooltip that vanished on Tab or on any typed
+    // character would make hover help unreadable for a keyboard user.
+    initTooltips();
+    const a = anchor("Hi");
+    pointerOver(a);
+    vi.advanceTimersByTime(1000);
+    expect(tip()).not.toBeNull();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
+    vi.advanceTimersByTime(150);
+    expect(tip()).not.toBeNull();
+  });
+
+  it("hides on a nested scroller's scroll, which does not bubble", () => {
+    // Real scroll events do not bubble, so only a CAPTURE-phase document
+    // listener sees a scroll inside a nested scroll container.
+    initTooltips();
+    const scroller = document.createElement("div");
+    document.body.appendChild(scroller);
+    const a = anchor("Hi");
+    pointerOver(a);
+    vi.advanceTimersByTime(1000);
+    expect(tip()).not.toBeNull();
+    scroller.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(150);
+    expect(tip()).toBeNull();
+  });
+
+  it("a pointerout from an unrelated anchor leaves the tooltip up", () => {
+    initTooltips();
+    const a = anchor("A");
+    const b = anchor("B");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    pointerOut(b, null); // a different anchor's leave must not hide A's tooltip
+    expect(tip()!.classList.contains("is-leaving")).toBe(false);
+  });
+});
+
+describe("re-entering an anchor the tooltip already tracks", () => {
+  it("does not restart a pending tooltip's delay", () => {
+    // pointerover fires again for every descendant the pointer crosses; a
+    // restarted timer would mean a tooltip that never appears on a rich anchor.
+    initTooltips();
+    const a = anchor("Hi");
+    pointerOver(a);
+    vi.advanceTimersByTime(400);
+    pointerOver(a);
+    vi.advanceTimersByTime(100); // the original 500ms deadline
+    expect(tip()).not.toBeNull();
+  });
+
+  it("does not rebuild a visible tooltip", () => {
+    initTooltips();
+    const a = anchor("Hi");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    const first = tip();
+    expect(first).not.toBeNull();
+    pointerOver(a);
+    expect(tip()).toBe(first); // the same node, not torn down and re-created
+  });
+});
+
+describe("handing the tooltip from one anchor to another", () => {
+  it("removes the visible tooltip and its describedby without a pointerout", () => {
+    initTooltips();
+    const a = anchor("A");
+    const b = anchor("B");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    expect(a.getAttribute("aria-describedby")).not.toBeNull();
+    pointerOver(b); // the controller tears A down itself
+    expect(tipCount()).toBe(0);
+    expect(a.getAttribute("aria-describedby")).toBeNull();
+  });
+
+  it("cancels a still-pending tooltip so only the newest anchor shows", () => {
+    initTooltips();
+    const a = anchor("A");
+    const b = anchor("B");
+    pointerOver(a);
+    vi.advanceTimersByTime(400); // A pending, 100ms short of its deadline
+    pointerOver(b);
+    vi.advanceTimersByTime(500);
+    expect(tipCount()).toBe(1);
+    expect(tip()!.textContent).toBe("B");
+  });
+
+  it("never paints the tooltip of an anchor the pointer already left", () => {
+    // The superseded timer must be dead, not merely outlived: A's deadline
+    // falls inside B's wait, so a surviving timer paints A while B is pending
+    // — and the end state converges again afterwards, which is why only this
+    // mid-wait moment can see it.
+    initTooltips();
+    const a = anchor("A");
+    const b = anchor("B");
+    pointerOver(a);
+    vi.advanceTimersByTime(400);
+    pointerOver(b); // A's pending timer is cancelled here
+    vi.advanceTimersByTime(100); // A's original 500ms deadline passes
+    expect(tip()).toBeNull();
+  });
+
+  it("removes a fading tooltip when its anchor is hovered again", () => {
+    initTooltips({ delayWarm: 0 });
+    const a = anchor("A");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    pointerOut(a, null);
+    expect(tip()!.classList.contains("is-leaving")).toBe(true);
+    pointerOver(a); // re-hover mid-fade
+    vi.advanceTimersByTime(1);
+    expect(tipCount()).toBe(1); // the fading node is gone, not stacked under the new one
+  });
+
+  it("an older tooltip's fade does not strand the newer one", () => {
+    // The fade finalizer must only reset the state it owns. Resetting a newer
+    // tooltip's state leaves it visible and undismissable.
+    initTooltips({ delayWarm: 0 });
+    const a = anchor("A");
+    const b = anchor("B");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    pointerOut(a, null); // A begins fading; its fallback lands 150ms out
+    pointerOver(b);
+    vi.advanceTimersByTime(1);
+    expect(liveTip()!.textContent).toBe("B");
+    vi.advanceTimersByTime(200); // A's finalizer runs while B is visible
+    pointerOut(b, null);
+    vi.advanceTimersByTime(150);
+    expect(tipCount()).toBe(0);
+  });
+});
+
+describe("the warm window", () => {
+  it("gives a peer the warm delay while the first tooltip is still visible", () => {
+    initTooltips({ delayWarm: 0 });
+    const a = anchor("A");
+    const b = anchor("B");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    expect(tip()!.textContent).toBe("A");
+    pointerOver(b); // showing A opened the warm window
+    vi.advanceTimersByTime(1);
+    expect(liveTip()!.textContent).toBe("B");
+  });
+
+  it("still makes the first tooltip of a cold group wait the cold delay", () => {
+    // delayWarm only applies once the group IS warm; the opening hover of a
+    // cold group pays delayCold whatever delayWarm says.
+    initTooltips({ delayWarm: 0 });
+    const a = anchor("A");
+    pointerOver(a);
+    vi.advanceTimersByTime(499);
+    expect(tip()).toBeNull();
+  });
+
+  it("opens after a pending tooltip is cancelled, not just after a visible one hides", () => {
+    initTooltips({ delayWarm: 0 });
+    const a = anchor("A");
+    const b = anchor("B");
+    pointerOver(a);
+    vi.advanceTimersByTime(100);
+    pointerOut(a, null); // cancels the pending tooltip; the group warms anyway
+    pointerOver(b);
+    vi.advanceTimersByTime(1);
+    expect(tip()!.textContent).toBe("B");
+  });
+});
+
+describe("show-time guards and placement", () => {
+  it("never paints a tooltip for an anchor removed during the delay", () => {
+    initTooltips();
+    const a = anchor("Hi");
+    pointerOver(a);
+    a.remove(); // a re-render dropped the anchor mid-delay
+    vi.advanceTimersByTime(1000);
+    expect(tip()).toBeNull();
+  });
+
+  it("positions the tooltip above its anchor, centered", () => {
+    // happy-dom does no layout, so the anchor rect is mocked and the tooltip
+    // measures 0x0: top = anchor top - 6px gap, left = anchor centre.
+    vi.stubGlobal("innerWidth", 2000);
+    vi.stubGlobal("innerHeight", 2000);
+    initTooltips();
+    const a = anchor("Hi");
+    anchorRect(a, 100, 200, 40, 40);
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    const t = tip()!;
+    expect(t.style.position).toBe("fixed");
+    expect(t.style.top).toBe("194px");
+    expect(t.style.left).toBe("120px");
+  });
+
+  it("renders a single-line tooltip with no <br>", () => {
+    initTooltips();
+    const a = anchor("just one line");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    expect(tip()!.querySelectorAll("br")).toHaveLength(0);
+  });
+
+  it("normalizes stray whitespace in an app-set aria-describedby", () => {
+    initTooltips();
+    const a = anchor("Hi");
+    a.setAttribute("aria-describedby", "  foo  bar  ");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    expect(a.getAttribute("aria-describedby")).toBe(`foo bar ${tip()!.id}`);
+  });
+
+  it("removes a live tooltip when the controller is torn down", () => {
+    initTooltips();
+    const a = anchor("Hi");
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    expect(tip()).not.toBeNull();
+    _resetForTest();
+    expect(tip()).toBeNull();
   });
 });

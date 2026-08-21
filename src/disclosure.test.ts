@@ -280,3 +280,72 @@ describe("createDisclosure: onToggle source", () => {
     d.dispose();
   });
 });
+
+describe("createDisclosure: the two height-animation engines", () => {
+  // 0 <-> auto is animated one of two ways, and which one runs is the whole
+  // reason `supportsInterpolateSize` exists. Both paths are documented
+  // behavior, so both are pinned with an explicit stub: happy-dom's
+  // `CSS.supports` answers true to anything, so the default environment only
+  // ever reached the interpolate-size path and the measured-px fallback — the
+  // path every engine without `interpolate-size` takes — ran in no test at all.
+  it("interpolates the auto keyword when the engine supports it", () => {
+    vi.stubGlobal("CSS", { supports: () => true });
+    const { trigger, region } = mount();
+    const d = createDisclosure(trigger, region);
+    d.open();
+    expect(region.style.height).toBe("auto");
+    d.dispose();
+  });
+
+  it("animates to a measured pixel height when it does not", () => {
+    vi.stubGlobal("CSS", { supports: () => false });
+    const { trigger, region } = mount();
+    Object.defineProperty(region, "scrollHeight", { value: 120, configurable: true });
+    const d = createDisclosure(trigger, region);
+    d.open();
+    expect(region.style.height).toBe("120px");
+    d.dispose();
+  });
+});
+
+describe("createDisclosure: ARIA the app already set", () => {
+  it("keeps an app-set role on a non-button trigger", () => {
+    // Overwriting a role the app chose would silently re-label the control.
+    const { trigger, region } = mount("div");
+    trigger.setAttribute("role", "tab");
+    const d = createDisclosure(trigger, region);
+    expect(trigger.getAttribute("role")).toBe("tab");
+    d.dispose();
+  });
+
+  it("keeps an app-set tabindex on a non-button trigger", () => {
+    const { trigger, region } = mount("div");
+    trigger.setAttribute("tabindex", "-1");
+    const d = createDisclosure(trigger, region);
+    expect(trigger.getAttribute("tabindex")).toBe("-1");
+    d.dispose();
+  });
+});
+
+describe("createDisclosure: which keys activate a non-button trigger", () => {
+  it("ignores a key that is neither Enter nor Space", () => {
+    const { trigger, region } = mount("div");
+    const d = createDisclosure(trigger, region, { animate: false });
+    const other = new KeyboardEvent("keydown", { key: "a", bubbles: true, cancelable: true });
+    trigger.dispatchEvent(other);
+    expect(d.isOpen).toBe(false);
+    expect(other.defaultPrevented).toBe(false);
+    d.dispose();
+  });
+
+  it("activates on the legacy Spacebar key value", () => {
+    // Older engines report Space as "Spacebar"; the trigger stays operable there.
+    const { trigger, region } = mount("div");
+    const d = createDisclosure(trigger, region, { animate: false });
+    trigger.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Spacebar", bubbles: true, cancelable: true }),
+    );
+    expect(d.isOpen).toBe(true);
+    d.dispose();
+  });
+});
