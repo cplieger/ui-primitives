@@ -44,6 +44,19 @@ function pressEscape(target: EventTarget): void {
 }
 
 describe("popup: reveal lifecycle", () => {
+  it("show() flushes the un-hide with a layout read before is-open lands", () => {
+    const { panel } = fixture();
+    const pop = createPopup(panel);
+    // Without a forced reflow between `hidden = false` and `is-open`, the
+    // browser coalesces both into one frame and the CSS transition from the
+    // resting state never plays. A layout read is the flush; happy-dom has no
+    // layout engine, so the read itself is the only observable.
+    const read = vi.spyOn(panel, "getBoundingClientRect");
+    pop.show();
+    expect(read).toHaveBeenCalled();
+    pop.dispose();
+  });
+
   it("show() reveals the panel with the state classes; hide() runs the leave then hides", () => {
     const { panel } = fixture();
     const pop = createPopup(panel);

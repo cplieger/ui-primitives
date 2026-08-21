@@ -119,6 +119,18 @@ describe("createDialog", () => {
     d.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     expect(d.classList.contains("is-leaving")).toBe(false);
   });
+
+  it("dispose stops intercepting Escape, leaving the platform close to run", () => {
+    const d = makeDialog();
+    const ctrl = createDialog(d);
+    ctrl.open();
+    ctrl.dispose();
+    const cancel = new Event("cancel", { cancelable: true });
+    d.dispatchEvent(cancel);
+    // Unwired: the fade lifecycle must not run and the native close is allowed.
+    expect(cancel.defaultPrevented).toBe(false);
+    expect(d.classList.contains("is-leaving")).toBe(false);
+  });
 });
 
 describe("createDialog: canDismiss guard", () => {

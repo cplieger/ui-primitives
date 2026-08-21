@@ -64,6 +64,24 @@ describe("createModal — structure", () => {
     expect(m.el.parentElement).toBeNull();
     expect(m.isOpen).toBe(false);
   });
+
+  it("dispose() hands the caller's content element back without the modal class", () => {
+    const { content } = makeContent();
+    const m = createModal(content);
+    expect(content.classList.contains("uip-modal-dialog")).toBe(true);
+    m.dispose();
+    expect(content.classList.contains("uip-modal-dialog")).toBe(false);
+  });
+
+  it("dispose() during the fade cancels the pending close, so onClose never fires", () => {
+    const onClose = vi.fn();
+    const m = createModal(makeContent().content, { onClose });
+    m.open();
+    m.close(); // starts the leave
+    m.dispose(); // tears down instead: the pending finalizer must no-op
+    vi.advanceTimersByTime(400);
+    expect(onClose).not.toHaveBeenCalled();
+  });
 });
 
 describe("createModal — ARIA", () => {
@@ -188,6 +206,25 @@ describe("iOS-safe scroll-lock (ref-counted)", () => {
   it("skips the scroll-lock when scrollLock is false", () => {
     const m = createModal(makeContent().content, { scrollLock: false });
     m.open();
+    expect(document.body.style.position).toBe("");
+  });
+
+  it("restores the scroll position when the lock is released", () => {
+    window.scrollTo(0, 250);
+    const m = createModal(makeContent().content);
+    m.open(); // saves scrollY 250 and pins the body at -250px
+    window.scrollTo(0, 0); // a pinned body sits at the top while the modal is up
+    m.close();
+    vi.advanceTimersByTime(400);
+    expect(window.scrollY).toBe(250);
+    window.scrollTo(0, 0);
+  });
+
+  it("dispose releases the scroll-lock of a still-open modal", () => {
+    const m = createModal(makeContent().content);
+    m.open();
+    expect(document.body.style.position).toBe("fixed");
+    m.dispose();
     expect(document.body.style.position).toBe("");
   });
 });
