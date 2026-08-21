@@ -100,3 +100,27 @@ describe("announce: modal <dialog> re-homing", () => {
     expect(region.textContent).toBe("back outside");
   });
 });
+
+describe("announce: hosting is left alone when it is already correct", () => {
+  it("does not move app DOM when the region is already hosted where it belongs", () => {
+    announce("first");
+    vi.advanceTimersByTime(100);
+
+    const appNode = document.createElement("div");
+    document.body.appendChild(appNode);
+
+    announce("second");
+    vi.advanceTimersByTime(100);
+    expect(document.body.lastElementChild).toBe(appNode);
+    expect(regions()[0]!.textContent).toBe("second");
+  });
+
+  it("_resetForTest removes the live regions", () => {
+    announce("stale");
+    vi.advanceTimersByTime(100);
+    expect(regions()).toHaveLength(1);
+
+    _resetForTest();
+    expect(regions()).toHaveLength(0);
+  });
+});
