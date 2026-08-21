@@ -308,6 +308,95 @@ describe("toast", () => {
     btn.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
     expect(node.classList.contains("is-leaving")).toBe(false);
   });
+
+  it("ignores a key that is neither Enter nor Space on the toast node", () => {
+    info("type near me");
+    const node = toasts()[0]!;
+    node.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(node.classList.contains("is-leaving")).toBe(false);
+  });
+
+  it('dismisses on the legacy "Spacebar" key name (older engines)', () => {
+    info("spacebar me");
+    const node = toasts()[0]!;
+    node.dispatchEvent(new KeyboardEvent("keydown", { key: "Spacebar", bubbles: true }));
+    expect(node.classList.contains("is-leaving")).toBe(true);
+  });
+
+  it("prevents the default of a dismissing key press (Space must not scroll the page)", () => {
+    info("space me");
+    const node = toasts()[0]!;
+    const evt = new KeyboardEvent("keydown", { key: " ", bubbles: true, cancelable: true });
+    node.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(true);
+  });
+
+  it("dismisses the toast when its retry button is clicked, as well as running the handler", () => {
+    const onClick = vi.fn();
+    error("failed", { onClick });
+    const node = toasts()[0]!;
+    node
+      .querySelector<HTMLButtonElement>(".uip-toast-retry")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onClick).toHaveBeenCalledOnce();
+    expect(node.classList.contains("is-leaving")).toBe(true);
+  });
+
+  it("settles an entering toast into is-shown on the next frame", () => {
+    vi.useFakeTimers();
+    try {
+      info("entering");
+      const node = toasts()[0]!;
+      expect(node.classList.contains("is-entering")).toBe(true);
+      vi.advanceTimersToNextFrame(); // the enter rAF runs
+      expect(node.classList.contains("is-entering")).toBe(false);
+      expect(node.classList.contains("is-shown")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops is-shown when the leave begins so the two motion states never overlap", () => {
+    vi.useFakeTimers();
+    try {
+      const dismiss = info("shown, then leaving");
+      const node = toasts()[0]!;
+      vi.advanceTimersToNextFrame();
+      expect(node.classList.contains("is-shown")).toBe(true);
+      dismiss();
+      expect(node.classList.contains("is-shown")).toBe(false);
+      expect(node.classList.contains("is-leaving")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a focusout with no matching focusin does not corrupt the pause ref-count", () => {
+    vi.useFakeTimers();
+    try {
+      info("stray focusout"); // timed (default 4000ms)
+      const node = toasts()[0]!;
+      // A focusout the toast never saw a focusin for (focus was inside when it
+      // mounted) must not push the count below zero, or hover would stop pausing.
+      node.dispatchEvent(new Event("focusout", { bubbles: true }));
+      node.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true })); // pause (0->1)
+      vi.advanceTimersByTime(10000); // hovered → paused → must NOT auto-dismiss
+      expect(node.classList.contains("is-leaving")).toBe(false);
+      expect(toasts()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leaves the stack where it is when a later toast finds it already hosted", () => {
+    info("first");
+    const s = stack()!;
+    const sibling = document.createElement("div");
+    document.body.appendChild(sibling); // sits after the stack
+    info("second"); // re-resolves the host; the stack must not be re-appended
+    expect(document.body.lastElementChild).toBe(sibling);
+    expect(s.parentElement).toBe(document.body);
+  });
 });
 
 describe("createToaster: container option", () => {

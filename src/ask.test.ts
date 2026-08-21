@@ -67,6 +67,60 @@ describe("ask (boolean shape)", () => {
     expect(d.getAttribute("aria-describedby")).toBeNull();
   });
 
+  it("shows the title element only when there is a title", () => {
+    void ask("Are you sure?", { title: "Heads up" });
+    const title = booleanDlg().querySelector<HTMLElement>(".uip-ask-title")!;
+    expect(title.hidden).toBe(false);
+  });
+
+  it("treats an empty title as no title (labelled by the message, title hidden)", () => {
+    void ask("Just a plain message", { title: "" });
+    const d = booleanDlg();
+    expect(d.getAttribute("aria-labelledby")).toBe("uip-ask-msg");
+    expect(d.querySelector<HTMLElement>(".uip-ask-title")!.hidden).toBe(true);
+  });
+
+  it("re-hides the title and drops the description when a later ask has no title", () => {
+    void ask("first", { title: "Heads up" });
+    void ask("second"); // reuses the same dialog
+    const d = booleanDlg();
+    expect(d.querySelector<HTMLElement>(".uip-ask-title")!.hidden).toBe(true);
+    expect(d.getAttribute("aria-describedby")).toBeNull();
+    expect(d.getAttribute("aria-labelledby")).toBe("uip-ask-msg");
+  });
+
+  it('defaults the OK label to "Confirm"', () => {
+    void ask("Delete?");
+    expect(booleanDlg().querySelector(".uip-ask-ok")!.textContent).toBe("Confirm");
+    expect(booleanDlg().querySelector(".uip-ask-cancel")!.textContent).toBe("Cancel");
+  });
+
+  it("closes the dialog once the answer resolves", async () => {
+    const p = ask("Delete?");
+    const d = booleanDlg();
+    expect(d.open).toBe(true);
+    click(d, ".uip-ask-ok");
+    await expect(p).resolves.toBe(true);
+    expect(d.classList.contains("is-leaving")).toBe(true); // fading out
+    vi.advanceTimersByTime(400); // no transitionend in happy-dom: fallback
+    expect(d.open).toBe(false);
+  });
+
+  it("prevents the native Escape close so the fade-out lifecycle runs", async () => {
+    const p = ask("Sure?");
+    const evt = new Event("cancel", { cancelable: true });
+    booleanDlg().dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(true);
+    await expect(p).resolves.toBe(false);
+  });
+
+  it("gives the action row its documented class hook", () => {
+    void ask("Delete?");
+    const row = booleanDlg().querySelector(".uip-ask-actions");
+    expect(row).not.toBeNull();
+    expect(row!.querySelectorAll("button")).toHaveLength(2);
+  });
+
   it("destructive variant uses role=alertdialog and focuses Cancel", () => {
     void ask("Delete everything?", { variant: "destructive" });
     const d = booleanDlg();
@@ -187,6 +241,29 @@ describe("ask (input shape)", () => {
     expect(label.textContent).toBe("API key label:");
   });
 
+  it('defaults the OK label to "OK"', () => {
+    void ask("Name?", { input: true });
+    expect(inputDlg().querySelector(".uip-ask-ok")!.textContent).toBe("OK");
+  });
+
+  it("labels the input dialog by its own title element when a title is given", () => {
+    void ask("Name?", { title: "Rename", input: true });
+    const d = inputDlg();
+    expect(d.getAttribute("aria-labelledby")).toBe("uip-ask-input-title");
+    expect(d.querySelector("#uip-ask-input-title")!.textContent).toBe("Rename");
+    expect(d.getAttribute("aria-describedby")).toBe("uip-ask-input-msg");
+  });
+
+  it("prevents the form's default submission (an ask must never navigate)", async () => {
+    const p = ask("Name?", { input: true });
+    const d = inputDlg();
+    d.querySelector<HTMLInputElement>(".uip-ask-input")!.value = "trillian";
+    const evt = new Event("submit", { cancelable: true });
+    d.querySelector("form")!.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(true);
+    await expect(p).resolves.toBe("trillian");
+  });
+
   it("destructive input ask keeps focus on the input (type-to-confirm flows)", () => {
     void ask("Type the name to delete:", { variant: "destructive", input: true });
     const d = inputDlg();
@@ -218,5 +295,21 @@ describe("ask — one preemption domain across shapes", () => {
     await expect(p1).resolves.toBeNull();
     click(booleanDlg(), ".uip-ask-ok");
     await expect(p2).resolves.toBe(true);
+  });
+});
+
+describe("ask — _resetForTest (test-only seam)", () => {
+  it("resolves a still-pending ask to its cancel value", async () => {
+    const p = ask("Sure?");
+    _resetForTest();
+    await expect(p).resolves.toBe(false);
+  });
+
+  it("removes both shapes' dialogs from the document", () => {
+    void ask("boolean shape");
+    void ask("input shape", { input: true }); // preempts the boolean one
+    expect(document.querySelectorAll("dialog.uip-ask")).toHaveLength(2);
+    _resetForTest();
+    expect(document.querySelectorAll("dialog.uip-ask")).toHaveLength(0);
   });
 });

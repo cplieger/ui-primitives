@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { afterTransition } from "./transition.js";
+import { afterTransition, forceReflow } from "./transition.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -10,6 +10,19 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   document.body.innerHTML = "";
+});
+
+describe("forceReflow", () => {
+  it("reads a layout property so a pending style change is flushed", () => {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    // A forced reflow has no observable state — the flush IS the read, and
+    // happy-dom has no layout engine — so the read itself is the contract.
+    // Any layout property would do; this pins that one is read at all.
+    const read = vi.spyOn(el, "getBoundingClientRect");
+    forceReflow(el);
+    expect(read).toHaveBeenCalled();
+  });
 });
 
 describe("afterTransition", () => {
