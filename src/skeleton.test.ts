@@ -1,8 +1,13 @@
+// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { skeletonTiming } from "./skeleton.js";
 
-// Pure timing — no DOM needed (node environment).
+// Pure timing — no DOM needed. The happy-dom pragma above is a harness
+// workaround, not a requirement: vitest.config.ts sets `isolate: false`, so a
+// mutation run's worker keeps the environment the other 16 test files ask for
+// and a node-environment file here is selected but never executed — every
+// assertion below then scores as a miss against a mutant it would have caught.
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -55,6 +60,17 @@ describe("skeletonTiming", () => {
     vi.advanceTimersByTime(150);
     t.commit(render);
     expect(render).toHaveBeenCalledTimes(1);
+  });
+
+  it("defaults the show delay to 150ms", () => {
+    // The documented default, and the whole anti-flicker premise: a load that
+    // settles inside this window must never paint the skeleton.
+    const show = vi.fn();
+    skeletonTiming(show);
+    vi.advanceTimersByTime(149);
+    expect(show).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(show).toHaveBeenCalledTimes(1);
   });
 
   it("runs the show teardown before the committed render", () => {
