@@ -45,6 +45,12 @@ export function viewTransition(fn: () => void | Promise<void>): Promise<void> {
     }
     const transition = document.startViewTransition(fn);
     transition.ready.catch(() => undefined);
+    // `updateCallbackDone` rejects with whatever `fn` threw, and nothing else
+    // here observes it, so without this handler a throwing cosmetic update
+    // raises an unhandled rejection in the page. Verified against Chromium's
+    // real View Transitions API; the DOM emulator this suite used to run under
+    // has no startViewTransition at all, so the leak could not surface there.
+    transition.updateCallbackDone.catch(() => undefined);
     const watchdog = setTimeout(() => {
       // Safe on a transition in any state: skipping after finish is a no-op.
       transition.skipTransition();
