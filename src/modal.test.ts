@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { createModal, _resetForTest } from "./modal.js";
@@ -210,14 +209,26 @@ describe("iOS-safe scroll-lock (ref-counted)", () => {
   });
 
   it("restores the scroll position when the lock is released", () => {
-    window.scrollTo(0, 250);
-    const m = createModal(makeContent().content);
-    m.open(); // saves scrollY 250 and pins the body at -250px
-    window.scrollTo(0, 0); // a pinned body sits at the top while the modal is up
-    m.close();
-    vi.advanceTimersByTime(400);
-    expect(window.scrollY).toBe(250);
-    window.scrollTo(0, 0);
+    // A real browser refuses to scroll a document with no overflow, so the page
+    // needs real content before scrollY can hold anything. Under the DOM
+    // emulator this suite used to run on, scrollTo wrote through to scrollY
+    // regardless of document height, so no spacer was needed.
+    const spacer = document.createElement("div");
+    spacer.style.height = "3000px";
+    document.body.appendChild(spacer);
+    try {
+      window.scrollTo(0, 250);
+      expect(window.scrollY).toBe(250); // the premise, not the assertion
+      const m = createModal(makeContent().content);
+      m.open(); // saves scrollY 250 and pins the body at -250px
+      window.scrollTo(0, 0); // a pinned body sits at the top while the modal is up
+      m.close();
+      vi.advanceTimersByTime(400);
+      expect(window.scrollY).toBe(250);
+    } finally {
+      spacer.remove();
+      window.scrollTo(0, 0);
+    }
   });
 
   it("dispose releases the scroll-lock of a still-open modal", () => {

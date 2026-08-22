@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fc from "fast-check";
 
@@ -10,12 +9,19 @@ import {
   type PopoverPlacement,
 } from "./popover.js";
 
-// happy-dom does no layout: getBoundingClientRect() returns zeros and
-// offsetWidth/offsetHeight are 0. To exercise the placement math for real we
-// mock the anchor rect and stub the panel's measured size. window.innerWidth /
-// innerHeight are stubbable via vi.stubGlobal (auto-restored by unstubGlobals),
-// and window.visualViewport is null by default so the innerWidth fallback path
-// runs unless we stub a fake box.
+// These tests exercise the placement MATH, so they feed it a chosen anchor rect
+// and a chosen viewport instead of laying out a real page: `stubRect` mocks the
+// anchor box and `stubSize` the panel's measured size.
+//
+// The viewport goes through `stubViewport`, which stubs window.visualViewport
+// as well as innerWidth/innerHeight, because `viewportBox()` in popover.ts
+// prefers visualViewport and only falls back to innerWidth/innerHeight when it
+// is absent. A real browser always has a visualViewport, so stubbing the two
+// inner* globals alone silently measures the true window and every flip/clamp
+// assertion reads the unflipped value. Stub both, or neither.
+//
+// The four tests that assert the visualViewport path itself (offset boxes,
+// pinch-zoom) call `fakeVisualViewport` directly with the box they need.
 
 /** A DOMRect-shaped return for a mocked getBoundingClientRect. */
 function rectOf(left: number, top: number, width: number, height: number): DOMRect {
@@ -61,6 +67,19 @@ function fakeVisualViewport(box: {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   });
+}
+
+/**
+ * Present a viewport of exactly `width` x `height` at the origin.
+ *
+ * Stubs all three globals a browser exposes for it, because production reads
+ * visualViewport first; stubbing only innerWidth/innerHeight leaves the real
+ * window in play and the assertion silently measures the wrong box.
+ */
+function stubViewport(width: number, height: number): void {
+  fakeVisualViewport({ offsetLeft: 0, offsetTop: 0, width, height });
+  vi.stubGlobal("innerWidth", width);
+  vi.stubGlobal("innerHeight", height);
 }
 
 beforeEach(() => {
@@ -127,8 +146,7 @@ describe("placeAnchored — placement × align math (flip/clamp off)", () => {
     document.body.append(anchor, panel);
     stubRect(anchor, 100, 100, 50, 20);
     stubSize(panel, 80, 40);
-    vi.stubGlobal("innerWidth", 2000);
-    vi.stubGlobal("innerHeight", 2000);
+    stubViewport(2000, 2000);
     placeAnchored(panel, anchor);
     expect(leftOf(panel)).toBe(100); // start
     expect(topOf(panel)).toBe(124); // bottom + default offset 4
@@ -142,8 +160,7 @@ describe("placeAnchored — flip", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 200);
+    stubViewport(1000, 200);
     stubRect(anchor, 100, 170, 50, 20); // bottom 190, near the viewport bottom
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom" });
@@ -155,8 +172,7 @@ describe("placeAnchored — flip", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 200);
+    stubViewport(1000, 200);
     stubRect(anchor, 100, 10, 50, 20); // bottom 30, near the viewport top
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "top" });
@@ -168,8 +184,7 @@ describe("placeAnchored — flip", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 200);
-    vi.stubGlobal("innerHeight", 1000);
+    stubViewport(200, 1000);
     stubRect(anchor, 170, 100, 20, 20); // right 190, near the viewport right
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "right", clamp: false });
@@ -181,8 +196,7 @@ describe("placeAnchored — flip", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 200);
-    vi.stubGlobal("innerHeight", 1000);
+    stubViewport(200, 1000);
     stubRect(anchor, 10, 100, 20, 20); // right 30, near the viewport left
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "left", clamp: false });
@@ -194,8 +208,7 @@ describe("placeAnchored — flip", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 200);
+    stubViewport(1000, 200);
     stubRect(anchor, 100, 170, 50, 20);
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom", flip: false, clamp: false });
@@ -206,8 +219,7 @@ describe("placeAnchored — flip", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 200);
+    stubViewport(1000, 200);
     // Anchor high up: below overflows a tiny bit but above has even less room.
     stubRect(anchor, 100, 5, 50, 190); // top 5, bottom 195; spaceAbove 5, spaceBelow 5
     stubSize(panel, 80, 40);
@@ -291,8 +303,7 @@ describe("placeAnchored — flip boundaries (vertical)", () => {
       const anchor = document.createElement("button");
       const panel = document.createElement("div");
       document.body.append(anchor, panel);
-      vi.stubGlobal("innerWidth", c.vpWidth);
-      vi.stubGlobal("innerHeight", c.vpHeight);
+      stubViewport(c.vpWidth, c.vpHeight);
       stubRect(anchor, c.rect[0], c.rect[1], c.rect[2], c.rect[3]);
       stubSize(panel, 80, 40);
       placeAnchored(panel, anchor, { placement: c.placement });
@@ -374,8 +385,7 @@ describe("placeAnchored — flip boundaries (horizontal)", () => {
       const anchor = document.createElement("button");
       const panel = document.createElement("div");
       document.body.append(anchor, panel);
-      vi.stubGlobal("innerWidth", c.vpWidth);
-      vi.stubGlobal("innerHeight", c.vpHeight);
+      stubViewport(c.vpWidth, c.vpHeight);
       stubRect(anchor, c.rect[0], c.rect[1], c.rect[2], c.rect[3]);
       stubSize(panel, 80, 40);
       placeAnchored(panel, anchor, { placement: c.placement });
@@ -391,8 +401,7 @@ describe("placeAnchored — clamp", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 200);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(200, 800);
     stubRect(anchor, 180, 50, 50, 20); // start-align left would be 180
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom", align: "start", margin: 8 });
@@ -404,8 +413,7 @@ describe("placeAnchored — clamp", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 200);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(200, 800);
     stubRect(anchor, -50, 50, 50, 20); // start-align left would be -50
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom", align: "start", margin: 8 });
@@ -416,8 +424,7 @@ describe("placeAnchored — clamp", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 800);
-    vi.stubGlobal("innerHeight", 200);
+    stubViewport(800, 200);
     stubRect(anchor, 50, 180, 20, 20); // start-align top would be 180
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "right", align: "start", margin: 8 });
@@ -429,8 +436,7 @@ describe("placeAnchored — clamp", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 200);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(200, 800);
     stubRect(anchor, 180, 50, 50, 20);
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, {
@@ -446,8 +452,7 @@ describe("placeAnchored — clamp", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 100);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(100, 800);
     stubRect(anchor, 40, 50, 20, 20);
     stubSize(panel, 200, 40); // wider than the 100px viewport
     placeAnchored(panel, anchor, { placement: "bottom", align: "start", flip: false, margin: 8 });
@@ -459,8 +464,7 @@ describe("placeAnchored — clamp", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 200);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(200, 800);
     stubRect(anchor, 180, 400, 50, 20); // start-align left would be 180
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "top", align: "start", flip: false, margin: 8 });
@@ -575,8 +579,7 @@ describe("placeAnchored — visualViewport box", () => {
 describe("placeAnchored — property", () => {
   it("the clamped cross-axis coord stays within the viewport box for random rects/sizes", () => {
     vi.stubGlobal("visualViewport", undefined);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(1000, 800);
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
@@ -863,8 +866,7 @@ describe("createPopover — reposition tracking", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.appendChild(anchor);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(1000, 800);
     stubRect(anchor, 100, 100, 50, 20);
     stubSize(panel, 80, 40);
     const c = createPopover(anchor, panel, {
@@ -888,8 +890,7 @@ describe("createPopover — reposition tracking", () => {
     const panel = document.createElement("div");
     scroller.appendChild(anchor);
     document.body.append(scroller, panel);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(1000, 800);
     stubRect(anchor, 100, 100, 50, 20);
     stubSize(panel, 80, 40);
     const c = createPopover(anchor, panel, {
@@ -914,8 +915,7 @@ describe("createPopover — reposition tracking", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.appendChild(anchor);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(1000, 800);
     stubRect(anchor, 100, 100, 50, 20);
     stubSize(panel, 80, 40);
     const c = createPopover(anchor, panel, {
@@ -1227,8 +1227,7 @@ describe("createPopover — rAF-throttled reposition tracking", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.appendChild(anchor);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(1000, 800);
     stubRect(anchor, 100, 100, 50, 20);
     stubSize(panel, 80, 40);
     const c = createPopover(anchor, panel, {
@@ -1273,8 +1272,7 @@ describe("createPopover — rAF-throttled reposition tracking", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.appendChild(anchor);
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(1000, 800);
     stubRect(anchor, 100, 100, 50, 20);
     stubSize(panel, 80, 40);
     const c = createPopover(anchor, panel, { flip: false, clamp: false });
@@ -1426,8 +1424,7 @@ describe("createPopover — point (virtual) anchor", () => {
   });
 
   it("a non-point virtual anchor positions and tracks on scroll", () => {
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(1000, 800);
     const panel = document.createElement("div");
     document.body.appendChild(panel);
     stubSize(panel, 80, 40);
@@ -1458,8 +1455,7 @@ describe("placeAnchored — full-bleed (stretch: viewport)", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 500);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(500, 800);
     stubRect(anchor, 100, 100, 50, 20); // bottom 120
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom", stretch: "viewport", flip: false });
@@ -1501,8 +1497,7 @@ describe("placeAnchored — full-bleed (stretch: viewport)", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 500);
-    vi.stubGlobal("innerHeight", 200);
+    stubViewport(500, 200);
     stubRect(anchor, 100, 170, 50, 20); // bottom 190 near the viewport bottom
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom", stretch: "viewport" });
@@ -1515,8 +1510,7 @@ describe("placeAnchored — full-bleed (stretch: viewport)", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    vi.stubGlobal("innerWidth", 800);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(800, 800);
     stubRect(anchor, 100, 100, 50, 20); // right 150
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, {
@@ -1546,8 +1540,7 @@ describe("placeAnchored — full-bleed (stretch: viewport)", () => {
 
   it("property: pins both inline edges to `margin` regardless of anchor x/width", () => {
     vi.stubGlobal("visualViewport", undefined);
-    vi.stubGlobal("innerWidth", 500);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(500, 800);
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
@@ -1670,9 +1663,10 @@ describe("createPopover — leave animation lifecycle", () => {
   });
 
   it("leave still completes without a transition event (the reduced-motion path)", () => {
-    // Under prefers-reduced-motion the CSS neutralizes the transition to ~0ms;
-    // happy-dom fires no real transitionend, so the fallback timer is what
-    // guarantees the leave lifecycle still finishes promptly.
+    // Under prefers-reduced-motion the CSS neutralizes the transition to ~0ms
+    // and no transitionend arrives, so the fallback timer is what guarantees
+    // the leave lifecycle still finishes promptly. Fake timers reproduce that
+    // shape: a suspended clock advances no CSS transition either.
     const { c, panel } = mountPopover();
     c.show();
     c.hide();
@@ -1726,8 +1720,7 @@ describe("createPopover — leave animation lifecycle", () => {
 
 describe("createPopover: setOptions (responsive placement)", () => {
   it("flips a live open popover between content-sized and full-bleed stretch", () => {
-    vi.stubGlobal("innerWidth", 1000);
-    vi.stubGlobal("innerHeight", 800);
+    stubViewport(1000, 800);
     const anchor = document.createElement("button");
     stubRect(anchor, 100, 50, 200, 40);
     const panel = document.createElement("div");

@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from "vitest";
 
 import { createDisclosure } from "./disclosure.js";
@@ -134,8 +133,9 @@ describe("keyboard activation", () => {
     const d = createDisclosure(trigger, region, { animate: false });
     const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
     trigger.dispatchEvent(enter);
-    // No synthetic toggle — a real button would fire click, which happy-dom
-    // does not synthesize from a dispatched keydown.
+    // No synthetic toggle. A dispatched event is untrusted, so it runs no
+    // default action and the button never fires the click the disclosure
+    // relies on; a real keypress would.
     expect(d.isOpen).toBe(false);
   });
 });
@@ -284,10 +284,10 @@ describe("createDisclosure: onToggle source", () => {
 describe("createDisclosure: the two height-animation engines", () => {
   // 0 <-> auto is animated one of two ways, and which one runs is the whole
   // reason `supportsInterpolateSize` exists. Both paths are documented
-  // behavior, so both are pinned with an explicit stub: happy-dom's
-  // `CSS.supports` answers true to anything, so the default environment only
-  // ever reached the interpolate-size path and the measured-px fallback — the
-  // path every engine without `interpolate-size` takes — ran in no test at all.
+  // behavior, so both are pinned with an explicit `CSS.supports` stub rather
+  // than left to whatever the running browser answers: Chromium supports
+  // `interpolate-size`, so without the stub the measured-px fallback — the
+  // path every engine without it takes — would run in no test at all.
   it("interpolates the auto keyword when the engine supports it", () => {
     vi.stubGlobal("CSS", { supports: () => true });
     const { trigger, region } = mount();

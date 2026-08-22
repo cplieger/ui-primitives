@@ -31,8 +31,8 @@ export interface DialogController {
   dispose(): void;
 }
 
-/** Open a native <dialog> as a modal. happy-dom / older engines may lack
- *  `showModal()`; fall back to the `open` property so behavior degrades. */
+/** Open a native <dialog> as a modal. An older engine may lack `showModal()`;
+ *  fall back to the `open` property so behavior degrades. */
 export function openDialog(dialog: HTMLDialogElement): void {
   // A reopen inside the leave fade cancels it: dropping is-leaving makes the
   // pending close finalizer a no-op (it is guarded on the class), so a reused
@@ -46,7 +46,7 @@ export function openDialog(dialog: HTMLDialogElement): void {
     dialog.showModal();
     return;
   } catch {
-    // showModal() absent or not implemented (happy-dom) — degrade gracefully.
+    // showModal() absent or not implemented — degrade gracefully.
   }
   dialog.open = true;
 }

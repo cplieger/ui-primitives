@@ -10,9 +10,9 @@
 // per-show via `closest("dialog[open]")`, generalized for chrome that has no
 // anchor element to derive the dialog from.
 
-/** `:modal` matches only dialogs opened via `showModal()`. Engines without a
- *  faithful `:modal` (happy-dom reports `false` even for showModal-opened
- *  dialogs) fall through to the caller's last-open-dialog fallback. */
+/** `:modal` matches only dialogs opened via `showModal()`. An engine without a
+ *  faithful `:modal`, or without the selector at all, falls through to the
+ *  caller's last-open-dialog fallback. */
 function isModal(dialog: HTMLDialogElement): boolean {
   try {
     return dialog.matches(":modal");
@@ -26,7 +26,7 @@ function isModal(dialog: HTMLDialogElement): boolean {
  *  top-layer order whenever dialogs are appended in open order — the common
  *  case for built-on-demand modals), falling back to the last open dialog of
  *  any kind. The fallback keeps the resolution working where `:modal` is
- *  unfaithful (happy-dom) and is harmless when the dialog is genuinely
+ *  unfaithful and is harmless when the dialog is genuinely
  *  non-modal: nothing is inert then, and the hosted chrome is
  *  `position: fixed`, so it paints in the same viewport spot either way. */
 export function topmostOpenDialog(): HTMLDialogElement | null {

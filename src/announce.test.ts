@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { announce, _resetForTest } from "./announce.js";

@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 // engine.ts is DOM-free, so these tests do not need a DOM. The pragma is for
 // the mutation harness: Stryker's vitest runner does not run test files whose
 // environment differs from the rest of the project, so without it none of the
