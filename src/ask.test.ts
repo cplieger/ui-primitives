@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { ask, _resetForTest } from "./ask.js";
@@ -102,7 +101,9 @@ describe("ask (boolean shape)", () => {
     click(d, ".uip-ask-ok");
     await expect(p).resolves.toBe(true);
     expect(d.classList.contains("is-leaving")).toBe(true); // fading out
-    vi.advanceTimersByTime(400); // no transitionend in happy-dom: fallback
+    // Fake timers suppress the CSS transition, so the 400ms fallback is the
+    // path that finalizes the close here.
+    vi.advanceTimersByTime(400);
     expect(d.open).toBe(false);
   });
 

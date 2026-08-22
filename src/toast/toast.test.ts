@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from "vitest";
 
 import { _resetForTest as resetAnnounce } from "../announce.js";
@@ -434,6 +433,23 @@ describe("toast: modal <dialog> auto-hosting", () => {
     return dlg;
   }
 
+  /**
+   * Close a dialog and wait for its `close` event to be delivered.
+   *
+   * `HTMLDialogElement.close()` queues the close event as a task rather than
+   * dispatching it synchronously, so an assertion placed straight after the
+   * call runs before the stack's evacuation handler does. The DOM emulator this
+   * suite used to run under dispatched it synchronously, which is why these
+   * assertions used to read correctly without a wait.
+   */
+  async function closeAndSettle(dlg: HTMLDialogElement): Promise<void> {
+    const delivered = new Promise<void>((resolve) => {
+      dlg.addEventListener("close", () => resolve(), { once: true });
+    });
+    dlg.close();
+    await delivered;
+  }
+
   it("hosts the default stack inside an open modal so toasts stay interactive (not inert)", () => {
     const dlg = openModal();
     info("over the modal");
@@ -444,7 +460,7 @@ describe("toast: modal <dialog> auto-hosting", () => {
     dlg.remove();
   });
 
-  it("moves a live stack in and back out, carrying visible toasts along", () => {
+  it("moves a live stack in and back out, carrying visible toasts along", async () => {
     error("sticky"); // sticky error toast, no auto-dismiss
     expect(stack()!.parentElement).toBe(document.body);
 
@@ -453,7 +469,7 @@ describe("toast: modal <dialog> auto-hosting", () => {
     expect(stack()!.parentElement).toBe(dlg);
     expect(toasts()).toHaveLength(2); // the sticky toast rode along
 
-    dlg.close(); // close event → evacuation without needing a new toast
+    await closeAndSettle(dlg); // close event → evacuation without needing a new toast
     expect(stack()!.parentElement).toBe(document.body);
     expect(toasts()).toHaveLength(2); // both toasts survived both moves
     dlg.remove();
@@ -469,14 +485,14 @@ describe("toast: modal <dialog> auto-hosting", () => {
     expect(stack()!.parentElement).toBe(document.body);
   });
 
-  it("nested modals: hosts into the most recent, steps back one per close", () => {
+  it("nested modals: hosts into the most recent, steps back one per close", async () => {
     const outer = openModal();
     const inner = openModal(); // appended after outer → resolves as topmost
     info("nested");
     expect(stack()!.parentElement).toBe(inner);
-    inner.close(); // re-sync lands on the still-open outer modal
+    await closeAndSettle(inner); // re-sync lands on the still-open outer modal
     expect(stack()!.parentElement).toBe(outer);
-    outer.close();
+    await closeAndSettle(outer);
     expect(stack()!.parentElement).toBe(document.body);
     inner.remove();
     outer.remove();

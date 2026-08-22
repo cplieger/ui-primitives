@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { initTooltips, _resetForTest } from "./tooltip.js";
@@ -31,6 +30,27 @@ function liveTip(): HTMLElement | null {
 
 function tipCount(): number {
   return document.querySelectorAll(".uip-tooltip").length;
+}
+
+/**
+ * Present a viewport of exactly `width` x `height` at the origin.
+ *
+ * The tooltip positioner reads window.visualViewport first and only falls back
+ * to innerWidth/innerHeight, so a test that stubs the two inner* globals alone
+ * silently measures the real window and its clamp/flip assertions read the
+ * unclamped value.
+ */
+function stubViewport(width: number, height: number): void {
+  vi.stubGlobal("visualViewport", {
+    offsetLeft: 0,
+    offsetTop: 0,
+    width,
+    height,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  });
+  vi.stubGlobal("innerWidth", width);
+  vi.stubGlobal("innerHeight", height);
 }
 
 function anchorRect(el: HTMLElement, left: number, top: number, w: number, h: number): void {
@@ -497,19 +517,26 @@ describe("show-time guards and placement", () => {
   });
 
   it("positions the tooltip above its anchor, centered", () => {
-    // happy-dom does no layout, so the anchor rect is mocked and the tooltip
-    // measures 0x0: top = anchor top - 6px gap, left = anchor centre.
-    vi.stubGlobal("innerWidth", 2000);
-    vi.stubGlobal("innerHeight", 2000);
+    // Asserted as a relationship, not as two magic pixel values: a real browser
+    // measures the tooltip (about 18px tall for one line), so the old
+    // `top === 194px` / `left === 120px` pair only held because the emulator
+    // this replaced reported every box as 0x0. The contract is that the
+    // tooltip's bottom edge sits GAP above the anchor top and its horizontal
+    // centre matches the anchor's, which is true at any measured size.
+    stubViewport(2000, 2000);
     initTooltips();
     const a = anchor("Hi");
     anchorRect(a, 100, 200, 40, 40);
     pointerOver(a);
     vi.advanceTimersByTime(500);
     const t = tip()!;
+    const box = t.getBoundingClientRect();
     expect(t.style.position).toBe("fixed");
-    expect(t.style.top).toBe("194px");
-    expect(t.style.left).toBe("120px");
+    expect(box.height).toBeGreaterThan(0);
+    // Anchor top 200, 6px gap.
+    expect(parseFloat(t.style.top) + box.height).toBe(194);
+    // Anchor centre: 100 + 40 / 2.
+    expect(parseFloat(t.style.left) + box.width / 2).toBe(120);
   });
 
   it("renders a single-line tooltip with no <br>", () => {

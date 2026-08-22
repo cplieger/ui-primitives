@@ -173,15 +173,31 @@ contract, independent of any local overlay.
 - **Strict typed ESLint.** No `any` (prefer `unknown`), inline `import type`,
   `eqeqeq`, `curly`, `prefer-const`. Prefix deliberately-unused names with `_`.
 - **Tests are colocated** as `src/**/*.test.ts` (the only pattern vitest
-  includes). Pure logic runs in the `node` environment; DOM tests opt in with
-  `// @vitest-environment happy-dom` on the first line.
+  includes). Every file runs in a real headless Chromium through Vitest Browser
+  Mode, so there is no environment to select and no per-file pragma: `window`,
+  `document`, real CSS layout and the real `<dialog>` are all present.
 - **Reset module singletons between tests.** `announce`, `ask`, `tooltip`,
   and the default `toast` are module singletons; call their `_resetForTest()`
   (and clear `document.body`) in `afterEach`.
-- **happy-dom limits.** happy-dom does no layout (`offsetParent` is `null`,
-  `getBoundingClientRect` is zeros) and only partially implements `<dialog>`.
-  Stub what you must (e.g. `offsetParent` for focus-trap tests) and keep the
-  production guards that make those APIs degrade gracefully.
+- **Write assertions a real engine can satisfy.** Because the boxes are real,
+  a measurement is a relationship rather than a constant: assert that a panel
+  sits GAP above its anchor, not that its `top` is a specific pixel value that
+  only held while every box measured 0. Three more consequences worth knowing
+  before a test confuses you:
+  - **The viewport is real.** To place an element near an edge, stub
+    `window.visualViewport` as well as `innerWidth`/`innerHeight`; production
+    reads `visualViewport` first, so stubbing only the two `inner*` globals
+    silently measures the true 1280x720 window.
+  - **`<dialog>.close()` queues its `close` event** instead of dispatching it
+    synchronously, so await the event rather than asserting straight after the
+    call.
+  - **`delete document.someMethod` is a no-op** for anything defined on a
+    prototype, which is most of the platform. Shadow it with an own `undefined`
+    property when a test needs the feature detection to fail.
+- **Keep the degradation guards.** Several primitives wrap `showModal()`,
+  `close()` and `:modal` in `try`/`catch` for engines that lack them. Chromium
+  has all three, so those branches are exercised by an explicit per-element
+  override rather than by the runner; do not delete them as dead code.
 - **Property-based tests.** `fast-check` drives invariants (e.g. the toast queue
   never exceeds `maxVisible + maxQueue`); keep new invariant coverage in that
   idiom where it fits.

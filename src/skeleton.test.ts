@@ -1,13 +1,11 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { skeletonTiming } from "./skeleton.js";
 
-// Pure timing — no DOM needed. The happy-dom pragma above is a harness
-// workaround, not a requirement: vitest.config.ts sets `isolate: false`, so a
-// mutation run's worker keeps the environment the other 16 test files ask for
-// and a node-environment file here is selected but never executed — every
-// assertion below then scores as a miss against a mutant it would have caught.
+// Pure timing, no DOM needed. It runs in the browser anyway because the whole
+// package does, which costs nothing and removes the split that used to make
+// this file unrunnable under a mutation run: with one runner there is no
+// second environment for a worker to be holding.
 
 beforeEach(() => {
   vi.useFakeTimers();

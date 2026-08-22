@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { createDialog, openDialog, closeDialog } from "./dialog.js";
@@ -195,15 +194,20 @@ describe("openDialog: reopen during the leave fade", () => {
 });
 
 describe("openDialog / closeDialog: platform calls and degradation", () => {
-  it("closes through the native close() so the dialog's own close event fires", () => {
+  it("closes through the native close() so the dialog's own close event fires", async () => {
     const d = makeDialog();
     openDialog(d);
-    const onNativeClose = vi.fn();
-    d.addEventListener("close", onNativeClose);
+    // `close()` queues the close event as a task rather than dispatching it
+    // synchronously, so await delivery instead of asserting on a spy right
+    // after the fade finalizer runs. A missing event fails on the test timeout.
+    const delivered = new Promise<void>((resolve) => {
+      d.addEventListener("close", () => resolve(), { once: true });
+    });
 
     closeDialog(d);
-    vi.advanceTimersByTime(400);
-    expect(onNativeClose).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(400);
+    await delivered;
+    expect(d.open).toBe(false);
   });
 
   it("openDialog falls back to the open property when showModal() is unavailable", () => {

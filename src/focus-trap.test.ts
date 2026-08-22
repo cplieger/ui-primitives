@@ -1,16 +1,15 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from "vitest";
 
 import { trapFocus } from "./focus-trap.js";
 
-// happy-dom does no layout, but `getClientRects()` returns a single rect for
-// every element, so the trap's getClientRects()-based visibility filter treats
-// them all as focusable with no stubbing; a hidden element is expressed by
-// stubbing `getClientRects` to return none. happy-dom DOES implement
-// `checkVisibility`, and it always answers `true`, so that guard is a no-op
-// unless a test overrides it per element.
-// We therefore use real, connected elements — no offsetParent/getClientRects
-// stub is needed (unlike the previous offsetParent-based filter).
+// The trap's visibility filter reads `getClientRects()` and `checkVisibility()`,
+// and both mean what they say now that the suite runs in a real browser: a
+// detached or `display: none` element reports no rects and fails
+// `checkVisibility`, so a hidden element is expressed by actually hiding it
+// rather than by stubbing a measurement. Tests that need a specific engine
+// shape (an element whose `checkVisibility` rejects only on the visibility
+// property, or an older engine with no `checkVisibility` at all) still override
+// that one method per element, which is the behavior under test.
 function makeButton(label: string): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.textContent = label;

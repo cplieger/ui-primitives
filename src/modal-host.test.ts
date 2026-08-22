@@ -1,13 +1,14 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, afterEach, vi } from "vitest";
 
 import { topmostOpenDialog } from "./modal-host.js";
 
 // modal-host resolves the open <dialog> that page-level chrome (the toast
 // stack, the announce regions) must live inside to escape showModal()'s
-// inertness. happy-dom's `:modal` never matches even for showModal()-opened
-// dialogs, so `matches` is stubbed per dialog to express which one the platform
-// would call modal — that ordering preference is the whole point of the module.
+// inertness. `matches` is stubbed per dialog to declare which ones the
+// platform would call modal, so a test can state an arbitrary stack of open
+// dialogs directly: the ORDERING preference is what this module decides, and
+// driving it through real showModal() calls would make the fixture the
+// platform's business rather than the test's.
 
 afterEach(() => {
   document.body.innerHTML = "";

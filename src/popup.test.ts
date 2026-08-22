@@ -1,11 +1,10 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { createPopup, closePopupGroup } from "./popup.js";
 
 // The install timer (listener arming) is a setTimeout(0) and the leave
-// fallback a setTimeout(400); both are driven with fake timers. happy-dom
-// does no layout, which is fine here — popup never measures or positions.
+// fallback a setTimeout(400); both are driven with fake timers. popup never
+// measures or positions anything, so nothing here depends on layout.
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -49,8 +48,8 @@ describe("popup: reveal lifecycle", () => {
     const pop = createPopup(panel);
     // Without a forced reflow between `hidden = false` and `is-open`, the
     // browser coalesces both into one frame and the CSS transition from the
-    // resting state never plays. A layout read is the flush; happy-dom has no
-    // layout engine, so the read itself is the only observable.
+    // resting state never plays. A forced reflow leaves no observable state
+    // behind, so that the read HAPPENS is the only thing a test can pin.
     const read = vi.spyOn(panel, "getBoundingClientRect");
     pop.show();
     expect(read).toHaveBeenCalled();

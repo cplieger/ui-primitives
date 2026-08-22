@@ -235,7 +235,7 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
         try {
           dialog.close();
         } catch {
-          // close() absent / not implemented (happy-dom) — degrade to the attr.
+          // close() absent or not implemented — degrade to the attribute.
           dialog.open = false;
         }
       }
