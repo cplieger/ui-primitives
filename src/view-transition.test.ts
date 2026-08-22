@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from "vitest";
 
 import { viewTransition } from "./view-transition.js";
@@ -7,20 +6,44 @@ interface MutableDoc {
   startViewTransition?: unknown;
 }
 
+/**
+ * Make `document.startViewTransition` absent to the module's feature detection.
+ *
+ * `delete document.startViewTransition` cannot do this in a real browser: the
+ * method lives on `Document.prototype`, so deleting a property the instance
+ * does not own is a silent no-op and the real API stays reachable. Every test
+ * below that used the delete believed it was exercising the fallback path and
+ * was in fact driving Chromium's real View Transitions API, which is how the
+ * missing `updateCallbackDone` handler in view-transition.ts went unnoticed.
+ *
+ * Shadowing it with an own `undefined` property is what the detection actually
+ * reads; the `afterEach` delete removes the shadow and restores the prototype
+ * method.
+ */
+function hideViewTransitionAPI(): void {
+  Object.defineProperty(document, "startViewTransition", {
+    value: undefined,
+    configurable: true,
+    writable: true,
+  });
+}
+
 afterEach(() => {
+  // Removes either the shadow above or a test's own assigned stub; in both
+  // cases the prototype method comes back.
   delete (document as MutableDoc).startViewTransition;
 });
 
 describe("viewTransition", () => {
   it("runs fn directly and resolves when startViewTransition is unavailable", async () => {
-    delete (document as MutableDoc).startViewTransition;
+    hideViewTransitionAPI();
     const fn = vi.fn();
     await viewTransition(fn);
     expect(fn).toHaveBeenCalledOnce();
   });
 
   it("awaits an async callback before resolving", async () => {
-    delete (document as MutableDoc).startViewTransition;
+    hideViewTransitionAPI();
     let done = false;
     await viewTransition(async () => {
       await Promise.resolve();
@@ -30,7 +53,7 @@ describe("viewTransition", () => {
   });
 
   it("serializes overlapping calls in order", async () => {
-    delete (document as MutableDoc).startViewTransition;
+    hideViewTransitionAPI();
     const order: number[] = [];
     const p1 = viewTransition(() => {
       order.push(1);
@@ -75,12 +98,12 @@ describe("viewTransition", () => {
   });
 
   it("resolves (swallows) when fn rejects and the API is absent — matching the API path", async () => {
-    delete (document as MutableDoc).startViewTransition;
+    hideViewTransitionAPI();
     await expect(viewTransition(() => Promise.reject(new Error("boom")))).resolves.toBeUndefined();
   });
 
   it("resolves (swallows) when fn throws synchronously and the API is absent", async () => {
-    delete (document as MutableDoc).startViewTransition;
+    hideViewTransitionAPI();
     await expect(
       viewTransition(() => {
         throw new Error("sync boom");
@@ -89,7 +112,7 @@ describe("viewTransition", () => {
   });
 
   it("a rejecting fn does not wedge the queue for the next call", async () => {
-    delete (document as MutableDoc).startViewTransition;
+    hideViewTransitionAPI();
     const order: number[] = [];
     const p1 = viewTransition(() => Promise.reject(new Error("boom")));
     const p2 = viewTransition(() => {
