@@ -24,7 +24,7 @@
 import { el } from "@cplieger/reactive";
 
 import { placeAnchored } from "./popover.js";
-import { afterTransition } from "./transition.js";
+import { cancelTransition, runTransition } from "./transition.js";
 
 export interface TooltipOptions {
   /** Trigger attribute holding the tooltip text. Default `data-uip-tooltip`. */
@@ -52,10 +52,7 @@ type TooltipState =
   | { readonly kind: "visible"; readonly anchor: HTMLElement; readonly tip: HTMLElement }
   | { readonly kind: "fading"; readonly tip: HTMLElement };
 
-const HIDE_FALLBACK_MS = 150;
-
 let tipIdSeq = 0;
-
 class TooltipController {
   private state: TooltipState = { kind: "idle" };
   private warmUntil = 0;
@@ -227,20 +224,21 @@ class TooltipController {
     }
     const { anchor, tip } = this.state;
     removeDescribedBy(anchor, tip.id);
-    tip.classList.add("is-leaving");
     this.state = { kind: "fading", tip };
     this.warmUntil = Date.now() + this.cooldown;
 
-    afterTransition(
-      tip,
-      () => {
-        if (this.state.kind === "fading" && this.state.tip === tip) {
-          this.state = { kind: "idle" };
-        }
+    // Each show builds a fresh tip, so this settle is the only one that can
+    // ever be pending on this element, and teardown() cancels it — nothing can
+    // reach here against a tip the controller has already moved on from.
+    runTransition(tip, {
+      change: () => {
+        tip.classList.add("is-leaving");
+      },
+      settled: () => {
+        this.state = { kind: "idle" };
         tip.remove();
       },
-      HIDE_FALLBACK_MS,
-    );
+    });
   }
 
   private teardown(): void {
@@ -253,6 +251,7 @@ class TooltipController {
         this.state.tip.remove();
         break;
       case "fading":
+        cancelTransition(this.state.tip);
         this.state.tip.remove();
         break;
       case "idle":

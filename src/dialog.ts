@@ -3,11 +3,7 @@
 // free; this module adds backdrop-click dismissal (drag-safe) and a fade-out
 // lifecycle via a namespaced `is-leaving` class before the element is closed.
 
-import { afterTransition } from "./transition.js";
-
-/** Fallback timeout (ms) if `transitionend` never fires (no CSS transition,
- *  reduced motion, or an interrupted animation). */
-const LEAVE_FALLBACK_MS = 400;
+import { cancelTransition, runTransition } from "./transition.js";
 
 export interface DialogOptions {
   /** Close when the backdrop is clicked. Default `true`. */
@@ -34,10 +30,10 @@ export interface DialogController {
 /** Open a native <dialog> as a modal. An older engine may lack `showModal()`;
  *  fall back to the `open` property so behavior degrades. */
 export function openDialog(dialog: HTMLDialogElement): void {
-  // A reopen inside the leave fade cancels it: dropping is-leaving makes the
-  // pending close finalizer a no-op (it is guarded on the class), so a reused
-  // dialog is not yanked shut by the stale timer moments after reopening.
-  // Mirrors popup's clearLeave-on-show.
+  // A reopen inside the leave fade cancels it outright: the pending settle
+  // belongs to a close this call is replacing, so drop it rather than leaving
+  // it to be no-oped by a guard downstream.
+  cancelTransition(dialog);
   dialog.classList.remove("is-leaving");
   if (dialog.open) {
     return;
@@ -62,26 +58,24 @@ function closeNative(dialog: HTMLDialogElement): void {
 }
 
 /** Close a native <dialog> after a fade-out: add `is-leaving`, wait for
- *  `transitionend` (or the fallback), then close and invoke `onClosed`. */
+ *  `transitionend` (or the fallback), then close and invoke `onClosed`. A
+ *  reopen (`openDialog`) cancels a pending close, so `onClosed` does not fire
+ *  for a dialog that was reclaimed mid-fade. */
 export function closeDialog(dialog: HTMLDialogElement, onClosed?: () => void): void {
   if (!dialog.open) {
     onClosed?.();
     return;
   }
-  afterTransition(
-    dialog,
-    () => {
-      // If the leaving state was reset (e.g. the element was reused by a newer
-      // caller), don't yank it closed out from under the new owner.
-      if (dialog.classList.contains("is-leaving")) {
-        dialog.classList.remove("is-leaving");
-        closeNative(dialog);
-        onClosed?.();
-      }
+  runTransition(dialog, {
+    change: () => {
+      dialog.classList.add("is-leaving");
     },
-    LEAVE_FALLBACK_MS,
-  );
-  dialog.classList.add("is-leaving");
+    settled: () => {
+      dialog.classList.remove("is-leaving");
+      closeNative(dialog);
+      onClosed?.();
+    },
+  });
 }
 
 /** Wire drag-safe backdrop dismissal on a native <dialog>: `onDismiss` fires

@@ -28,7 +28,7 @@ builds every DOM node (CSP-safe, no `innerHTML`).
 - `modal-host.ts`: INTERNAL helper (not a subpath export) resolving the open `<dialog>` that page-level chrome (the toast stack, the announce regions) must host into to stay usable while a modal is open.
 - `disclosure.ts`: animated collapsible region per the WAI-ARIA disclosure pattern.
 - `skeleton.ts`: anti-flicker timing for skeleton loads. Pure timing, no DOM.
-- `transition.ts`: shared "run after the CSS transition, or a fallback" helper behind the leave lifecycles.
+- `transition.ts`: the one way this library changes an element's state and lets the change animate. `runTransition(el, { change, settled? })` commits whatever the caller wrote as the start state, applies the change, and owns the settle (first `transitionend` on the element, or a 400ms ceiling) until superseded; `cancelTransition(el)` drops a pending settle. Supersession is per element, so no caller carries a cancel handle or an "am I still the owner" guard. **Never flush a style by hand** — a bare layout read is a footgun whose whole purpose is its discarded side effect, and both defects this replaced were a caller placing one wrong or nowhere.
 - `toast/`: the flagship, split three ways:
   - `engine.ts`: a **pure, DOM-free** timer/queue/promotion state machine driven by an injected `ToastView` port. Testable headless.
   - `view.ts`: the DOM implementation of `ToastView` (built with `el`).

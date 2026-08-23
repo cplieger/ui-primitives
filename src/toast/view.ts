@@ -1,23 +1,21 @@
 // view.ts — DOM implementation of the toast `ToastView` port. Builds a
 // purely-visual `.uip-toast-stack` container + per-toast nodes with `el`, wires
 // interaction to the engine's callbacks, and manages the enter/leave lifecycle
-// via `is-entering` → `is-shown` → `is-leaving` state classes. The countdown is
-// driven by the `--uip-toast-duration` custom property (the CSS animates the
-// progress bar from it); pause/resume freeze the progress animation via
-// play-state. Screen-reader announcement is delegated to `announce()`: neither
-// the stack nor the toast nodes are live regions, so no live region ever nests
-// inside another, and importing this module mutates no DOM (the stack is
-// created lazily, on the first toast shown).
+// via `is-entering` → `is-shown` → `is-leaving` state classes (the leave goes
+// through `runTransition`, so the state it animates from is committed for us).
+// The countdown is driven by the `--uip-toast-duration` custom
+// property (the CSS animates the progress bar from it); pause/resume freeze the
+// progress animation via play-state. Screen-reader announcement is delegated to
+// `announce()`: neither the stack nor the toast nodes are live regions, so no
+// live region ever nests inside another, and importing this module mutates no
+// DOM (the stack is created lazily, on the first toast shown).
 
 import { el } from "@cplieger/reactive";
 
 import { announce } from "../announce.js";
 import { topmostOpenDialog } from "../modal-host.js";
-import { afterTransition, forceReflow } from "../transition.js";
+import { cancelTransition, runTransition } from "../transition.js";
 import type { ToastCallbacks, ToastRenderData, ToastView } from "./engine.js";
-
-/** Fallback (ms) if `transitionend` never fires so a toast is always removed. */
-const LEAVE_FALLBACK_MS = 400;
 
 export interface ToastHandle {
   readonly el: HTMLElement;
@@ -26,8 +24,6 @@ export interface ToastHandle {
    *  run (or been cancelled). Cancelled on leave/remove so a late enter frame
    *  can't re-apply `is-shown` mid-leave. */
   enterRaf: number | null;
-  /** afterTransition cancel for the pending leave, or null when idle. */
-  leaveCancel: (() => void) | null;
 }
 
 /**
@@ -199,8 +195,13 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
       node.addEventListener("focusin", addPause);
       node.addEventListener("focusout", removePause);
 
-      const handle: ToastHandle = { el: node, progressEl, enterRaf: null, leaveCancel: null };
+      const handle: ToastHandle = { el: node, progressEl, enterRaf: null };
       stack.appendChild(node);
+      // Enter on the next frame. Deliberately a frame and not a synchronous
+      // style commit: the node's FIRST style resolution has no before-change
+      // style, so resolving it with `is-shown` already applied would produce no
+      // enter transition at all. The frame lets the resting `is-entering` state
+      // resolve first, which is what the transition animates from.
       handle.enterRaf = requestAnimationFrame(() => {
         handle.enterRaf = null;
         node.classList.remove("is-entering");
@@ -212,32 +213,29 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
 
     scheduleLeave(handle: ToastHandle, done: () => void): void {
       const node = handle.el;
-      // A dismiss can land before the enter frame runs. Cancel it (so it can't
-      // re-add `is-shown` mid-leave) and settle the node into `is-shown` now, so
-      // the leave transition runs from a defined start state and its
-      // `transitionend` fires instead of stalling on the fallback timer. The
-      // reflow is what makes the settle real: without a style flush between the
-      // add and the `remove` below, `is-shown` never becomes a used style and the
-      // leave would run from `is-entering` (opacity 0) to `is-leaving`
-      // (opacity 0) — no transition, no `transitionend`.
+      // A dismiss can land before the enter frame runs. Cancel it so it cannot
+      // re-add `is-shown` mid-leave, and put the node into `is-shown` now so the
+      // leave has a defined start state — without this the leave would run from
+      // `is-entering` (which the stylesheet has no rule for, so opacity 0) to
+      // `is-leaving` (also opacity 0), which is no change and starts no
+      // transition. Committing that start state is runTransition's job, not
+      // this block's.
       if (handle.enterRaf !== null) {
         cancelAnimationFrame(handle.enterRaf);
         handle.enterRaf = null;
         node.classList.remove("is-entering");
         node.classList.add("is-shown");
-        forceReflow(node);
       }
-      handle.leaveCancel = afterTransition(
-        node,
-        () => {
-          handle.leaveCancel = null;
+      runTransition(node, {
+        change: () => {
+          node.classList.remove("is-shown");
+          node.classList.add("is-leaving");
+        },
+        settled: () => {
           node.remove();
           done();
         },
-        LEAVE_FALLBACK_MS,
-      );
-      node.classList.remove("is-shown");
-      node.classList.add("is-leaving");
+      });
     },
 
     remove(handle: ToastHandle): void {
@@ -245,10 +243,7 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
         cancelAnimationFrame(handle.enterRaf);
         handle.enterRaf = null;
       }
-      if (handle.leaveCancel !== null) {
-        handle.leaveCancel();
-        handle.leaveCancel = null;
-      }
+      cancelTransition(handle.el);
       handle.el.remove();
     },
 

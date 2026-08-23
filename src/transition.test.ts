@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { afterTransition, forceReflow } from "./transition.js";
+import { cancelTransition, runTransition } from "./transition.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -11,94 +11,158 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("forceReflow", () => {
-  it("reads a layout property so a pending style change is flushed", () => {
-    const el = document.createElement("div");
-    document.body.appendChild(el);
-    // A forced reflow leaves no observable state behind: the flush IS the
-    // read, so that a layout property is read at all is the whole contract.
-    // Any of them would do; this pins that one of them is.
+function mount(): HTMLElement {
+  const el = document.createElement("div");
+  document.body.appendChild(el);
+  return el;
+}
+
+describe("runTransition: the start state is committed before the change", () => {
+  it("reads a layout property before running the change, so the change has something to animate from", () => {
+    const el = mount();
+    // The commit leaves no observable state behind — the flush IS the read — so
+    // that a layout property is read, and read BEFORE the change, is the whole
+    // contract. Ordering is what the two measured defects got wrong, so the
+    // ordering is what this pins.
+    const order: string[] = [];
+    vi.spyOn(el, "getBoundingClientRect").mockImplementation(() => {
+      order.push("commit");
+      return new DOMRect();
+    });
+    runTransition(el, {
+      change: () => {
+        order.push("change");
+      },
+    });
+    expect(order).toEqual(["commit", "change"]);
+  });
+
+  it("commits unconditionally, so a caller has no placement decision to get wrong", () => {
+    const el = mount();
     const read = vi.spyOn(el, "getBoundingClientRect");
-    forceReflow(el);
-    expect(read).toHaveBeenCalled();
+    // No settled, nothing pending, nothing to supersede: the commit still happens.
+    runTransition(el, { change: () => undefined });
+    expect(read).toHaveBeenCalledOnce();
   });
 });
 
-describe("afterTransition", () => {
-  it("runs the callback once on a transitionend whose target is the element", () => {
-    const el = document.createElement("div");
-    document.body.appendChild(el);
-    const cb = vi.fn();
-    afterTransition(el, cb, 400);
+describe("runTransition: settled", () => {
+  it("runs once on a transitionend whose target is the element", () => {
+    const el = mount();
+    const settled = vi.fn();
+    runTransition(el, { change: () => undefined, settled });
     el.dispatchEvent(new Event("transitionend"));
     el.dispatchEvent(new Event("transitionend")); // a second event must not re-run
-    expect(cb).toHaveBeenCalledOnce();
+    expect(settled).toHaveBeenCalledOnce();
   });
 
   it("ignores a transitionend that bubbles up from a descendant", () => {
-    const el = document.createElement("div");
+    const el = mount();
     const child = document.createElement("span");
     el.appendChild(child);
-    document.body.appendChild(el);
-    const cb = vi.fn();
-    afterTransition(el, cb, 400);
+    const settled = vi.fn();
+    runTransition(el, { change: () => undefined, settled });
     child.dispatchEvent(new Event("transitionend", { bubbles: true }));
-    expect(cb).not.toHaveBeenCalled(); // descendant transition is not the element's own
-    el.dispatchEvent(new Event("transitionend")); // the element's own transition still settles it
-    expect(cb).toHaveBeenCalledOnce();
+    expect(settled).not.toHaveBeenCalled(); // a descendant's transition is not the element's
+    el.dispatchEvent(new Event("transitionend")); // the element's own still settles it
+    expect(settled).toHaveBeenCalledOnce();
   });
 
-  it("runs the callback via the fallback timeout when transitionend never fires", () => {
-    const el = document.createElement("div");
-    document.body.appendChild(el);
-    const cb = vi.fn();
-    afterTransition(el, cb, 400);
+  it("runs via the fallback ceiling when transitionend never fires", () => {
+    const el = mount();
+    const settled = vi.fn();
+    runTransition(el, { change: () => undefined, settled });
     vi.advanceTimersByTime(399);
-    expect(cb).not.toHaveBeenCalled();
+    expect(settled).not.toHaveBeenCalled();
     vi.advanceTimersByTime(1);
-    expect(cb).toHaveBeenCalledOnce();
+    expect(settled).toHaveBeenCalledOnce();
   });
 
-  it("cancel() prevents the callback; a later transitionend and the fallback are no-ops", () => {
-    const el = document.createElement("div");
-    document.body.appendChild(el);
-    const cb = vi.fn();
-    const cancel = afterTransition(el, cb, 400);
-    cancel();
-    el.dispatchEvent(new Event("transitionend"));
-    vi.advanceTimersByTime(400);
-    expect(cb).not.toHaveBeenCalled();
+  it("arms nothing when settled is omitted", () => {
+    const el = mount();
+    const listen = vi.spyOn(el, "addEventListener");
+    runTransition(el, { change: () => undefined });
+    expect(listen).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 
-describe("afterTransition: 'no-op' means it stops touching the element", () => {
-  // The contract is "after cb has run or cancel has been called, both are
-  // no-ops". Every overlay primitive here hands this helper ONE long-lived,
-  // shared element (the reused <dialog>, the toast stack), so a no-op has to
-  // mean it stops touching that element — not merely that it stops calling
-  // back. Same reason toast.test.ts pins that a re-resolved dialog's close
-  // listener does not churn.
-  function arm(): { el: HTMLElement; detach: ReturnType<typeof vi.fn>; cancel: () => void } {
-    const el = document.createElement("div");
-    document.body.appendChild(el);
+describe("runTransition: supersession is per element", () => {
+  it("a second run drops the first settle without running it", () => {
+    const el = mount();
+    const first = vi.fn();
+    const second = vi.fn();
+    runTransition(el, { change: () => undefined, settled: first });
+    runTransition(el, { change: () => undefined, settled: second });
+    el.dispatchEvent(new Event("transitionend"));
+    vi.advanceTimersByTime(400);
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledOnce();
+  });
+
+  it("supersedes only the element it is given", () => {
+    const a = mount();
+    const b = mount();
+    const settledA = vi.fn();
+    const settledB = vi.fn();
+    runTransition(a, { change: () => undefined, settled: settledA });
+    runTransition(b, { change: () => undefined, settled: settledB });
+    a.dispatchEvent(new Event("transitionend"));
+    b.dispatchEvent(new Event("transitionend"));
+    expect(settledA).toHaveBeenCalledOnce();
+    expect(settledB).toHaveBeenCalledOnce();
+  });
+
+  it("cancelTransition prevents the settle; a later transitionend and the ceiling are no-ops", () => {
+    const el = mount();
+    const settled = vi.fn();
+    runTransition(el, { change: () => undefined, settled });
+    cancelTransition(el);
+    el.dispatchEvent(new Event("transitionend"));
+    vi.advanceTimersByTime(400);
+    expect(settled).not.toHaveBeenCalled();
+  });
+
+  it("cancelTransition on an element with nothing pending is a no-op", () => {
+    const el = mount();
     const detach = vi.spyOn(el, "removeEventListener");
-    const cancel = afterTransition(el, () => undefined, 400);
-    return { el, detach, cancel };
+    cancelTransition(el);
+    expect(detach).not.toHaveBeenCalled();
+  });
+});
+
+describe("runTransition: 'settled' means it stops touching the element", () => {
+  // Every overlay primitive here hands the helper ONE long-lived, shared
+  // element (the reused <dialog>, a toast node), so finishing has to mean it
+  // stops touching that element — not merely that it stops calling back. Same
+  // reason toast.test.ts pins that a re-resolved dialog's close listener does
+  // not churn.
+  function arm(): { el: HTMLElement; detach: ReturnType<typeof vi.spyOn> } {
+    const el = mount();
+    const detach = vi.spyOn(el, "removeEventListener");
+    runTransition(el, { change: () => undefined, settled: () => undefined });
+    return { el, detach };
   }
 
-  it("cancel() after the callback has already run detaches nothing a second time", () => {
-    const { el, detach, cancel } = arm();
+  it("cancelTransition after the settle has already run detaches nothing a second time", () => {
+    const { el, detach } = arm();
     el.dispatchEvent(new Event("transitionend")); // settles, taking the listener off
     expect(detach).toHaveBeenCalledTimes(1);
-    cancel();
+    cancelTransition(el);
     expect(detach).toHaveBeenCalledTimes(1);
   });
 
-  it("a second cancel() detaches nothing a second time", () => {
-    const { detach, cancel } = arm();
-    cancel();
+  it("a second cancelTransition detaches nothing a second time", () => {
+    const { el, detach } = arm();
+    cancelTransition(el);
     expect(detach).toHaveBeenCalledTimes(1);
-    cancel();
+    cancelTransition(el);
     expect(detach).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the fallback timer when the transition ends first", () => {
+    const { el } = arm();
+    el.dispatchEvent(new Event("transitionend"));
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

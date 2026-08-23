@@ -9,17 +9,14 @@
 // enter/leave state-class pattern, dismiss on outside-click and Escape
 // (isolated by default), wire aria-expanded / aria-haspopup on an optional
 // trigger, coordinate single-open groups, and manage opt-in focus. Motion is
-// entirely the app's: `is-open` is added after a forced reflow (so a CSS
-// transition from the resting state plays) and `is-leaving` before `[hidden]`
-// lands on the panel's first transitionend (or a fallback timeout).
+// entirely the app's: both directions go through `runTransition`, so the state
+// the change animates from is committed for us — `is-open` transitions from the
+// panel's resting state, and `is-leaving` from a resolved `is-open`. `[hidden]`
+// follows on the panel's first transitionend, or the shared fallback ceiling
+// when no transition runs.
 
 import { topmostOpenDialog } from "./modal-host.js";
-import { afterTransition, forceReflow } from "./transition.js";
-
-/** Fallback timeout (ms) if `transitionend` never fires on the panel (no CSS
- *  transition, reduced motion, or an interrupted animation). Mirrors the
- *  dialog / modal / popover leave fallback. */
-const LEAVE_FALLBACK_MS = 400;
+import { cancelTransition, runTransition } from "./transition.js";
 
 export interface PopupOptions {
   /** Trigger element to wire ARIA on (`aria-expanded`, `aria-haspopup`) and to
@@ -163,9 +160,6 @@ export function createPopupCore(
   // back out even without returnFocus, so it is never stranded on the
   // now-hidden panel (WCAG 2.4.3 focus-loss).
   let movedFocusIn = false;
-  // While a leave animation is in flight this holds afterTransition's cancel
-  // handle (else null). A re-show cancels it.
-  let cancelLeave: (() => void) | null = null;
 
   // --- Single-open group registration -----------------------------------
   const entry: GroupEntry = {
@@ -189,14 +183,11 @@ export function createPopupCore(
   };
   syncGroup();
 
-  // Cancel a pending leave synchronously WITHOUT running its callback, then
-  // drop the leaving state — used by show() so a re-show mid-fade re-reveals
-  // cleanly rather than letting the stale leave fire and hide the panel again.
+  // Cancel a pending leave synchronously WITHOUT running its settle, then drop
+  // the leaving state — used by show() so a re-show mid-fade re-reveals cleanly
+  // rather than letting the stale leave fire and hide the panel again.
   const clearLeave = (): void => {
-    if (cancelLeave !== null) {
-      cancelLeave();
-      cancelLeave = null;
-    }
+    cancelTransition(panel);
     panel.classList.remove("is-leaving");
   };
 
@@ -295,10 +286,14 @@ export function createPopupCore(
       const host = current.trigger?.closest("dialog[open]") ?? topmostOpenDialog() ?? document.body;
       host.appendChild(panel);
     }
-    // Flush the un-hide before adding is-open so a CSS *transition* from the
-    // resting state plays (an animation on is-open plays either way).
-    forceReflow(panel);
-    panel.classList.add("is-open");
+    // Reveal, then let a CSS *transition* from the resting state play: the
+    // primitive commits everything written above before adding is-open (an
+    // animation on is-open would play either way).
+    runTransition(panel, {
+      change: () => {
+        panel.classList.add("is-open");
+      },
+    });
     hooks?.onReveal?.();
     current.trigger?.setAttribute("aria-expanded", "true");
     current.trigger?.setAttribute("aria-haspopup", String(current.haspopup ?? "true"));
@@ -351,23 +346,19 @@ export function createPopupCore(
     // Leave lifecycle: swap is-open → is-leaving and keep the panel in the DOM
     // until its transition ends — or the fallback fires when there is no
     // transition / reduced motion / an interruption — then set [hidden] and
-    // drop the state classes. Mirrors dialog/modal/toast/popover.
-    panel.classList.remove("is-open");
-    panel.classList.add("is-leaving");
-    cancelLeave = afterTransition(
-      panel,
-      () => {
-        cancelLeave = null;
-        // A re-show during the fade clears is-leaving; only finalize if we're
-        // still leaving, so we never yank a freshly re-shown panel shut.
-        if (panel.classList.contains("is-leaving")) {
-          panel.classList.remove("is-leaving");
-          hooks?.onLeaveEnd?.();
-          panel.hidden = true;
-        }
+    // drop the state classes. Mirrors dialog/modal/toast/popover. A re-show
+    // cancels this settle (clearLeave), so it cannot yank a re-shown panel shut.
+    runTransition(panel, {
+      change: () => {
+        panel.classList.remove("is-open");
+        panel.classList.add("is-leaving");
       },
-      LEAVE_FALLBACK_MS,
-    );
+      settled: () => {
+        panel.classList.remove("is-leaving");
+        hooks?.onLeaveEnd?.();
+        panel.hidden = true;
+      },
+    });
     current.onClose?.();
   };
 
