@@ -312,9 +312,10 @@ describe("openDialog uses the platform's modal API", () => {
     openDialog(d);
 
     // showModal() is what buys focus containment, the top layer and an inert
-    // background; `open = true` alone renders a non-modal dialog in flow. Both
-    // set the attribute, so in happy-dom the call itself is the only difference
-    // there is to see.
+    // background; `open = true` alone renders a non-modal dialog in flow. Both set
+    // the attribute, so the CALL is what this test pins. On a real engine the
+    // difference is also visible in `:modal` and in where focus lands, either of
+    // which would be a broader assertion than the one made here.
     expect(showModal).toHaveBeenCalledOnce();
     expect(d.open).toBe(true);
   });

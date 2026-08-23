@@ -604,8 +604,8 @@ describe("teardown leaves the document as it found it", () => {
 
     // scroll is registered in the capture phase (it does not bubble from a
     // nested scroller). removeEventListener matches on that flag, so dropping
-    // it leaves the listener installed for the life of the page — happy-dom
-    // ignores the mismatch, every real engine does not.
+    // it leaves the listener installed for the life of the page. The engine here
+    // honours the flag, so the leak is real rather than notional.
     expect(docRemove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
   });
 

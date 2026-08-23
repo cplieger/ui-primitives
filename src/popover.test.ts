@@ -1895,7 +1895,7 @@ describe("createPopover — the tracking frame is released on hide", () => {
     // Anchor tracking listens for scroll in the capture phase because a scroll
     // in an ancestor container does not bubble. removeEventListener matches on
     // that flag, so a mismatch leaves the tracker wired to a closed popover for
-    // the life of the page — happy-dom ignores the mismatch, browsers do not.
+    // the life of the page. The engine here honours the flag, so a mismatch leaks.
     expect(docRemove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
     c.dispose();
   });
