@@ -106,7 +106,7 @@ describe("initTooltips", () => {
     pointerOut(a, null);
     expect(a.getAttribute("aria-describedby")).toBeNull();
     expect(tip()!.classList.contains("is-leaving")).toBe(true);
-    vi.advanceTimersByTime(150); // fallback removal
+    vi.advanceTimersByTime(400); // the shared leave-fallback ceiling
     expect(tip()).toBeNull();
   });
 
@@ -135,7 +135,7 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(500);
     expect(tip()!.textContent).toBe("A");
     pointerOut(a, null);
-    vi.advanceTimersByTime(150); // remove A; the cooldown window is open
+    vi.advanceTimersByTime(400); // remove A; the cooldown window is still open
     pointerOver(b);
     vi.advanceTimersByTime(499);
     expect(tip()).toBeNull();
@@ -151,7 +151,7 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(500);
     expect(tip()!.textContent).toBe("A");
     pointerOut(a, null);
-    vi.advanceTimersByTime(150); // remove A; group is now warm
+    vi.advanceTimersByTime(400); // remove A; group is now warm
     pointerOver(b);
     vi.advanceTimersByTime(1); // opted-in warm delay is 0
     expect(tip()!.textContent).toBe("B");
@@ -165,7 +165,7 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(2000);
     expect(tip()!.textContent).toBe("A");
     pointerOut(a, null);
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(400);
     pointerOver(b);
     vi.advanceTimersByTime(1999);
     expect(tip()).toBeNull(); // never faster than the delay the caller asked for
@@ -190,7 +190,7 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(1000);
     expect(tip()).not.toBeNull();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(400);
     expect(tip()).toBeNull();
   });
 
@@ -237,7 +237,7 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(1000);
     expect(tip()).not.toBeNull();
     document.dispatchEvent(new Event("scroll"));
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(400);
     expect(tip()).toBeNull();
   });
 
@@ -248,7 +248,7 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(1000);
     expect(tip()).not.toBeNull();
     window.dispatchEvent(new Event("blur"));
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(400);
     expect(tip()).toBeNull();
   });
 
@@ -262,7 +262,7 @@ describe("initTooltips", () => {
     expect(a.getAttribute("aria-describedby")).toBe(`foo ${t.id}`);
     pointerOut(a, null);
     expect(a.getAttribute("aria-describedby")).toBe("foo"); // prior token restored
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(400);
   });
 
   it("renders into an open ancestor <dialog> so it clears the modal's top layer", () => {
@@ -344,7 +344,7 @@ describe("dismissal triggers are specific", () => {
     vi.advanceTimersByTime(1000);
     expect(tip()).not.toBeNull();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab" }));
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(400);
     expect(tip()).not.toBeNull();
   });
 
@@ -359,7 +359,7 @@ describe("dismissal triggers are specific", () => {
     vi.advanceTimersByTime(1000);
     expect(tip()).not.toBeNull();
     scroller.dispatchEvent(new Event("scroll"));
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(400);
     expect(tip()).toBeNull();
   });
 
@@ -451,21 +451,25 @@ describe("handing the tooltip from one anchor to another", () => {
     expect(tipCount()).toBe(1); // the fading node is gone, not stacked under the new one
   });
 
-  it("an older tooltip's fade does not strand the newer one", () => {
-    // The fade finalizer must only reset the state it owns. Resetting a newer
-    // tooltip's state leaves it visible and undismissable.
+  it("an older tooltip's fade is cancelled outright, so it cannot reach the newer one", () => {
+    // A superseded fade used to be left running and made harmless by a guard in
+    // its own finalizer ("only reset the state I own"). It is now cancelled when
+    // the controller tears the old tip down, so there is no late finalizer to
+    // guard against — and B stays live and dismissable across the window where
+    // A's ceiling would have fired.
     initTooltips({ delayWarm: 0 });
     const a = anchor("A");
     const b = anchor("B");
     pointerOver(a);
     vi.advanceTimersByTime(500);
-    pointerOut(a, null); // A begins fading; its fallback lands 150ms out
+    pointerOut(a, null); // A begins fading; its ceiling would land 400ms out
     pointerOver(b);
     vi.advanceTimersByTime(1);
     expect(liveTip()!.textContent).toBe("B");
-    vi.advanceTimersByTime(200); // A's finalizer runs while B is visible
+    vi.advanceTimersByTime(600); // past A's ceiling: nothing of A's runs
+    expect(liveTip()!.textContent).toBe("B");
     pointerOut(b, null);
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(400);
     expect(tipCount()).toBe(0);
   });
 });
@@ -650,7 +654,7 @@ describe("the warm window's edges", () => {
     vi.advanceTimersByTime(1);
     const first = tip()!.id;
     pointerOut(a, null);
-    vi.advanceTimersByTime(150);
+    vi.advanceTimersByTime(400);
     pointerOver(b);
     vi.advanceTimersByTime(1);
     const second = tip()!.id;
@@ -688,24 +692,26 @@ describe("pointer traffic that is not over an anchor", () => {
   });
 });
 
-describe("two fades in flight at once", () => {
-  it("an older fade's finalizer does not adopt the newer tooltip's fade", () => {
-    // Each fade owns exactly its own tip. When the older finalizer claims the
-    // state, the newer fading tip stops being anyone's to clean up and is left
-    // stacked in the DOM under whatever shows next.
+describe("a superseded fade", () => {
+  it("is cancelled outright, so only one fade is ever in flight", () => {
+    // Two fades used to be able to run at once, with each finalizer guarded to
+    // touch only its own tip. Superseding now CANCELS the older fade, so the
+    // older tip's ceiling never arrives and cannot adopt the newer tip — and
+    // the newer tip is still cleaned up by whatever shows next.
     initTooltips({ delayCold: 0, delayWarm: 0, cooldown: 0 });
     const a = anchor("A");
     const b = anchor("B");
 
     pointerOver(a);
     vi.advanceTimersByTime(1); // A visible
-    pointerOut(a, null); // A fades; its fallback lands 150ms out
-    pointerOver(b); // takes A's node down early, arms B
+    pointerOut(a, null); // A begins fading
+    pointerOver(b); // takes A's node down early and cancels its fade
     vi.advanceTimersByTime(1); // B visible
-    pointerOut(b, null); // B fades too — two fades in flight, 1ms apart
-    vi.advanceTimersByTime(149); // A's finalizer runs while B is still fading
+    expect(tipCount()).toBe(1); // A's node is gone, not stacked under B
+    pointerOut(b, null); // B fades — the only fade in flight
+    vi.advanceTimersByTime(600); // past where A's ceiling would have been
 
-    pointerOver(a); // whatever owns the state now must clear B's node
+    pointerOver(a); // whatever owns the state now must have cleared B's node
     expect(tipCount()).toBe(0);
   });
 });

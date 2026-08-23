@@ -47,11 +47,18 @@ must still observe the key. `setOptions` is the same merge-patch as
 | `.uip-popup.is-open` / `.uip-popup.is-leaving` | lifecycle state classes (all motion is the app's; the base ships none for popup) |         |
 
 **Motion is entirely yours.** The library adds `uip-popup` + `is-open` on
-reveal (after a forced reflow, so a CSS _transition_ from the resting state
+reveal (the resting state is committed first, so a CSS _transition_ from it
 plays; an _animation_ on `is-open` works too) and swaps `is-open` →
 `is-leaving` on conceal, setting `[hidden]` once the panel's first
-`transitionend` fires (or a 400ms fallback). The base stylesheet ships only the
-`[hidden]` display rule: no default motion, no custom properties.
+`transitionend` fires (or a 400ms ceiling when no transition runs at all — a
+leave transition skinned longer than that is truncated). The base stylesheet
+ships only the `[hidden]` display rule: no default motion, no custom properties.
+
+One case the reveal cannot animate out of: `hide()` in the **same task** as
+`show()`. The reveal starts a transition at zero progress, and reversing it
+targets the value it is already at, so CSS starts nothing and `[hidden]` waits
+for the ceiling. Hide from a later task (a click handler, a timer) and both
+directions animate.
 
 ```css
 .my-card {

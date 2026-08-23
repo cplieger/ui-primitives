@@ -19,6 +19,7 @@
 import { el } from "@cplieger/reactive";
 
 import { closeDialog, openDialog, wireBackdropDismiss } from "./dialog.js";
+import { cancelTransition } from "./transition.js";
 
 export interface ModalOptions {
   /** Close when the backdrop is clicked (drag-safe). Default `true`. */
@@ -207,9 +208,10 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
     },
     open(): void {
       if (dialog.open) {
-        // Reopened mid fade-out: cancel the leave by clearing `is-leaving` (the
-        // pending closeDialog finish() no-ops on its guard). The scroll-lock was
-        // never released, so there is nothing to re-acquire.
+        // Reopened mid fade-out: cancel the pending close and drop the leaving
+        // state. The scroll-lock was never released, so there is nothing to
+        // re-acquire.
+        cancelTransition(dialog);
         dialog.classList.remove("is-leaving");
         return;
       }
@@ -227,8 +229,9 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
     dispose(): void {
       cleanupBackdrop?.();
       dialog.removeEventListener("cancel", onCancel);
-      // Cancel any in-flight leave so its pending finish() no-ops, release the
-      // lock, close the native dialog (so `open` clears), then remove it.
+      // Cancel any in-flight leave so its pending settle never runs, release
+      // the lock, close the native dialog (so `open` clears), then remove it.
+      cancelTransition(dialog);
       dialog.classList.remove("is-leaving");
       releaseLock();
       if (dialog.open) {

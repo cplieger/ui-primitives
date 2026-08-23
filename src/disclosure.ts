@@ -9,10 +9,7 @@
 // stylesheet); engines without it fall back to a measured `scrollHeight` px
 // target. Both honor `prefers-reduced-motion` by skipping the tween.
 
-import { afterTransition } from "./transition.js";
-
-/** Fallback (ms) if `transitionend` never fires on the region. */
-const OPEN_FALLBACK_MS = 400;
+import { cancelTransition, runTransition } from "./transition.js";
 
 export interface DisclosureOptions {
   /** Initial open state. Default `false`. */
@@ -57,12 +54,6 @@ function supportsInterpolateSize(): boolean {
   );
 }
 
-/** Read a layout property to flush a pending style change (force reflow) so the
- *  next change starts a transition rather than collapsing into one frame. */
-function forceReflow(node: HTMLElement): void {
-  node.getBoundingClientRect();
-}
-
 /** Wire `trigger` (a button, or any element given button semantics) to `region`
  *  as an animated disclosure.
  *
@@ -97,29 +88,6 @@ export function createDisclosure(
   }
 
   let open = opts?.open ?? false;
-  let cancelPending: (() => void) | null = null;
-
-  const clearPending = (): void => {
-    if (cancelPending !== null) {
-      cancelPending();
-      cancelPending = null;
-    }
-  };
-
-  // Settle after the region's height transition (or a fallback), cancelling any
-  // prior pending settle so rapid toggles don't clash. Delegates the guarded
-  // "transitionend-or-fallback, run once" mechanics to the shared helper.
-  const settleAfterTransition = (cb: () => void): void => {
-    clearPending();
-    cancelPending = afterTransition(
-      region,
-      () => {
-        cancelPending = null;
-        cb();
-      },
-      OPEN_FALLBACK_MS,
-    );
-  };
 
   const reflectAria = (): void => {
     trigger?.setAttribute("aria-expanded", open ? "true" : "false");
@@ -132,29 +100,37 @@ export function createDisclosure(
   };
 
   const applyHeight = (targetOpen: boolean, animate: boolean): void => {
-    clearPending();
     if (!animate || prefersReducedMotion()) {
       // No tween: expanded is auto (cleared inline height), collapsed is 0.
+      // A settle armed by an earlier animated toggle must not land on this
+      // untweened state — reachable when the OS motion preference flips while
+      // an animation is in flight.
+      cancelTransition(region);
       region.style.height = targetOpen ? "" : "0px";
       return;
     }
     if (targetOpen) {
+      // The collapsed start height is written here and committed by
+      // runTransition, so scrollHeight is read against a settled height:0 box.
       region.style.height = "0px";
-      forceReflow(region);
-      region.style.height = supportsInterpolateSize() ? "auto" : `${region.scrollHeight}px`;
-      settleAfterTransition(() => {
-        // Settle to auto so the content can reflow/grow later — but only if it
-        // is still open (a fast close may have won).
-        if (open) {
+      runTransition(region, {
+        change: () => {
+          region.style.height = supportsInterpolateSize() ? "auto" : `${region.scrollHeight}px`;
+        },
+        // Settle to auto so the content can reflow/grow later.
+        settled: () => {
           region.style.height = "";
-        }
+        },
       });
     } else {
       // Collapse from a concrete height (auto isn't an animatable start on the
       // fallback path) down to 0, and stay there.
       region.style.height = `${region.scrollHeight}px`;
-      forceReflow(region);
-      region.style.height = "0px";
+      runTransition(region, {
+        change: () => {
+          region.style.height = "0px";
+        },
+      });
     }
   };
 
@@ -201,7 +177,7 @@ export function createDisclosure(
       set(!open, animateDefault, "api");
     },
     dispose(): void {
-      clearPending();
+      cancelTransition(region);
       // Settle the height so a dispose mid-animation doesn't freeze an inline
       // px height: open clears to auto, collapsed pins to 0.
       region.style.height = open ? "" : "0px";

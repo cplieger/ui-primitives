@@ -389,12 +389,14 @@ describe("createDisclosure: engine capability guards", () => {
   });
 });
 
-describe("createDisclosure: the forced reflow between the two height writes", () => {
+describe("createDisclosure: the committed start height between the two writes", () => {
   // Setting the start height and the target height in one tick collapses into a
   // single frame and no transition starts; the layout read in between is what
-  // flushes the first write. happy-dom has no layout engine, so the read itself
-  // is the only trace of the flush — as in transition.test.ts's forceReflow
-  // test. These pin that it happens, once, and at the right moment.
+  // commits the first write. runTransition owns that read now, so these pin that
+  // disclosure hands it the two writes in the right order — the read is taken
+  // while the height still reads the START value. transition.motion.test.ts
+  // asserts the consequence against real CSS (a `height` transitionend); these
+  // pin the ordering, once, without needing motion.
   function watchReflow(region: HTMLElement): string[] {
     const seen: string[] = [];
     const orig = region.getBoundingClientRect.bind(region);
@@ -405,26 +407,26 @@ describe("createDisclosure: the forced reflow between the two height writes", ()
     return seen;
   }
 
-  it("flushes the collapsed start height before setting the open target", () => {
+  it("commits the collapsed start height before setting the open target", () => {
     vi.stubGlobal("CSS", { supports: () => true });
     const { trigger, region } = mount();
     const d = createDisclosure(trigger, region);
     const seen = watchReflow(region);
     d.open();
-    // Exactly one flush, and taken while the height still reads 0.
+    // Exactly one commit, and taken while the height still reads 0.
     expect(seen).toEqual(["0px"]);
     expect(region.style.height).toBe("auto");
     d.dispose();
   });
 
-  it("flushes the measured start height before collapsing to 0", () => {
+  it("commits the measured start height before collapsing to 0", () => {
     const { trigger, region } = mount();
     Object.defineProperty(region, "scrollHeight", { value: 90, configurable: true });
     const d = createDisclosure(trigger, region, { open: true });
     const seen = watchReflow(region);
     d.close();
     // auto is not an animatable start, so the collapse begins from a measured
-    // px height — flushed before the 0.
+    // px height — committed before the 0.
     expect(seen).toEqual(["90px"]);
     expect(region.style.height).toBe("0px");
     d.dispose();
@@ -470,6 +472,31 @@ describe("createDisclosure: a superseded settle must not fire late", () => {
 
       vi.advanceTimersByTime(200); // t=600 — #2's deadline
       expect(region.style.height).toBe("");
+      d.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a settle armed before the motion preference flipped does not reopen the region", () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("CSS", { supports: () => true });
+      const { trigger, region } = mount();
+      const d = createDisclosure(trigger, region);
+      d.open(); // animated: a settle is armed, deadline t=400
+      expect(region.style.height).toBe("auto");
+
+      // The user turns on "reduce motion" mid-animation. The close now takes the
+      // untweened path, which must still supersede the open's settle: if that
+      // settle lands it clears the inline height, and a CLOSED region rendered
+      // at `height: auto` is a region that reopened itself.
+      forceReducedMotion();
+      d.close();
+      expect(region.style.height).toBe("0px");
+
+      vi.advanceTimersByTime(400);
+      expect(region.style.height).toBe("0px");
       d.dispose();
     } finally {
       vi.useRealTimers();

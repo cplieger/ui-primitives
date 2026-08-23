@@ -209,9 +209,6 @@ export function ask(message: string, opts?: AskOptions): Promise<boolean | strin
     }
   }
 
-  // Clear a stale leaving state in case this reuses a dialog mid fade-out.
-  r.dialog.classList.remove("is-leaving");
-
   return new Promise<boolean | string | null>((resolve) => {
     const controller = new AbortController();
     const { signal } = controller;
