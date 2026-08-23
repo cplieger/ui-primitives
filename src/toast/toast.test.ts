@@ -526,7 +526,7 @@ describe("toast: modal <dialog> auto-hosting", () => {
     return spy.mock.calls.filter((call) => call[0] === "close").length;
   }
 
-  it("releases the dialog it evacuates: no close listener is left behind on it", () => {
+  it("releases the dialog it evacuates: no close listener is left behind on it", async () => {
     const dlg = openModal();
     const addSpy = vi.spyOn(dlg, "addEventListener");
     const removeSpy = vi.spyOn(dlg, "removeEventListener");
@@ -536,6 +536,11 @@ describe("toast: modal <dialog> auto-hosting", () => {
     expect(closeCalls(addSpy)).toBe(1);
 
     dlg.close();
+    // close() queues the close event as an element task, so it has not fired
+    // yet on the statement after the call.
+    await new Promise<void>((resolve) => {
+      dlg.addEventListener("close", () => resolve(), { once: true });
+    });
     expect(stack()!.parentElement).toBe(document.body);
     // The listener is app-owned DOM the view no longer has any use for; a
     // retained one keeps a closed dialog wired to a stack that has left it.
