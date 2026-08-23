@@ -566,3 +566,165 @@ describe("show-time guards and placement", () => {
     expect(tip()).toBeNull();
   });
 });
+
+/** How many of a spy's calls were registrations for `type`. */
+function callsFor(spy: { mock: { calls: unknown[][] } }, type: string): number {
+  return spy.mock.calls.filter((call) => call[0] === type).length;
+}
+
+describe("teardown leaves the document as it found it", () => {
+  it("removes every listener init installed, on document and on window", () => {
+    const docAdd = vi.spyOn(document, "addEventListener");
+    const docRemove = vi.spyOn(document, "removeEventListener");
+    const winAdd = vi.spyOn(window, "addEventListener");
+    const winRemove = vi.spyOn(window, "removeEventListener");
+
+    initTooltips();
+    _resetForTest();
+
+    // One controller on `document` is the whole design, so a listener it fails
+    // to give back accumulates across every init/reset cycle an app performs.
+    for (const type of ["pointerover", "pointerout", "focusin", "focusout", "keydown", "scroll"]) {
+      expect(callsFor(docAdd, type)).toBe(1);
+      expect(callsFor(docRemove, type)).toBe(1);
+    }
+    expect(callsFor(winAdd, "blur")).toBe(1);
+    expect(callsFor(winRemove, "blur")).toBe(1);
+  });
+
+  it("gives the capture-phase scroll listener back with the capture flag it used", () => {
+    const docRemove = vi.spyOn(document, "removeEventListener");
+
+    initTooltips();
+    _resetForTest();
+
+    // scroll is registered in the capture phase (it does not bubble from a
+    // nested scroller). removeEventListener matches on that flag, so dropping
+    // it leaves the listener installed for the life of the page — happy-dom
+    // ignores the mismatch, every real engine does not.
+    expect(docRemove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
+  });
+
+  it("repeated init/reset cycles do not accumulate listeners", () => {
+    const docAdd = vi.spyOn(document, "addEventListener");
+    const docRemove = vi.spyOn(document, "removeEventListener");
+
+    for (let i = 0; i < 4; i++) {
+      initTooltips();
+      _resetForTest();
+    }
+
+    expect(callsFor(docAdd, "pointerout")).toBe(4);
+    expect(callsFor(docRemove, "pointerout")).toBe(4);
+    expect(callsFor(docAdd, "keydown")).toBe(4);
+    expect(callsFor(docRemove, "keydown")).toBe(4);
+  });
+});
+
+describe("the warm window's edges", () => {
+  it("a hover exactly at the warm deadline waits the cold delay, not the warm one", () => {
+    // The window is [hide, hide + cooldown): at the deadline itself the group is
+    // cold again, so "warm" can never outlast the cooldown the caller asked for.
+    initTooltips({ delayCold: 500, delayWarm: 100, cooldown: 500 });
+    const a = anchor("A");
+    const b = anchor("B");
+
+    pointerOver(a);
+    vi.advanceTimersByTime(500); // A shows
+    pointerOut(a, null); // the warm window now ends 500ms out
+    vi.advanceTimersByTime(500); // ...and this is that exact moment
+
+    pointerOver(b);
+    vi.advanceTimersByTime(100); // the warm delay would have painted B here
+    expect(liveTip()).toBeNull();
+    vi.advanceTimersByTime(400); // the cold delay is what B actually waits
+    expect(liveTip()!.textContent).toBe("B");
+  });
+
+  it("gives every tooltip a fresh id that rises with show order", () => {
+    initTooltips({ delayCold: 0 });
+    const a = anchor("A");
+    const b = anchor("B");
+
+    pointerOver(a);
+    vi.advanceTimersByTime(1);
+    const first = tip()!.id;
+    pointerOut(a, null);
+    vi.advanceTimersByTime(150);
+    pointerOver(b);
+    vi.advanceTimersByTime(1);
+    const second = tip()!.id;
+
+    expect(first).toMatch(/^uip-tip-\d+$/);
+    expect(second).toMatch(/^uip-tip-\d+$/);
+    const seq = (id: string): number => Number(id.slice("uip-tip-".length));
+    expect(seq(second)).toBeGreaterThan(seq(first));
+  });
+});
+
+describe("pointer traffic that is not over an anchor", () => {
+  it("a pointerover away from any anchor shows nothing", () => {
+    initTooltips();
+    const plain = document.createElement("div");
+    document.body.appendChild(plain);
+
+    pointerOver(plain);
+    vi.advanceTimersByTime(1000);
+
+    expect(tip()).toBeNull();
+  });
+
+  it("a pointerover on an anchor's ancestor, not the anchor, shows nothing", () => {
+    initTooltips();
+    const box = document.createElement("div");
+    const a = anchor("A");
+    box.appendChild(a);
+    document.body.appendChild(box);
+
+    pointerOver(box); // closest() looks up, not down: the box is not an anchor
+    vi.advanceTimersByTime(1000);
+
+    expect(tip()).toBeNull();
+  });
+});
+
+describe("two fades in flight at once", () => {
+  it("an older fade's finalizer does not adopt the newer tooltip's fade", () => {
+    // Each fade owns exactly its own tip. When the older finalizer claims the
+    // state, the newer fading tip stops being anyone's to clean up and is left
+    // stacked in the DOM under whatever shows next.
+    initTooltips({ delayCold: 0, delayWarm: 0, cooldown: 0 });
+    const a = anchor("A");
+    const b = anchor("B");
+
+    pointerOver(a);
+    vi.advanceTimersByTime(1); // A visible
+    pointerOut(a, null); // A fades; its fallback lands 150ms out
+    pointerOver(b); // takes A's node down early, arms B
+    vi.advanceTimersByTime(1); // B visible
+    pointerOut(b, null); // B fades too — two fades in flight, 1ms apart
+    vi.advanceTimersByTime(149); // A's finalizer runs while B is still fading
+
+    pointerOver(a); // whatever owns the state now must clear B's node
+    expect(tipCount()).toBe(0);
+  });
+});
+
+describe("handing an app-owned aria-describedby back", () => {
+  it("drops the attribute when only the tip's own token (and whitespace) is left", () => {
+    initTooltips();
+    const a = anchor("Hi");
+
+    pointerOver(a);
+    vi.advanceTimersByTime(500);
+    const t = tip()!;
+    // The app rewrites the attribute while the tooltip is up — its formatting is
+    // its own business, and the tooltip still has to leave nothing behind.
+    a.setAttribute("aria-describedby", ` ${t.id} `);
+
+    pointerOut(a, null);
+
+    // An empty aria-describedby is worse than none: it points at nothing.
+    expect(a.hasAttribute("aria-describedby")).toBe(false);
+  });
+});

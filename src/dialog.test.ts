@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { createDialog, openDialog, closeDialog } from "./dialog.js";
+import { createDialog, openDialog, closeDialog, wireBackdropDismiss } from "./dialog.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -301,5 +301,52 @@ describe("createDialog: a refused dismissal changes nothing", () => {
     expect(d.classList.contains("is-leaving")).toBe(false);
     expect(d.open).toBe(true);
     ctl.dispose();
+  });
+});
+
+describe("openDialog uses the platform's modal API", () => {
+  it("opens through showModal(), not by setting the attribute", () => {
+    const d = makeDialog();
+    const showModal = vi.spyOn(d, "showModal");
+
+    openDialog(d);
+
+    // showModal() is what buys focus containment, the top layer and an inert
+    // background; `open = true` alone renders a non-modal dialog in flow. Both
+    // set the attribute, so in happy-dom the call itself is the only difference
+    // there is to see.
+    expect(showModal).toHaveBeenCalledOnce();
+    expect(d.open).toBe(true);
+  });
+});
+
+describe("wireBackdropDismiss: the cleanup is complete", () => {
+  it("a press begun before the cleanup cannot dismiss after it", () => {
+    const d = makeDialog();
+    const onDismiss = vi.fn();
+    const cleanup = wireBackdropDismiss(d, onDismiss);
+
+    d.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); // press on the backdrop
+    cleanup();
+    d.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+
+    expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it("gives back both listeners it took, not just one", () => {
+    const d = makeDialog();
+    const add = vi.spyOn(d, "addEventListener");
+    const remove = vi.spyOn(d, "removeEventListener");
+    const types = (spy: typeof add): string[] =>
+      (spy.mock.calls as unknown[][]).map((c) => String(c[0])).sort();
+
+    const cleanup = wireBackdropDismiss(d, vi.fn());
+    expect(types(add)).toEqual(["mousedown", "mouseup"]);
+
+    cleanup();
+
+    // A half-cleanup leaves a closure on an app-owned element for the life of
+    // the page, holding the dismissal callback with it.
+    expect(types(remove)).toEqual(["mousedown", "mouseup"]);
   });
 });
