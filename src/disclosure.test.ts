@@ -349,3 +349,180 @@ describe("createDisclosure: which keys activate a non-button trigger", () => {
     d.dispose();
   });
 });
+
+describe("createDisclosure: engine capability guards", () => {
+  // `prefersReducedMotion` and `supportsInterpolateSize` are written as feature
+  // probes — each `typeof` guard exists so an engine (or a non-browser render
+  // pass) that lacks the API degrades instead of throwing. happy-dom provides
+  // all of them, so the degraded arms only run when the API is taken away.
+
+  it("treats an engine without matchMedia as expressing no motion preference", () => {
+    vi.stubGlobal("CSS", { supports: () => true });
+    vi.stubGlobal("matchMedia", undefined);
+    const { trigger, region } = mount();
+    const d = createDisclosure(trigger, region);
+    d.open();
+    // Nothing to ask ⇒ no reduce claim ⇒ the tween runs (and asking anyway
+    // would throw).
+    expect(region.style.height).toBe("auto");
+    d.dispose();
+  });
+
+  it("treats a windowless environment as expressing no motion preference", () => {
+    const { trigger, region } = mount();
+    vi.stubGlobal("CSS", { supports: () => true });
+    vi.stubGlobal("window", undefined);
+    const d = createDisclosure(trigger, region);
+    d.open();
+    expect(region.style.height).toBe("auto");
+    d.dispose();
+  });
+
+  it("falls back to a measured pixel height when CSS is absent entirely", () => {
+    vi.stubGlobal("CSS", undefined);
+    const { trigger, region } = mount();
+    Object.defineProperty(region, "scrollHeight", { value: 90, configurable: true });
+    const d = createDisclosure(trigger, region);
+    d.open();
+    expect(region.style.height).toBe("90px");
+    d.dispose();
+  });
+
+  it("falls back to a measured pixel height when CSS exists without supports()", () => {
+    vi.stubGlobal("CSS", {});
+    const { trigger, region } = mount();
+    Object.defineProperty(region, "scrollHeight", { value: 90, configurable: true });
+    const d = createDisclosure(trigger, region);
+    d.open();
+    expect(region.style.height).toBe("90px");
+    d.dispose();
+  });
+});
+
+describe("createDisclosure: the forced reflow between the two height writes", () => {
+  // Setting the start height and the target height in one tick collapses into a
+  // single frame and no transition starts; the layout read in between is what
+  // flushes the first write. happy-dom has no layout engine, so the read itself
+  // is the only trace of the flush — as in transition.test.ts's forceReflow
+  // test. These pin that it happens, once, and at the right moment.
+  function watchReflow(region: HTMLElement): string[] {
+    const seen: string[] = [];
+    const orig = region.getBoundingClientRect.bind(region);
+    vi.spyOn(region, "getBoundingClientRect").mockImplementation(() => {
+      seen.push(region.style.height);
+      return orig();
+    });
+    return seen;
+  }
+
+  it("flushes the collapsed start height before setting the open target", () => {
+    vi.stubGlobal("CSS", { supports: () => true });
+    const { trigger, region } = mount();
+    const d = createDisclosure(trigger, region);
+    const seen = watchReflow(region);
+    d.open();
+    // Exactly one flush, and taken while the height still reads 0.
+    expect(seen).toEqual(["0px"]);
+    expect(region.style.height).toBe("auto");
+    d.dispose();
+  });
+
+  it("flushes the measured start height before collapsing to 0", () => {
+    const { trigger, region } = mount();
+    Object.defineProperty(region, "scrollHeight", { value: 90, configurable: true });
+    const d = createDisclosure(trigger, region, { open: true });
+    const seen = watchReflow(region);
+    d.close();
+    // auto is not an animatable start, so the collapse begins from a measured
+    // px height — flushed before the 0.
+    expect(seen).toEqual(["90px"]);
+    expect(region.style.height).toBe("0px");
+    d.dispose();
+  });
+});
+
+describe("createDisclosure: generated region ids", () => {
+  it("names id-less regions from a rising positive counter", () => {
+    const a = document.createElement("div");
+    const b = document.createElement("div");
+    document.body.append(a, b);
+    const d1 = createDisclosure(null, a, { animate: false });
+    const d2 = createDisclosure(null, b, { animate: false });
+    // The documented shape is `uip-disclosure-<n>`; a negative or non-numeric
+    // suffix is not it, and ids must not collide.
+    expect(a.id).toMatch(/^uip-disclosure-\d+$/);
+    expect(b.id).toMatch(/^uip-disclosure-\d+$/);
+    const seq = (id: string): number => Number(id.slice("uip-disclosure-".length));
+    expect(seq(b.id)).toBeGreaterThan(seq(a.id));
+    d1.dispose();
+    d2.dispose();
+  });
+});
+
+describe("createDisclosure: a superseded settle must not fire late", () => {
+  it("a settle armed by an earlier open does not clear a later open's height", () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("CSS", { supports: () => true });
+      const { trigger, region } = mount();
+      const d = createDisclosure(trigger, region);
+      d.open(); // settle #1 armed, deadline t=400
+      vi.advanceTimersByTime(100);
+      d.close(); // supersedes #1
+      vi.advanceTimersByTime(100);
+      d.open(); // settle #2 armed, deadline t=600
+      expect(region.style.height).toBe("auto");
+
+      vi.advanceTimersByTime(200); // t=400 — #1's old deadline
+      // #1 was cancelled by the close. If it still fired it would settle this
+      // second open's height mid-tween, killing the animation.
+      expect(region.style.height).toBe("auto");
+
+      vi.advanceTimersByTime(200); // t=600 — #2's deadline
+      expect(region.style.height).toBe("");
+      d.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a close leaves no settle armed against the region", () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("CSS", { supports: () => true });
+      const { trigger, region } = mount();
+      const d = createDisclosure(trigger, region);
+      d.open();
+      expect(vi.getTimerCount()).toBe(1); // the open's settle fallback
+
+      d.close();
+      // A collapse ends at 0 and has nothing to settle afterwards. A fallback
+      // left armed here fires into whatever state the region is in 400ms later,
+      // which is not the state it was armed for.
+      expect(vi.getTimerCount()).toBe(0);
+      d.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("dispose drops the pending settle so nothing touches the region afterwards", () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("CSS", { supports: () => true });
+      const { trigger, region } = mount();
+      const d = createDisclosure(trigger, region);
+      d.open(); // settle armed
+      d.dispose(); // settles the height itself, and must drop the pending work
+      expect(region.style.height).toBe("");
+
+      // The caller now owns the element again.
+      region.style.height = "42px";
+      vi.advanceTimersByTime(400);
+      region.dispatchEvent(new Event("transitionend"));
+      expect(region.style.height).toBe("42px");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

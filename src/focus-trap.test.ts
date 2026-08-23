@@ -297,3 +297,43 @@ describe("trapFocus", () => {
     expect(document.activeElement).toBe(outside);
   });
 });
+
+describe("trapFocus: releasing the document listener", () => {
+  it("takes the keydown listener off in the phase it was added", () => {
+    const add = vi.spyOn(document, "addEventListener");
+    const remove = vi.spyOn(document, "removeEventListener");
+    const { container } = mount("a", "b");
+
+    const release = trapFocus(container, { returnFocus: false });
+    release();
+
+    const phases = (spy: typeof add): unknown[] =>
+      (spy.mock.calls as unknown[][]).filter((c) => c[0] === "keydown").map((c) => c[2]);
+    // The trap listens on `document` in the CAPTURE phase so focus already
+    // outside the container still routes through it. Capture-phase listeners are
+    // a distinct registration from bubble-phase ones, so a release that names
+    // the wrong phase removes nothing and leaks the trap for the life of the
+    // page — every keystroke keeps being redirected into a container the caller
+    // has finished with. happy-dom removes a listener whatever flag is passed,
+    // so the phase is the only thing that can be asserted here; this is the one
+    // place in these suites where the registration itself is the contract.
+    expect(phases(add)).toEqual([true]);
+    expect(phases(remove)).toEqual([true]);
+  });
+
+  it("stops intercepting Tab once released", () => {
+    const outside = makeButton("outside");
+    document.body.appendChild(outside);
+    const { container } = mount("a", "b");
+
+    const release = trapFocus(container, { returnFocus: false });
+    release();
+    outside.focus();
+
+    const evt = tabEvent();
+    document.dispatchEvent(evt);
+    // Tab belongs to the platform again: no redirect, no preventDefault.
+    expect(evt.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(outside);
+  });
+});

@@ -70,3 +70,35 @@ describe("afterTransition", () => {
     expect(cb).not.toHaveBeenCalled();
   });
 });
+
+describe("afterTransition: 'no-op' means it stops touching the element", () => {
+  // The contract is "after cb has run or cancel has been called, both are
+  // no-ops". Every overlay primitive here hands this helper ONE long-lived,
+  // shared element (the reused <dialog>, the toast stack), so a no-op has to
+  // mean it stops touching that element — not merely that it stops calling
+  // back. Same reason toast.test.ts pins that a re-resolved dialog's close
+  // listener does not churn.
+  function arm(): { el: HTMLElement; detach: ReturnType<typeof vi.fn>; cancel: () => void } {
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const detach = vi.spyOn(el, "removeEventListener");
+    const cancel = afterTransition(el, () => undefined, 400);
+    return { el, detach, cancel };
+  }
+
+  it("cancel() after the callback has already run detaches nothing a second time", () => {
+    const { el, detach, cancel } = arm();
+    el.dispatchEvent(new Event("transitionend")); // settles, taking the listener off
+    expect(detach).toHaveBeenCalledTimes(1);
+    cancel();
+    expect(detach).toHaveBeenCalledTimes(1);
+  });
+
+  it("a second cancel() detaches nothing a second time", () => {
+    const { detach, cancel } = arm();
+    cancel();
+    expect(detach).toHaveBeenCalledTimes(1);
+    cancel();
+    expect(detach).toHaveBeenCalledTimes(1);
+  });
+});
