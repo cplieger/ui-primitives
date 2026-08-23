@@ -39,7 +39,7 @@
     "lint:knip": "knip"
   },
   "dependencies": {
-    "@cplieger/reactive": "^1.2.2"
+    "@cplieger/reactive": "^2.0.0"
   },
   "overrides": {
     "qs": "^6.15.2"
