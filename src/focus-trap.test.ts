@@ -314,9 +314,10 @@ describe("trapFocus: releasing the document listener", () => {
     // a distinct registration from bubble-phase ones, so a release that names
     // the wrong phase removes nothing and leaks the trap for the life of the
     // page — every keystroke keeps being redirected into a container the caller
-    // has finished with. happy-dom removes a listener whatever flag is passed,
-    // so the phase is the only thing that can be asserted here; this is the one
-    // place in these suites where the registration itself is the contract.
+    // has finished with. Asserted on the registration arguments because that is
+    // the narrowest statement of the contract; note that a real engine DOES honour
+    // the capture flag on removal, so the leak is now observable behaviourally too
+    // and a stronger test than this one is available if it is ever wanted.
     expect(phases(add)).toEqual([true]);
     expect(phases(remove)).toEqual([true]);
   });

@@ -240,9 +240,10 @@ describe("rovingFocus: nothing holds focus at all", () => {
     const { container, items } = menu(["a", "b", "c"]);
     rovingFocus(container, ".item");
 
-    // The "active element is not an element" arm only exists for this state, and
-    // happy-dom's default (document.body) is an HTMLElement, so it has to be
-    // forced. "The item after none" must resolve to the first item.
+    // The "active element is not an element" arm only exists for this state, and no
+    // engine produces it on its own: activeElement falls back to document.body,
+    // which is an HTMLElement. So it has to be forced. "The item after none" must
+    // resolve to the first item.
     Object.defineProperty(document, "activeElement", { value: null, configurable: true });
     try {
       key(container, "ArrowDown");

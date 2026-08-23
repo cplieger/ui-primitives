@@ -353,8 +353,9 @@ describe("createDisclosure: which keys activate a non-button trigger", () => {
 describe("createDisclosure: engine capability guards", () => {
   // `prefersReducedMotion` and `supportsInterpolateSize` are written as feature
   // probes — each `typeof` guard exists so an engine (or a non-browser render
-  // pass) that lacks the API degrades instead of throwing. happy-dom provides
-  // all of them, so the degraded arms only run when the API is taken away.
+  // pass) that lacks the API degrades instead of throwing. The engine here
+  // provides all of them, so the degraded arms only run when a test takes the
+  // API away deliberately.
 
   it("treats an engine without matchMedia as expressing no motion preference", () => {
     vi.stubGlobal("CSS", { supports: () => true });
