@@ -474,3 +474,138 @@ describe("popup: groups, on leaving one", () => {
     b.dispose();
   });
 });
+
+describe("popup: the group registry outlives its members", () => {
+  it("one member leaving a group leaves the rest coordinating", () => {
+    // Unregistering the LAST member drops the group; unregistering any other
+    // must leave the group standing, or its survivors stop seeing each other.
+    const a = createPopup(fixture().panel, { group: "g" });
+    const b = createPopup(fixture().panel, { group: "g" });
+    const c = createPopup(fixture().panel, { group: "g" });
+
+    c.dispose(); // g still holds a and b
+    a.show();
+    b.show(); // single-open still applies between the survivors
+
+    expect(a.isOpen).toBe(false);
+    expect(b.isOpen).toBe(true);
+    a.dispose();
+    b.dispose();
+  });
+
+  it("dispose takes the popup out of its group in both directions", () => {
+    const a = createPopup(fixture().panel, { group: "g" });
+    const b = createPopup(fixture().panel, { group: "g" });
+
+    a.dispose(); // a is no longer a member of g
+    a.show(); // ...so opening it must not close a peer,
+    b.show(); // ...and a peer opening must not close it.
+
+    expect(a.isOpen).toBe(true);
+    expect(b.isOpen).toBe(true);
+    a.dispose();
+    b.dispose();
+  });
+});
+
+describe("popup: nothing is left armed", () => {
+  it("hide() cancels the deferred listener install instead of leaving it pending", () => {
+    const { panel } = fixture();
+    const pop = createPopup(panel);
+
+    pop.show();
+    expect(vi.getTimerCount()).toBe(1); // the deferred install, and only it
+
+    pop.hide(); // the install is cancelled; the leave fallback takes its place
+    panel.dispatchEvent(new Event("transitionend")); // ends the leave, clearing its timer
+    // A pending install that outlives the popup is a callback holding the
+    // controller alive after it closed.
+    expect(vi.getTimerCount()).toBe(0);
+    pop.dispose();
+  });
+
+  it("setOptions on a closed popup arms nothing", () => {
+    const { panel } = fixture();
+    const pop = createPopup(panel);
+
+    pop.setOptions({ closeOnOutside: false });
+
+    // Only an OPEN popup re-arms dismissal: a closed one has nothing to re-arm,
+    // and must not schedule work that fires after the caller moved on.
+    expect(vi.getTimerCount()).toBe(0);
+    pop.dispose();
+  });
+
+  it("a popup that never opened touches no document listener at all", () => {
+    const add = vi.spyOn(document, "addEventListener");
+    const remove = vi.spyOn(document, "removeEventListener");
+    const dismissal = (spy: typeof add): number =>
+      (spy.mock.calls as unknown[][]).filter((c) => c[0] === "click" || c[0] === "keydown").length;
+
+    const { panel } = fixture();
+    const pop = createPopup(panel);
+    pop.hide();
+    pop.dispose();
+
+    expect(dismissal(add)).toBe(0);
+    // Not even a defensive removal: the controller starts disarmed, so there is
+    // nothing of its to take off the document.
+    expect(dismissal(remove)).toBe(0);
+  });
+});
+
+describe("popup: a panel handed to a new owner mid-fade", () => {
+  it("the old controller's leave finalizer does not hide what the new owner revealed", () => {
+    const { panel } = fixture();
+    const first = createPopup(panel);
+    first.show();
+    armListeners();
+    first.hide(); // the leave is in flight: is-leaving is on, the fallback armed
+
+    // The caller reuses the element for a fresh popup — the case the finalizer's
+    // is-leaving re-check exists for. The new owner clears is-leaving on show().
+    const second = createPopup(panel);
+    second.show();
+    expect(panel.hidden).toBe(false);
+
+    finishLeave(); // the first controller's stale finalizer comes due here
+
+    // Finalizing regardless of the class would set [hidden] on a panel the new
+    // owner has open: an open popup, invisible, with nothing to hint why.
+    expect(panel.hidden).toBe(false);
+    expect(second.isOpen).toBe(true);
+    second.dispose();
+    first.dispose();
+  });
+});
+
+describe("popup: dispose disarms even what a callback re-armed", () => {
+  it("a popup reopened by its own onClose is still disarmed by the dispose that closed it", () => {
+    const { panel } = fixture();
+    let reopen = false;
+    let closes = 0;
+    let pop: ReturnType<typeof createPopup> | null = null;
+    pop = createPopup(panel, {
+      onClose: (): void => {
+        closes++;
+        if (reopen) {
+          pop?.show();
+        }
+      },
+    });
+
+    pop.show();
+    armListeners();
+    reopen = true;
+    pop.dispose(); // hide() → onClose → show(), which arms a fresh install
+    reopen = false;
+    armListeners(); // an install that outlived dispose would land here
+    expect(closes).toBe(1);
+
+    clickOn(document.body);
+
+    // Dismissal wiring installed after the teardown began still belongs to a
+    // disposed controller: it must not be listening to the document at all.
+    expect(closes).toBe(1);
+  });
+});

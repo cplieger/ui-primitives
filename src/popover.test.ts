@@ -1851,3 +1851,52 @@ describe("createPopover — pointAnchor panel hosting under a modal", () => {
     modal.remove();
   });
 });
+
+describe("createPopover — the tracking frame is released on hide", () => {
+  it("cancels the pending frame by its handle and clears the handle", () => {
+    const raf = vi.spyOn(globalThis, "requestAnimationFrame");
+    const cancel = vi.spyOn(globalThis, "cancelAnimationFrame");
+    const { c } = mountPopover();
+
+    c.show();
+    vi.advanceTimersByTime(1); // install the deferred tracking listeners
+    document.dispatchEvent(new Event("scroll")); // schedules one frame
+    expect(raf).toHaveBeenCalledOnce();
+    const pending = raf.mock.results[0]!.value as number;
+    // Guard the assertion below against a vacuous pass: if the handle were
+    // undefined, `toHaveBeenCalledWith(pending)` would also match a cancel of
+    // undefined, and the test would prove nothing.
+    expect(pending).toBeTypeOf("number");
+
+    c.hide();
+
+    // The frame belongs to a popover that is closing: it is cancelled, not left
+    // to run into a torn-down tracker.
+    expect(cancel).toHaveBeenCalledWith(pending);
+
+    // ...and the handle is cleared, so tracking re-arms. Without that, the
+    // throttle still believes a frame is pending and coalesces every later
+    // scroll into a frame that will never come.
+    c.show();
+    vi.advanceTimersByTime(1);
+    document.dispatchEvent(new Event("scroll"));
+    expect(raf).toHaveBeenCalledTimes(2);
+    c.dispose();
+  });
+
+  it("gives the capture-phase scroll listener back with the capture flag it used", () => {
+    const docRemove = vi.spyOn(document, "removeEventListener");
+    const { c } = mountPopover();
+
+    c.show();
+    vi.advanceTimersByTime(1);
+    c.hide();
+
+    // Anchor tracking listens for scroll in the capture phase because a scroll
+    // in an ancestor container does not bubble. removeEventListener matches on
+    // that flag, so a mismatch leaves the tracker wired to a closed popover for
+    // the life of the page — happy-dom ignores the mismatch, browsers do not.
+    expect(docRemove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
+    c.dispose();
+  });
+});

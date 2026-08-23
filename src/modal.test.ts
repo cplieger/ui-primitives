@@ -380,3 +380,66 @@ describe("scroll-lock ref-counting across mixed and revived modals", () => {
     expect(document.body.style.position).toBe("");
   });
 });
+
+describe("createModal — dispose hands the element back to the platform", () => {
+  it("stops intercepting the platform's cancel event", () => {
+    const m = createModal(makeContent().content);
+    m.open();
+    m.dispose();
+
+    // While wired, the modal preventDefaults `cancel` so its own fade can run.
+    // A disposed modal has no fade left to protect, so Escape must go back to
+    // meaning what the platform says it means.
+    const evt = new Event("cancel", { cancelable: true });
+    m.el.dispatchEvent(evt);
+
+    expect(evt.defaultPrevented).toBe(false);
+  });
+
+  it("degrades to the open attribute when close() is not implemented", () => {
+    const m = createModal(makeContent().content);
+    m.open();
+    vi.spyOn(m.el, "close").mockImplementation(() => {
+      throw new Error("close is not implemented");
+    });
+
+    m.dispose();
+
+    // The dialog must not be left reporting itself as open just because the
+    // engine lacks close() — the attribute is the fallback for that engine.
+    expect(m.el.open).toBe(false);
+  });
+
+  it("leaves the return value of an already-closed dialog alone", () => {
+    const m = createModal(makeContent().content);
+    m.open();
+    // The platform closes dialogs too (a <form method="dialog"> submit), and it
+    // records why in returnValue. Tearing the wrapper down must not overwrite
+    // the answer the app has not read yet.
+    m.el.close("save");
+    expect(m.el.returnValue).toBe("save");
+
+    m.dispose();
+
+    expect(m.el.returnValue).toBe("save");
+  });
+});
+
+describe("scroll-lock accounting cannot go negative", () => {
+  it("a release that outlives the count it belonged to does not break the next lock", () => {
+    const a = createModal(makeContent().content);
+    a.open();
+    expect(document.body.style.position).toBe("fixed");
+
+    _resetForTest(); // the shared count is cleared while `a` still holds a lock
+    a.dispose(); // ...so a's release arrives with nothing left to release
+
+    const b = createModal(makeContent().content);
+    b.open();
+
+    // An underflowed count would leave the next modal one increment short of
+    // locking, and the page scrolls behind it.
+    expect(document.body.style.position).toBe("fixed");
+    b.dispose();
+  });
+});
