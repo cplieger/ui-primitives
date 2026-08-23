@@ -13,7 +13,7 @@ import { el } from "@cplieger/reactive";
 
 import { announce } from "../announce.js";
 import { topmostOpenDialog } from "../modal-host.js";
-import { afterTransition } from "../transition.js";
+import { afterTransition, forceReflow } from "../transition.js";
 import type { ToastCallbacks, ToastRenderData, ToastView } from "./engine.js";
 
 /** Fallback (ms) if `transitionend` never fires so a toast is always removed. */
@@ -215,12 +215,17 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
       // A dismiss can land before the enter frame runs. Cancel it (so it can't
       // re-add `is-shown` mid-leave) and settle the node into `is-shown` now, so
       // the leave transition runs from a defined start state and its
-      // `transitionend` fires instead of stalling on the fallback timer.
+      // `transitionend` fires instead of stalling on the fallback timer. The
+      // reflow is what makes the settle real: without a style flush between the
+      // add and the `remove` below, `is-shown` never becomes a used style and the
+      // leave would run from `is-entering` (opacity 0) to `is-leaving`
+      // (opacity 0) — no transition, no `transitionend`.
       if (handle.enterRaf !== null) {
         cancelAnimationFrame(handle.enterRaf);
         handle.enterRaf = null;
         node.classList.remove("is-entering");
         node.classList.add("is-shown");
+        forceReflow(node);
       }
       handle.leaveCancel = afterTransition(
         node,
