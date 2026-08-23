@@ -234,3 +234,23 @@ describe("rovingFocus: dispose", () => {
     expect(items.map((i) => i.getAttribute("tabindex"))).toEqual(["0", "-1"]);
   });
 });
+
+describe("rovingFocus: nothing holds focus at all", () => {
+  it("Next from no focus lands on the first item, not the second", () => {
+    const { container, items } = menu(["a", "b", "c"]);
+    rovingFocus(container, ".item");
+
+    // The "active element is not an element" arm only exists for this state, and
+    // happy-dom's default (document.body) is an HTMLElement, so it has to be
+    // forced. "The item after none" must resolve to the first item.
+    Object.defineProperty(document, "activeElement", { value: null, configurable: true });
+    try {
+      key(container, "ArrowDown");
+    } finally {
+      Reflect.deleteProperty(document, "activeElement");
+    }
+
+    expect(document.activeElement).toBe(items[0]);
+    expect(items.map((i) => i.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
+  });
+});

@@ -314,3 +314,205 @@ describe("ask — _resetForTest (test-only seam)", () => {
     expect(document.querySelectorAll("dialog.uip-ask")).toHaveLength(0);
   });
 });
+
+/** Listener registrations we observe by invocation rather than by count. */
+type Listener = EventListenerOrEventListenerObject;
+
+/**
+ * Wrap every listener `target` registers from now on, appending its event type
+ * to `ran` whenever it actually fires. Registration options pass through
+ * untouched — so an `AbortSignal` still governs removal exactly as it would
+ * without the wrapper — and an explicit `removeEventListener` for the original
+ * function still matches, because the same wrapper is looked up again.
+ *
+ * This is how "the ask no longer owns anything on the shared dialog" is
+ * observed: the handlers a settled ask leaves behind are all inert (each
+ * re-checks `settled` and returns), so nothing but their invocation
+ * distinguishes a detached listener from a leaked one.
+ */
+function watchListeners(target: EventTarget, ran: string[]): void {
+  const wrappers = new Map<Listener, Map<string, EventListener>>();
+  const add = target.addEventListener.bind(target);
+  const remove = target.removeEventListener.bind(target);
+  const wrap = (type: string, listener: Listener): EventListener => {
+    let byType = wrappers.get(listener);
+    if (byType === undefined) {
+      byType = new Map<string, EventListener>();
+      wrappers.set(listener, byType);
+    }
+    let wrapper = byType.get(type);
+    if (wrapper === undefined) {
+      wrapper = (e: Event): void => {
+        ran.push(type);
+        if (typeof listener === "function") {
+          listener(e);
+        } else {
+          listener.handleEvent(e);
+        }
+      };
+      byType.set(type, wrapper);
+    }
+    return wrapper;
+  };
+  vi.spyOn(target, "addEventListener").mockImplementation(
+    (type: string, listener: Listener | null, options?: AddEventListenerOptions | boolean) => {
+      if (listener !== null) {
+        add(type, wrap(type, listener), options);
+      }
+    },
+  );
+  vi.spyOn(target, "removeEventListener").mockImplementation(
+    (type: string, listener: Listener | null, options?: EventListenerOptions | boolean) => {
+      if (listener !== null) {
+        // Look up, never create: a removal we have no wrapper for (an abort
+        // signal firing hands back the wrapper itself) must pass through as-is,
+        // or the real registration is never taken off.
+        remove(type, wrappers.get(listener)?.get(type) ?? listener, options);
+      }
+    },
+  );
+}
+
+/** Drive every dismissal affordance the boolean ask wires, in one go. */
+function pokeEverything(d: HTMLDialogElement): void {
+  const fire = (el: Element, e: Event): void => {
+    el.dispatchEvent(e);
+  };
+  fire(d.querySelector(".uip-ask-ok")!, new MouseEvent("click", { bubbles: true }));
+  fire(d.querySelector(".uip-ask-cancel")!, new MouseEvent("click", { bubbles: true }));
+  fire(d, new MouseEvent("mousedown", { bubbles: true }));
+  fire(d, new MouseEvent("mouseup", { bubbles: true }));
+  fire(d, new Event("cancel", { cancelable: true }));
+}
+
+describe("ask — an ask that is over owns nothing on the shared dialog", () => {
+  /** Build the boolean shape's reused dialog and leave it fully closed. */
+  async function warmBooleanDialog(): Promise<HTMLDialogElement> {
+    const p = ask("warm up");
+    const d = booleanDlg();
+    click(d, ".uip-ask-cancel");
+    await expect(p).resolves.toBe(false);
+    vi.advanceTimersByTime(400);
+    return d;
+  }
+
+  it("stops intercepting the dialog's native cancel once the answer has resolved", async () => {
+    const p = ask("Sure?");
+    const d = booleanDlg();
+    click(d, ".uip-ask-ok");
+    await expect(p).resolves.toBe(true);
+    vi.advanceTimersByTime(400);
+
+    const evt = new Event("cancel", { cancelable: true });
+    d.dispatchEvent(evt);
+    // The dialog is shared and long-lived. A resolved ask must hand it back to
+    // the platform: an Escape that lands on it now has to reach the native
+    // close, not a dead handler that swallows it and does nothing.
+    expect(evt.defaultPrevented).toBe(false);
+  });
+
+  it("detaches every listener it registered when the answer resolves", async () => {
+    const d = await warmBooleanDialog();
+    const ran: string[] = [];
+    watchListeners(d, ran);
+    watchListeners(d.querySelector(".uip-ask-ok")!, ran);
+    watchListeners(d.querySelector(".uip-ask-cancel")!, ran);
+
+    const p = ask("Delete?");
+    click(d, ".uip-ask-ok");
+    await expect(p).resolves.toBe(true);
+    vi.advanceTimersByTime(400);
+
+    ran.length = 0;
+    pokeEverything(d);
+    // Confirm, cancel, backdrop press and Escape: nothing the resolved ask
+    // registered may still run. Each leftover would be inert today (they all
+    // re-check `settled`), which is exactly why a leak here is invisible until
+    // something downstream stops being inert.
+    expect(ran).toEqual([]);
+  });
+
+  it("detaches the listeners of an ask its successor preempted", async () => {
+    const d = await warmBooleanDialog();
+    const ran: string[] = [];
+    watchListeners(d, ran);
+    watchListeners(d.querySelector(".uip-ask-ok")!, ran);
+    watchListeners(d.querySelector(".uip-ask-cancel")!, ran);
+
+    const p1 = ask("First?");
+    const p2 = ask("Second?"); // same shape: takes over the still-open dialog
+    await expect(p1).resolves.toBe(false);
+
+    ran.length = 0;
+    // A backdrop press (no release, so nothing settles) and then Escape. Each
+    // must find exactly ONE handler — the successor's. Two would mean the
+    // preempted ask is still wired to a dialog it no longer owns.
+    d.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    d.dispatchEvent(new Event("cancel", { cancelable: true }));
+    expect(ran).toEqual(["mousedown", "cancel"]);
+    await expect(p2).resolves.toBe(false);
+  });
+
+  it("detaches the input shape's submit handler when the value resolves", async () => {
+    const p0 = ask("warm up", { input: true });
+    const d = inputDlg();
+    click(d, ".uip-ask-cancel");
+    await expect(p0).resolves.toBeNull();
+    vi.advanceTimersByTime(400);
+
+    const form = d.querySelector("form")!;
+    const ran: string[] = [];
+    watchListeners(form, ran);
+
+    const p = ask("Name?", { input: true });
+    d.querySelector<HTMLInputElement>(".uip-ask-input")!.value = "ford";
+    form.dispatchEvent(new Event("submit", { cancelable: true }));
+    await expect(p).resolves.toBe("ford");
+    vi.advanceTimersByTime(400);
+
+    ran.length = 0;
+    const late = new Event("submit", { cancelable: true });
+    form.dispatchEvent(late);
+    // A resolved input ask must not keep swallowing the form's submission.
+    expect(ran).toEqual([]);
+    expect(late.defaultPrevented).toBe(false);
+  });
+});
+
+describe("ask — preemption arms no stray leave lifecycle", () => {
+  it("a same-shape preemption reuses the open dialog instead of fading it out", async () => {
+    const p1 = ask("First?");
+    const d = booleanDlg();
+    const p2 = ask("Second?");
+    await expect(p1).resolves.toBe(false);
+
+    // The successor needs the dialog that is already on screen, so no leave may
+    // start against it: a leave armed here is the stale timer that yanks a
+    // reopened dialog shut moments later.
+    expect(d.open).toBe(true);
+    expect(d.classList.contains("is-leaving")).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+
+    click(d, ".uip-ask-ok");
+    await expect(p2).resolves.toBe(true);
+  });
+
+  it("a resolved ask is not pending, so the next ask has nothing to preempt", async () => {
+    const p1 = ask("Sure?");
+    const d1 = booleanDlg();
+    click(d1, ".uip-ask-ok");
+    await expect(p1).resolves.toBe(true);
+    // Its own leave is in flight: exactly one fallback is armed against d1.
+    expect(vi.getTimerCount()).toBe(1);
+
+    const p2 = ask("Name?", { input: true });
+    // The boolean ask already resolved. Treating it as still pending would run a
+    // second, overlapping leave on a dialog that is already closing.
+    expect(vi.getTimerCount()).toBe(1);
+
+    vi.advanceTimersByTime(400);
+    expect(d1.open).toBe(false);
+    click(inputDlg(), ".uip-ask-cancel");
+    await expect(p2).resolves.toBeNull();
+  });
+});

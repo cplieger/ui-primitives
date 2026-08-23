@@ -123,3 +123,31 @@ describe("announce: hosting is left alone when it is already correct", () => {
     expect(regions()).toHaveLength(0);
   });
 });
+
+describe("announce — _resetForTest really resets", () => {
+  it("cancels a pending announcement instead of leaving it armed", () => {
+    announce("pending");
+    expect(vi.getTimerCount()).toBe(1);
+
+    _resetForTest();
+    // The region the timer would write into has just been removed from the
+    // document; leaving the timer armed fires text into a detached node.
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("discards the registry too, so a later announce builds a fresh region", () => {
+    announce("stale");
+    const first = regions()[0]!;
+    _resetForTest();
+    expect(regions()).toHaveLength(0);
+
+    announce("fresh");
+    const second = regions()[0]!;
+    // Regions are cached by politeness and re-homed on every announce. If the
+    // cache outlives the reset, the discarded node is re-appended and reused as
+    // though it had never been thrown away.
+    expect(second).not.toBe(first);
+    vi.advanceTimersByTime(100);
+    expect(second.textContent).toBe("fresh");
+  });
+});

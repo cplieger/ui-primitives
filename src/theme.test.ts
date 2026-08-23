@@ -363,3 +363,17 @@ describe("themeInitSnippetFromJSON", () => {
     localStorage.removeItem("st");
   });
 });
+
+describe("createTheme: an engine with no matchMedia", () => {
+  it("degrades to light and attaches no OS listener", () => {
+    vi.stubGlobal("matchMedia", undefined);
+    const t = createTheme({ storageKey: "k", storage: memoryStorage() });
+    // With no media query to consult there is no dark signal and nothing to
+    // subscribe to; consulting it anyway would throw at construction, before
+    // the controller ever gets built.
+    expect(t.getSystem()).toBe("light");
+    expect(t.resolved()).toBe("light");
+    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    t.dispose(); // must not throw either — there is no listener to detach
+  });
+});
