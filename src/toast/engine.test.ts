@@ -522,3 +522,65 @@ describe("ToastEngine: a dismiss that lands mid-promotion", () => {
     expect(engine.visibleCount).toBe(0);
   });
 });
+
+describe("ToastEngine: a countdown that drained while the toast was held", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // A throttled or backgrounded tab lets the wall clock pass a toast's deadline
+  // before its pending setTimeout runs. Hovering/focusing in that window drains
+  // `remaining` to 0 and clears the timer, so nothing is armed to auto-dismiss
+  // it any more. Holding it there is the documented policy; RELEASING it has to
+  // let the expired countdown finish, or the toast is on screen forever.
+  function expireWhileHeld(): {
+    engine: ToastEngine<FakeToast>;
+    mounts: FakeToast[];
+  } {
+    vi.useFakeTimers();
+    const { view, mounts } = makeFakeView(true);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1, defaultDuration: 1000 });
+    engine.show("t", { level: "info", duration: 1000 });
+    vi.setSystemTime(Date.now() + 1500); // clock jumps the deadline; no timer runs
+    mounts[0]!.ctx.pause();
+    return { engine, mounts };
+  }
+
+  it("keeps a toast whose countdown drained while it is still hovered or focused", () => {
+    const { engine, mounts } = expireWhileHeld();
+
+    // docs/toast.md: hover/focus pauses the countdown, "so a focused toast
+    // never auto-dismisses under the cursor". An expired countdown is no
+    // exception: while the user still holds the toast it stays put.
+    vi.advanceTimersByTime(10_000);
+    expect(mounts[0]!.left).toBe(false);
+    expect(engine.visibleCount).toBe(1);
+  });
+
+  it("dismisses it when the hover/focus is released, instead of stranding it on screen", () => {
+    const { engine, mounts } = expireWhileHeld();
+
+    mounts[0]!.ctx.resume();
+
+    // Its time is up and no timer is left to notice, so the release is the last
+    // chance to run the auto-dismiss the toast was promised.
+    expect(mounts[0]!.left).toBe(true);
+    expect(engine.visibleCount).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("leaves a sticky toast alone: remaining 0 there is no countdown, not a drained one", () => {
+    vi.useFakeTimers();
+    const { view, mounts } = makeFakeView(true);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1 });
+    engine.show("e", { level: "error" }); // sticky: duration 0, so remaining 0
+
+    // A sticky toast sits at remaining = 0 from birth, which must not be read as
+    // an expired countdown: hovering it and letting go dismisses nothing.
+    mounts[0]!.ctx.pause();
+    mounts[0]!.ctx.resume();
+
+    expect(mounts[0]!.left).toBe(false);
+    expect(engine.visibleCount).toBe(1);
+  });
+});

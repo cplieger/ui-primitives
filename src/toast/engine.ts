@@ -281,7 +281,18 @@ export class ToastEngine<H> {
 
   private resume(id: number): void {
     const t = this.find(id);
-    if (t === undefined || t.duration <= 0 || t.remaining <= 0 || t.timer !== null) {
+    if (t === undefined || t.duration <= 0 || t.timer !== null) {
+      return;
+    }
+    if (t.remaining <= 0) {
+      // The countdown drained while the toast was held: a throttled or
+      // backgrounded tab can let the wall clock pass the deadline before the
+      // pending timeout runs, and pausing in that window takes `remaining` to 0
+      // with no timer left to fire. Releasing the hold is therefore the last
+      // chance to run the auto-dismiss this toast was promised — without this
+      // it stays on screen until it is clicked, Escaped or cleared. (Sticky
+      // toasts never reach here: `duration <= 0` returns above.)
+      this.dismiss(id);
       return;
     }
     this.startTimer(t);
