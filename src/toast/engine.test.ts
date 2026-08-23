@@ -411,3 +411,114 @@ describe("ToastEngine: per-toast targeting", () => {
     expect(engine.visibleCount).toBe(1);
   });
 });
+
+describe("ToastEngine: render-data ids", () => {
+  it("gives each toast a fresh positive id that rises with show order", () => {
+    const { view, mounts } = makeFakeView();
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 3, defaultDuration: 0 });
+    engine.show("a");
+    engine.show("b");
+    engine.show("c");
+
+    // A view keys its nodes off `id`, so the ids must be distinct, usable
+    // numbers that follow the order the toasts were raised in.
+    const ids = mounts.map((m) => m.data.id);
+    expect(ids.every((id) => id > 0)).toBe(true);
+    expect(ids[1]!).toBeGreaterThan(ids[0]!);
+    expect(ids[2]!).toBeGreaterThan(ids[1]!);
+  });
+});
+
+describe("ToastEngine: timer hygiene", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("leaves no timer armed for a toast replaced in replace mode", () => {
+    vi.useFakeTimers();
+    const { view } = makeFakeView();
+    const engine = new ToastEngine<FakeToast>({ view, mode: "replace", defaultDuration: 1000 });
+
+    engine.show("first");
+    expect(vi.getTimerCount()).toBe(1);
+    engine.show("second");
+    // The replaced toast's countdown dies with it: one live toast, one timer.
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("leaves no timer armed after clear()", () => {
+    vi.useFakeTimers();
+    const { view } = makeFakeView(false);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 3, defaultDuration: 1000 });
+
+    engine.show("a");
+    engine.show("b");
+    expect(vi.getTimerCount()).toBe(2);
+    engine.clear();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("leaves no timer armed after a toast is dismissed", () => {
+    vi.useFakeTimers();
+    const { view } = makeFakeView(true);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1, defaultDuration: 1000 });
+
+    const dismiss = engine.show("a");
+    expect(vi.getTimerCount()).toBe(1);
+    dismiss();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not resume the progress animation when no time is left on the clock", () => {
+    vi.useFakeTimers();
+    const { view, mounts } = makeFakeView(true);
+    const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1, defaultDuration: 1000 });
+    engine.show("t", { level: "info", duration: 1000 });
+
+    // The wall clock runs past the deadline without the timer firing — what a
+    // backgrounded tab does to a throttled timeout. Pausing there drains the
+    // remaining time to zero.
+    vi.setSystemTime(Date.now() + 1500);
+    mounts[0]!.ctx.pause();
+    expect(mounts[0]!.paused).toBe(true);
+
+    // Nothing is left to count down, so there is nothing to resume: the view
+    // must not be told to restart a progress animation that has no time in it.
+    mounts[0]!.ctx.resume();
+    expect(mounts[0]!.resumes).toBe(0);
+  });
+});
+
+describe("ToastEngine: a dismiss that lands mid-promotion", () => {
+  it("dismisses a queued toast that is dismissed from inside the view's mount", () => {
+    // The queue shift and the dismiss-fn rebind straddle view.mount(), so a
+    // dismiss arriving from inside mount() finds neither the queued entry (it
+    // has been shifted off) nor a mounted dismiss fn (not bound yet). It must
+    // not be swallowed: the toast has to leave again.
+    const { view, mounts } = makeFakeView(true);
+    let dismissQueued: (() => void) | null = null;
+    const dismissingView: ToastView<FakeToast> = {
+      ...view,
+      mount(data, ctx) {
+        const handle = view.mount(data, ctx);
+        if (data.message === "queued") {
+          dismissQueued?.();
+        }
+        return handle;
+      },
+    };
+    const engine = new ToastEngine<FakeToast>({
+      view: dismissingView,
+      maxVisible: 1,
+      defaultDuration: 0,
+    });
+    const dismissVisible = engine.show("visible");
+    dismissQueued = engine.show("queued");
+
+    dismissVisible(); // frees the slot: "queued" is promoted, then dismissed
+
+    expect(mounts[1]!.data.message).toBe("queued");
+    expect(mounts[1]!.left).toBe(true);
+    expect(engine.visibleCount).toBe(0);
+  });
+});
