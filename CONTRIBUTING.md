@@ -132,6 +132,7 @@ stylelint-clean under `stylelint-config-standard`. Rules:
 
 ```sh
 npm install
+npx --no-install playwright install chromium   # once per machine, see below
 npm run typecheck         # tsc -p tsconfig.json (source)
 npm run typecheck:tests   # tsc -p tsconfig.test.json (incl. tests)
 npm test                  # vitest --run
@@ -141,6 +142,15 @@ npm run lint:prettier     # prettier --check .
 npm run lint:stylelint    # stylelint css/**/*.css
 npm run lint:knip         # unused files/exports/deps
 ```
+
+The tests run in a real headless Chromium through Vitest Browser Mode, and the
+browser is a per-machine step rather than a per-clone one: `npm install` brings
+the Playwright library but never the browser binary. `ci-local.sh` will not do it
+for you either, because it skips every step named `Install *` on the assumption
+that a local machine already has the tool. Without the browser, `npm test` fails
+with a missing-executable error that reads like a test failure. Add `--with-deps`
+only on a bare container; a desktop already has the system libraries Chromium
+links against.
 
 There is no build step: the package ships TypeScript source directly (npm and
 JSR both reference `src/**/*.ts`), so consumers compile it through their own
