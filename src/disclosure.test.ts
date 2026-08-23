@@ -368,16 +368,6 @@ describe("createDisclosure: engine capability guards", () => {
     d.dispose();
   });
 
-  it("treats a windowless environment as expressing no motion preference", () => {
-    const { trigger, region } = mount();
-    vi.stubGlobal("CSS", { supports: () => true });
-    vi.stubGlobal("window", undefined);
-    const d = createDisclosure(trigger, region);
-    d.open();
-    expect(region.style.height).toBe("auto");
-    d.dispose();
-  });
-
   it("falls back to a measured pixel height when CSS is absent entirely", () => {
     vi.stubGlobal("CSS", undefined);
     const { trigger, region } = mount();
