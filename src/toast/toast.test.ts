@@ -520,6 +520,77 @@ describe("toast: modal <dialog> auto-hosting", () => {
     info("recovers"); // next mount re-resolves the host
     expect(stack()!.parentElement).toBe(document.body);
   });
+
+  /** How many of the spied add/removeEventListener calls were for `close`. */
+  function closeCalls(spy: { mock: { calls: unknown[][] } }): number {
+    return spy.mock.calls.filter((call) => call[0] === "close").length;
+  }
+
+  it("releases the dialog it evacuates: no close listener is left behind on it", () => {
+    const dlg = openModal();
+    const addSpy = vi.spyOn(dlg, "addEventListener");
+    const removeSpy = vi.spyOn(dlg, "removeEventListener");
+
+    info("over the modal");
+    expect(stack()!.parentElement).toBe(dlg);
+    expect(closeCalls(addSpy)).toBe(1);
+
+    dlg.close();
+    expect(stack()!.parentElement).toBe(document.body);
+    // The listener is app-owned DOM the view no longer has any use for; a
+    // retained one keeps a closed dialog wired to a stack that has left it.
+    expect(closeCalls(removeSpy)).toBe(1);
+    dlg.remove();
+  });
+
+  it("dispose() releases the dialog the stack was hosted in", () => {
+    const dlg = openModal();
+    const removeSpy = vi.spyOn(dlg, "removeEventListener");
+
+    const t = createToaster();
+    t.info("inside the modal");
+    expect(dlg.querySelector(".uip-toast-stack")).not.toBeNull();
+
+    t.dispose();
+    // A disposed toaster leaves nothing of itself on the page — the dialog's
+    // close listener included.
+    expect(closeCalls(removeSpy)).toBe(1);
+    dlg.close();
+    dlg.remove();
+  });
+
+  it("does not churn the close listener when a second toast re-resolves the same dialog", () => {
+    const dlg = openModal();
+    const addSpy = vi.spyOn(dlg, "addEventListener");
+    const removeSpy = vi.spyOn(dlg, "removeEventListener");
+
+    info("first");
+    info("second"); // same host: the adoption already stands
+    expect(stack()!.parentElement).toBe(dlg);
+
+    // Re-registering per toast would open a window in which a `close` racing
+    // the swap is heard by nobody.
+    expect(closeCalls(addSpy)).toBe(1);
+    expect(closeCalls(removeSpy)).toBe(0);
+    dlg.close();
+    dlg.remove();
+  });
+
+  it("an explicit <dialog> container is pinned, never adopted", () => {
+    const dlg = openModal();
+    const addSpy = vi.spyOn(dlg, "addEventListener");
+
+    const t = createToaster({ container: dlg });
+    t.info("pinned");
+    expect(dlg.querySelector(".uip-toast-stack")).not.toBeNull();
+
+    // Pinned means exempt from auto-hosting: the view takes no interest in the
+    // element's dialog-ness, so it never watches it for `close`.
+    expect(closeCalls(addSpy)).toBe(0);
+    t.dispose();
+    dlg.close();
+    dlg.remove();
+  });
 });
 
 describe("toast: default toaster laziness", () => {
@@ -622,5 +693,146 @@ describe("the default toaster's teardown seams", () => {
     expect(stack()).toBeNull();
     info("again"); // lazily rebuilt
     expect(stack()).not.toBeNull();
+  });
+});
+
+describe("toast: the engine port the view drives", () => {
+  it("pauses the engine once for two overlapping pause sources, and resumes once", () => {
+    const view = createToastView();
+    const ctx = { dismiss: vi.fn(), pause: vi.fn(), resume: vi.fn() };
+    const handle = view.mount(
+      { id: 1, message: "hover and focus", level: "info", duration: 4000 },
+      ctx,
+    );
+    const node = handle.el;
+
+    // Hover and focus are two DOM sources over ONE engine timer, so the view
+    // ref-counts them: the engine hears a single pause, and a single resume
+    // only once the last source lets go.
+    node.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+    node.dispatchEvent(new Event("focusin", { bubbles: true }));
+    expect(ctx.pause).toHaveBeenCalledTimes(1);
+
+    node.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+    expect(ctx.resume).not.toHaveBeenCalled();
+    node.dispatchEvent(new Event("focusout", { bubbles: true }));
+    expect(ctx.resume).toHaveBeenCalledTimes(1);
+
+    view.dispose();
+  });
+});
+
+describe("toast: teardown cancels pending work", () => {
+  /** A host element for an isolated toaster, so the singleton is untouched. */
+  function makeHost(): HTMLElement {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    return host;
+  }
+
+  it("cancels a removed toast's pending enter frame so it cannot restyle the detached node", () => {
+    vi.useFakeTimers();
+    try {
+      const t = createToaster({ container: makeHost(), mode: "replace" });
+      t.info("first");
+      const first = document.querySelector<HTMLElement>(".uip-toast")!;
+      expect(first.classList.contains("is-entering")).toBe(true);
+
+      t.info("second"); // replace mode removes "first" on the spot
+      vi.advanceTimersToNextFrame(); // a surviving enter frame would run here
+      expect(first.isConnected).toBe(false);
+      expect(first.classList.contains("is-shown")).toBe(false);
+      t.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a pending leave transition on clear(), leaving no fallback timer armed", () => {
+    vi.useFakeTimers();
+    try {
+      const t = createToaster({ container: makeHost() });
+      const dismiss = t.info("bye");
+      vi.advanceTimersByTime(100); // the announce timer lands and clears
+      expect(vi.getTimerCount()).toBe(1); // the auto-dismiss countdown
+
+      dismiss();
+      expect(vi.getTimerCount()).toBe(1); // countdown cancelled, leave fallback armed
+
+      t.clear();
+      // The leave's fallback timer goes with the node it would have removed:
+      // nothing may fire into a cleared toaster.
+      expect(vi.getTimerCount()).toBe(0);
+      t.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a live toast's countdown on dispose(), leaving no timer armed", () => {
+    vi.useFakeTimers();
+    try {
+      const t = createToaster({ container: makeHost() });
+      t.info("timed");
+      vi.advanceTimersByTime(100); // the announce timer lands and clears
+      expect(vi.getTimerCount()).toBe(1); // the auto-dismiss countdown
+
+      t.dispose();
+      // The view is gone, so a countdown that outlived it would dismiss into a
+      // torn-down stack.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("toast: a failing retry handler", () => {
+  function clickRetry(root: ParentNode): void {
+    root
+      .querySelector<HTMLButtonElement>(".uip-toast-retry")!
+      .dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  }
+
+  it("does not let the retry click escape the toast to the app's own root", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const onHostClick = vi.fn();
+    host.addEventListener("click", onHostClick);
+
+    const t = createToaster({ container: host });
+    t.error("failed", { onClick: vi.fn() });
+    clickRetry(host);
+
+    // The retry button owns the click: an app listening on the root it handed
+    // us must not also see it as a click of its own.
+    expect(onHostClick).not.toHaveBeenCalled();
+    t.dispose();
+  });
+
+  it("reports a rejected retry handler instead of dropping the rejection", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const boom = new Error("nope");
+    const onClick = vi.fn().mockRejectedValue(boom);
+
+    error("failed", { onClick });
+    clickRetry(document);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(logged).toHaveBeenCalledWith("[uip-toast] retry handler rejected", boom);
+  });
+
+  it("reports a retry handler that throws synchronously", () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const boom = new Error("sync boom");
+    const onClick = vi.fn(() => {
+      throw boom;
+    });
+
+    error("failed", { onClick });
+    clickRetry(document);
+
+    expect(logged).toHaveBeenCalledWith("[uip-toast] retry handler threw", boom);
   });
 });
