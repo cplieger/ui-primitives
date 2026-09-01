@@ -1,24 +1,15 @@
 // view-transition.ts — Queued, feature-detected, rejection-safe wrapper over
 // document.startViewTransition. Overlapping calls serialize through a
-// module-level pending promise so transitions never visually overlap; when the
-// API is unavailable the callback runs directly. The returned promise resolves
-// when the transition (or the direct run) finishes; both paths swallow errors
-// (ready/finished rejections such as a transition skipped under
-// prefers-reduced-motion, AND a throwing/rejecting `fn`) so a cosmetic
-// transition never rejects the caller — the contract is identical either way.
+// module-level pending promise; the returned promise never rejects, even when
+// the transition rejects or `fn` throws.
 //
-// Suspended-renderer safety: startViewTransition's update callback and its
-// `finished` promise both require rendering opportunities. A hidden tab (and
-// some remote/virtualized sessions that stay "visible" while the compositor is
-// suspended) never grants one — the callback never runs, `finished` never
-// settles, and every later call chains behind it: the whole app's view swaps
-// wedge while URLs keep changing. Two guards close that class:
-//   1. `document.hidden` fast-path — run the swap directly, no transition
-//      (nothing is visible to animate anyway);
-//   2. a watchdog that calls `transition.skipTransition()` when `finished`
-//      has not settled in time. Skipping still runs the update callback and
-//      settles `finished` via task queues, no frames needed, so the DOM swap
-//      always lands.
+// Suspended-renderer safety: a hidden tab (and some remote/virtualized
+// sessions that stay "visible" while the compositor is suspended) never
+// grants startViewTransition a rendering opportunity, so `finished` never
+// settles and every later call chains behind it forever. Two guards: a
+// `document.hidden` fast-path that skips the transition entirely, and a
+// watchdog that calls `skipTransition()` when `finished` hasn't settled in
+// time (skipping still runs the update callback and settles via task queues).
 
 let pending: Promise<void> = Promise.resolve();
 
@@ -34,25 +25,19 @@ export function viewTransition(fn: () => void | Promise<void>): Promise<void> {
   const run = async (): Promise<void> => {
     // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime feature detection
     if (!document.startViewTransition || document.hidden) {
-      // Match the API-present path: a cosmetic DOM update that throws/rejects
-      // must not reject the caller. Both paths resolve.
       try {
         await fn();
       } catch {
-        // swallow — the direct run "completes" like a skipped transition.
+        // swallow — matches the API-present path, which never rejects the caller.
       }
       return;
     }
     const transition = document.startViewTransition(fn);
     transition.ready.catch(() => undefined);
-    // `updateCallbackDone` rejects with whatever `fn` threw, and nothing else
-    // here observes it, so without this handler a throwing cosmetic update
-    // raises an unhandled rejection in the page. Verified against Chromium's
-    // real View Transitions API; the DOM emulator this suite used to run under
-    // has no startViewTransition at all, so the leak could not surface there.
+    // Otherwise a throwing `fn` raises an unhandled rejection in the page —
+    // nothing else here observes updateCallbackDone.
     transition.updateCallbackDone.catch(() => undefined);
     const watchdog = setTimeout(() => {
-      // Safe on a transition in any state: skipping after finish is a no-op.
       transition.skipTransition();
     }, SKIP_WATCHDOG_MS);
     try {
@@ -61,8 +46,7 @@ export function viewTransition(fn: () => void | Promise<void>): Promise<void> {
       clearTimeout(watchdog);
     }
   };
-  // Chain off the previous call regardless of how it settled, then reset the
-  // shared tail to a swallowed promise so one failure can't wedge the queue.
+  // Reset the shared tail to a swallowed promise so one failure can't wedge the queue.
   const result = pending.then(run, run);
   pending = result.catch(() => undefined);
   return result;

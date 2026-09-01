@@ -2,13 +2,9 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 
 import { topmostOpenDialog } from "./modal-host.js";
 
-// modal-host resolves the open <dialog> that page-level chrome (the toast
-// stack, the announce regions) must live inside to escape showModal()'s
-// inertness. `matches` is stubbed per dialog to declare which ones the
-// platform would call modal, so a test can state an arbitrary stack of open
-// dialogs directly: the ORDERING preference is what this module decides, and
-// driving it through real showModal() calls would make the fixture the
-// platform's business rather than the test's.
+// `matches` is stubbed per dialog to declare which ones the platform would
+// call modal, so a stack of open dialogs can be stated directly rather than
+// driven through real showModal() calls.
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -38,8 +34,7 @@ describe("topmostOpenDialog", () => {
   });
 
   it("prefers a modal dialog over a later non-modal one", () => {
-    // Document order alone would pick the last open dialog. Chrome has to land
-    // inside the MODAL one: that is the only subtree showModal() leaves live.
+    // Chrome must land inside the MODAL one, the only subtree showModal() leaves live.
     const modal = openDialog(true);
     openDialog(false);
     expect(topmostOpenDialog()).toBe(modal);
@@ -58,8 +53,7 @@ describe("topmostOpenDialog", () => {
   });
 
   it("does not treat a dialog as modal when the :modal check throws", () => {
-    // An engine without a faithful `:modal` must fall through to the
-    // last-open-dialog fallback rather than trusting the failed probe.
+    // Must fall through to the last-open-dialog fallback, not trust the failed probe.
     openDialog("throws");
     const last = openDialog(false);
     expect(topmostOpenDialog()).toBe(last);

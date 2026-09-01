@@ -1,16 +1,9 @@
 // roving-focus.ts — WAI-ARIA roving-tabindex keyboard navigation for
-// composite widgets: menus, listboxes, pickers, toolbars, any container whose
-// items should be one Tab stop navigated with the arrow keys.
+// composite widgets (menus, listboxes, pickers, toolbars): one Tab stop,
+// arrow keys move focus. Items are queried live each keystroke; call
+// `refresh()` after a bulk re-render to restore the single-Tab-stop invariant.
 //
-// Headless: it wires listeners on the container you supply and manages only
-// `tabindex` and focus. Items are queried live on every keystroke, so rows
-// added or removed after wiring (a filtered list, a reconciled menu) are
-// picked up automatically; call `refresh()` after a bulk re-render to restore
-// the single-Tab-stop invariant on brand-new items.
-//
-// This is the keyboard half of the WAI-ARIA menu pattern — pair it with
-// popover (`role="menu"` panel, `role="menuitem"` items) so the announced
-// role keeps its interaction promise:
+// Pairs with popover for the WAI-ARIA menu pattern:
 //
 //   const pop = createPopover(button, panel, { haspopup: "menu" });
 //   const nav = rovingFocus(panel, "[role=menuitem]");
@@ -58,7 +51,6 @@ export function rovingFocus(
   const items = (): HTMLElement[] => [...container.querySelectorAll<HTMLElement>(selector)];
 
   const applyTabindex = (list: HTMLElement[], active: HTMLElement | null): void => {
-    // Exactly one Tab stop: the active item, or the first when none is.
     const target = active !== null && list.includes(active) ? active : (list[0] ?? null);
     for (const item of list) {
       item.setAttribute("tabindex", item === target ? "0" : "-1");
@@ -66,7 +58,6 @@ export function rovingFocus(
   };
 
   const onKeyDown = (e: KeyboardEvent): void => {
-    // Query live so dynamically added/removed items are always current.
     const list = items();
     if (list.length === 0) {
       return;
@@ -98,8 +89,7 @@ export function rovingFocus(
       case " ":
       case "Spacebar":
         if (activate && current !== -1) {
-          // Suppress the native activation (a button's Enter/Space default is
-          // already a click) and fire exactly one.
+          // Suppress the native Enter/Space activation and fire exactly one click.
           e.preventDefault();
           list[current]?.click();
         }
@@ -111,8 +101,6 @@ export function rovingFocus(
     list[next]?.focus();
   };
 
-  // Focus moving into any item (pointer, keyboard, or programmatic) rolls the
-  // single Tab stop onto it.
   const onFocusIn = (e: FocusEvent): void => {
     const target = e.target;
     if (!(target instanceof HTMLElement) || !target.matches(selector)) {

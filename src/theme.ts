@@ -61,9 +61,8 @@ function isChoice(value: string | null): value is ThemeChoice {
  *  resolved theme immediately and starts following the OS while in "system". */
 export function createTheme(opts: ThemeOptions): ThemeController {
   const attribute = opts.attribute ?? DEFAULT_ATTRIBUTE;
-  // Default adapter: a bare localStorage key. Access is lazy (only inside
-  // get/set) and every call is wrapped in try/catch below, so blocked or absent
-  // storage degrades to in-memory rather than throwing at construction.
+  // Lazy + try/catch-wrapped below, so blocked/absent storage degrades to
+  // in-memory rather than throwing at construction.
   const storage: ThemeStorage = opts.storage ?? {
     get: () => window.localStorage.getItem(opts.storageKey),
     set: (value) => {
@@ -98,8 +97,7 @@ export function createTheme(opts: ThemeOptions): ThemeController {
     try {
       storage.set(next);
     } catch {
-      // Storage denied (private mode / disabled), or a custom adapter threw —
-      // apply in memory only.
+      // Storage denied, or a custom adapter threw — apply in memory only.
     }
     apply();
   };
@@ -145,9 +143,8 @@ export function themeInitSnippet(storageKey: string, attribute = DEFAULT_ATTRIBU
     `if(c!=="light"&&c!=="dark"&&c!=="system"){c="system";}` +
     `var r=c==="system"?(${system}):c;` +
     `document.documentElement.setAttribute(${attr},r);` +
-    // Fall back to the resolved system preference (matching createTheme's
-    // runtime default) rather than a hardcoded "light" that would flash the
-    // wrong theme for dark-mode users when storage is unavailable.
+    // Falls back to the system preference, matching createTheme's runtime
+    // default, rather than a hardcoded "light".
     `}catch(e){document.documentElement.setAttribute(${attr},${system});}})();`
   );
 }
@@ -182,8 +179,7 @@ export function themeInitSnippetFromJSON(
     `if(c!=="light"&&c!=="dark"&&c!=="system"){c="system";}` +
     `var r=c==="system"?(${system}):c;` +
     `document.documentElement.setAttribute(${attr},r);` +
-    // Same system-preference fallback as themeInitSnippet: never flash a
-    // hardcoded light theme for dark-mode users when storage / JSON is unusable.
+    // Same system-preference fallback as themeInitSnippet.
     `}catch(e){document.documentElement.setAttribute(${attr},${system});}})();`
   );
 }

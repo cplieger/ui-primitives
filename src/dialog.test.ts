@@ -126,7 +126,6 @@ describe("createDialog", () => {
     ctrl.dispose();
     const cancel = new Event("cancel", { cancelable: true });
     d.dispatchEvent(cancel);
-    // Unwired: the fade lifecycle must not run and the native close is allowed.
     expect(cancel.defaultPrevented).toBe(false);
     expect(d.classList.contains("is-leaving")).toBe(false);
   });
@@ -154,8 +153,7 @@ describe("createDialog: canDismiss guard", () => {
     expect(d.open).toBe(true);
     expect(canDismiss).toHaveBeenCalledTimes(2);
 
-    // The refusal must not disarm the wiring: a later attempt re-consults the
-    // guard and succeeds once it allows.
+    // A refusal must not disarm the wiring; a later attempt succeeds once allowed.
     allowed = true;
     backdropPress(d);
     vi.advanceTimersByTime(400);
@@ -182,13 +180,11 @@ describe("openDialog: reopen during the leave fade", () => {
     closeDialog(d);
     expect(d.classList.contains("is-leaving")).toBe(true);
 
-    // Reopen mid-fade (a reused dialog: search/sync popups, prompt, confirm).
-    openDialog(d);
+    openDialog(d); // reopen mid-fade
     expect(d.classList.contains("is-leaving")).toBe(false);
     expect(d.open).toBe(true);
 
-    // The stale finalizer fires (fallback window) and must be a no-op.
-    vi.advanceTimersByTime(400);
+    vi.advanceTimersByTime(400); // stale finalizer must be a no-op
     expect(d.open).toBe(true);
   });
 });
@@ -197,9 +193,8 @@ describe("openDialog / closeDialog: platform calls and degradation", () => {
   it("closes through the native close() so the dialog's own close event fires", async () => {
     const d = makeDialog();
     openDialog(d);
-    // `close()` queues the close event as a task rather than dispatching it
-    // synchronously, so await delivery instead of asserting on a spy right
-    // after the fade finalizer runs. A missing event fails on the test timeout.
+    // close() queues the close event as a task, so await delivery rather than
+    // asserting right after the fade finalizer runs.
     const delivered = new Promise<void>((resolve) => {
       d.addEventListener("close", () => resolve(), { once: true });
     });
@@ -311,11 +306,8 @@ describe("openDialog uses the platform's modal API", () => {
 
     openDialog(d);
 
-    // showModal() is what buys focus containment, the top layer and an inert
-    // background; `open = true` alone renders a non-modal dialog in flow. Both set
-    // the attribute, so the CALL is what this test pins. On a real engine the
-    // difference is also visible in `:modal` and in where focus lands, either of
-    // which would be a broader assertion than the one made here.
+    // showModal() buys focus containment, the top layer and inertness that
+    // `open = true` alone does not, so the CALL is what this test pins.
     expect(showModal).toHaveBeenCalledOnce();
     expect(d.open).toBe(true);
   });
@@ -346,8 +338,7 @@ describe("wireBackdropDismiss: the cleanup is complete", () => {
 
     cleanup();
 
-    // A half-cleanup leaves a closure on an app-owned element for the life of
-    // the page, holding the dismissal callback with it.
+    // A half-cleanup leaks a closure on an app-owned element permanently.
     expect(types(remove)).toEqual(["mousedown", "mouseup"]);
   });
 });

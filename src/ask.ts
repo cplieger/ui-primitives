@@ -1,24 +1,6 @@
-// ask.ts — ONE Promise-shaped question dialog: the styled, non-blocking
-// replacement for BOTH window.confirm and window.prompt. A plain ask resolves
-// `Promise<boolean>` (OK → true; Cancel / Escape / backdrop / preemption →
-// false). Passing `input` turns it into a single-input ask resolving
-// `Promise<string | null>` (OK / Enter → the value as-is; cancellation paths →
-// null) — the overloads narrow the return type from the options shape, so
-// call sites keep the exact contracts the old confirm/prompt pair had.
-//
-// One primitive, one preemption domain: a newer ask() preempts ANY open ask —
-// same shape reuses the still-open dialog seamlessly; the other shape's
-// dialog is faded closed. Internally each shape keeps its own lazily-created,
-// reused native <dialog> (the input shape needs a <form> + <label>-for-input
-// structure a boolean ask must not carry), but both share the `.uip-ask`
-// class family; the input dialog adds the `.uip-ask--input` modifier.
-//
-// `variant: "destructive"` upgrades either shape to role="alertdialog" and
-// marks OK `is-destructive`. On a boolean ask it also moves initial focus to
-// Cancel (WAI-ARIA: a keyboard user must not confirm by accident); an input
-// ask always focuses its input — the typed value is what gets submitted, so
-// the accidental-Enter hazard the Cancel-focus rule guards against does not
-// apply, and type-to-confirm flows (destructive + input) need the caret.
+// ask.ts — ONE Promise-shaped question dialog, replacing window.confirm and
+// window.prompt. Two shapes (boolean / input) share one preemption domain and
+// the `.uip-ask` class family, each over its own lazily-created reused dialog.
 
 import { el } from "@cplieger/reactive";
 
@@ -143,15 +125,11 @@ export function ask(message: string, opts?: AskOptions): Promise<boolean | strin
   const input: AskInput | null = inputOpt === undefined ? null : inputOpt === true ? {} : inputOpt;
   const destructive = (opts?.variant ?? "normal") === "destructive";
 
-  // Resolve this shape's reused dialog (built lazily on first use).
   const ir = input !== null ? (inputRefs ??= buildInput()) : null;
   const r: AskRefs = ir ?? (booleanRefs ??= buildBoolean());
   const cancelValue = input !== null ? null : false;
 
-  // Preempt any prior open ask — across shapes. It resolves to its cancel
-  // value and its listeners drop. Same shape: the reused dialog stays open
-  // for this new ask (seamless takeover). Other shape: fade its dialog
-  // closed; this shape's dialog opens over it.
+  // Same shape: the reused dialog stays open. Other shape: fade it closed.
   if (pending !== null) {
     const prev = pending;
     pending = null;
@@ -170,7 +148,6 @@ export function ask(message: string, opts?: AskOptions): Promise<boolean | strin
     r.dialog.setAttribute("aria-labelledby", r.title.id);
     r.dialog.setAttribute("aria-describedby", r.message.id);
   } else {
-    // Title-less: fall back to labelling the dialog by its message.
     r.title.textContent = "";
     r.title.hidden = true;
     r.dialog.setAttribute("aria-labelledby", r.message.id);
@@ -263,7 +240,6 @@ export function ask(message: string, opts?: AskOptions): Promise<boolean | strin
       ir.form.addEventListener(
         "submit",
         (e) => {
-          // Enter in the input and the OK button both land here.
           e.preventDefault();
           settle(ir.input.value);
         },

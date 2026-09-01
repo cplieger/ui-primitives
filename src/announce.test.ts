@@ -65,8 +65,7 @@ describe("announce", () => {
     announce("first");
     vi.advanceTimersByTime(50);
     announce("second"); // cancels first's pending timer
-    // At +50ms from the second call (and +100ms from the first): the first
-    // would have landed here if it had NOT been cancelled. It must not.
+    // +50ms from the second call = +100ms from the first: it must NOT land here.
     vi.advanceTimersByTime(50);
     expect(regions()[0]!.textContent).toBe("");
     vi.advanceTimersByTime(50); // now +100ms from the second call
@@ -80,8 +79,8 @@ describe("announce: modal <dialog> re-homing", () => {
     document.body.appendChild(dlg);
     dlg.showModal();
 
-    // showModal() inerts everything outside the dialog subtree, and inert
-    // content is silent to AT — the region must live INSIDE the dialog.
+    // showModal() inerts everything outside the dialog subtree, so the region
+    // must live INSIDE it or it is silent to AT.
     announce("saved inside modal");
     const region = regions()[0]!;
     expect(region.parentElement).toBe(dlg);
@@ -91,8 +90,7 @@ describe("announce: modal <dialog> re-homing", () => {
     dlg.close();
     dlg.remove();
 
-    // Next announce re-resolves the host: back on document.body (and the
-    // region survives its host's removal — it re-attaches).
+    // Next announce re-resolves the host: back on document.body, re-attached.
     announce("back outside");
     expect(region.parentElement).toBe(document.body);
     vi.advanceTimersByTime(100);
@@ -130,8 +128,7 @@ describe("announce — _resetForTest really resets", () => {
     expect(vi.getTimerCount()).toBe(1);
 
     _resetForTest();
-    // The region the timer would write into has just been removed from the
-    // document; leaving the timer armed fires text into a detached node.
+    // The region has just been removed; a leftover timer fires into a detached node.
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -143,9 +140,7 @@ describe("announce — _resetForTest really resets", () => {
 
     announce("fresh");
     const second = regions()[0]!;
-    // Regions are cached by politeness and re-homed on every announce. If the
-    // cache outlives the reset, the discarded node is re-appended and reused as
-    // though it had never been thrown away.
+    // If the region cache outlives the reset, the discarded node is reused.
     expect(second).not.toBe(first);
     vi.advanceTimersByTime(100);
     expect(second.textContent).toBe("fresh");

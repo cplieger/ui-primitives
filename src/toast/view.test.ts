@@ -1,9 +1,5 @@
-// view.test.ts — the toast view's leave lifecycle measured against the SHIPPED
-// stylesheet. Separate from toast.test.ts on purpose: these tests need the real
-// css/ui-primitives.css in the document (a document-wide side effect the rest of
-// the suite must not inherit) and real timers, so they can watch an actual CSS
-// transition run, which is exactly what toast.test.ts's synthetic
-// `dispatchEvent(new Event("transitionend"))` fixtures cannot observe.
+// Separate from toast.test.ts: needs the real shipped CSS and real timers to
+// observe an actual transition, which a synthetic transitionend event cannot.
 import { describe, it, expect, afterEach, beforeAll, afterAll } from "vitest";
 
 import { _resetForTest as resetAnnounce } from "../announce.js";
@@ -76,9 +72,8 @@ describe("toast view: a leave that starts before the enter frame has run", () =>
   });
 
   it("settles into is-shown first, so the leave transition really runs", async () => {
-    // The shipped CSS only animates when motion is allowed; if the runner ever
-    // reports `reduce` there is no transition to observe and this test would be
-    // vacuous, so state the precondition rather than silently passing.
+    // If the runner reports prefers-reduced-motion, there is no transition to
+    // observe and this test would be vacuous; state the precondition.
     expect(window.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false);
 
     const host = document.createElement("div");
@@ -89,12 +84,9 @@ describe("toast view: a leave that starts before the enter frame has run", () =>
     const handle = view.mount(data, ctx);
     const node = handle.el;
 
-    // A dismiss landing before the enter frame: the node is still `is-entering`,
-    // which the stylesheet has no rule for, so its used style is the base
-    // `.uip-toast { opacity: 0 }`. Leaving from there to `.is-leaving`
-    // (also opacity 0) is a no-op the engine never animates, so `scheduleLeave`
-    // has to settle the node into `is-shown` — for real, with a style flush —
-    // before it swaps in `is-leaving`.
+    // `is-entering` has no stylesheet rule (opacity 0), and `is-leaving` is also
+    // opacity 0, so scheduleLeave must settle the node into `is-shown` first or
+    // the leave transition is a no-op.
     expect(node.classList.contains("is-entering")).toBe(true);
 
     let doneCalls = 0;
@@ -102,14 +94,12 @@ describe("toast view: a leave that starts before the enter frame has run", () =>
     view.scheduleLeave(handle, () => {
       doneCalls++;
     });
-    // Read now, before the transition has had time to progress: the leave starts
-    // from the settled state, so the first resolved value of the transitioning
-    // property is the `is-shown` one, not the `is-leaving` one.
+    // Read before the transition progresses: the value is the settled `is-shown`
+    // one, not `is-leaving`.
     const startOpacity = getComputedStyle(node).opacity;
 
-    // `transitionend` is the assertion, not a stopwatch: without the settle no
-    // transition starts at all, so the event never arrives and the node waits
-    // out LEAVE_FALLBACK_MS (400 ms) instead of the 150 ms leave.
+    // Without the settle, no transition starts, so transitionend never arrives
+    // and the node waits out LEAVE_FALLBACK_MS instead of the real leave.
     expect(await ended).toBe(true);
     await settle();
     expect(doneCalls).toBe(1);

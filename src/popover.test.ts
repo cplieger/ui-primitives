@@ -9,19 +9,12 @@ import {
   type PopoverPlacement,
 } from "./popover.js";
 
-// These tests exercise the placement MATH, so they feed it a chosen anchor rect
-// and a chosen viewport instead of laying out a real page: `stubRect` mocks the
-// anchor box and `stubSize` the panel's measured size.
-//
-// The viewport goes through `stubViewport`, which stubs window.visualViewport
-// as well as innerWidth/innerHeight, because `viewportBox()` in popover.ts
-// prefers visualViewport and only falls back to innerWidth/innerHeight when it
-// is absent. A real browser always has a visualViewport, so stubbing the two
-// inner* globals alone silently measures the true window and every flip/clamp
-// assertion reads the unflipped value. Stub both, or neither.
-//
-// The four tests that assert the visualViewport path itself (offset boxes,
-// pinch-zoom) call `fakeVisualViewport` directly with the box they need.
+// These tests exercise the placement MATH: `stubRect` mocks the anchor box,
+// `stubSize` the panel's measured size. `stubViewport` stubs visualViewport
+// AND innerWidth/innerHeight together, since production prefers
+// visualViewport and stubbing only the inner* globals silently measures the
+// real window. Tests asserting the visualViewport path itself call
+// `fakeVisualViewport` directly.
 
 /** A DOMRect-shaped return for a mocked getBoundingClientRect. */
 function rectOf(left: number, top: number, width: number, height: number): DOMRect {
@@ -94,8 +87,7 @@ afterEach(() => {
 // ===== placeAnchored: main + cross axis math =============================
 
 describe("placeAnchored — placement × align math (flip/clamp off)", () => {
-  // anchor: left 100, top 100, w 50, h 20 → right 150, bottom 120.
-  // panel: 80 × 40. offset default 4.
+  // anchor: left 100, top 100, w 50, h 20 → right 150, bottom 120. panel: 80×40, offset 4.
   const cases: { placement: PopoverPlacement; align: PopoverAlign; left: number; top: number }[] = [
     { placement: "bottom", align: "start", left: 100, top: 124 },
     { placement: "bottom", align: "center", left: 85, top: 124 },
@@ -231,11 +223,9 @@ describe("placeAnchored — flip", () => {
 
 // ===== placeAnchored: flip boundaries =====================================
 
-// The flip engine decides per axis: does the panel overflow the viewport edge
-// (beyond `margin`), AND does the opposite side have strictly more room? These
-// pin both halves and the exact edge of the overflow test, which the coarse
-// cases above (huge overflows, huge asymmetries) cannot distinguish.
-// offset 4 and margin 8 are the defaults throughout.
+// The flip engine decides per axis: does the panel overflow the edge (beyond
+// margin), AND does the opposite side have strictly more room? These pin the
+// exact boundary the coarse cases above cannot distinguish. offset 4, margin 8.
 
 interface FlipBoundaryCase {
   readonly name: string;
@@ -524,12 +514,11 @@ describe("placeAnchored — visualViewport box", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    // Visual viewport shifted right by 100 and down by 50 (mobile keyboard-ish).
     fakeVisualViewport({ offsetLeft: 100, offsetTop: 50, width: 300, height: 200 });
     stubRect(anchor, 0, 60, 20, 20); // start-align left would be 0
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom", align: "start", margin: 8 });
-    // Lower bound uses the vv offset: lo = 100 + 8 = 108 (fallback would be 8).
+    // Lower bound uses the vv offset: lo = 100 + 8 = 108.
     expect(leftOf(panel)).toBe(108);
   });
 
@@ -537,8 +526,7 @@ describe("placeAnchored — visualViewport box", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    // vv bottom edge at offsetTop 0 + height 200 = 200.
-    fakeVisualViewport({ offsetLeft: 0, offsetTop: 0, width: 1000, height: 200 });
+    fakeVisualViewport({ offsetLeft: 0, offsetTop: 0, width: 1000, height: 200 }); // vv bottom edge 200
     stubRect(anchor, 100, 170, 50, 20); // bottom 190 near vv bottom
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom" });
@@ -549,14 +537,12 @@ describe("placeAnchored — visualViewport box", () => {
     const anchor = document.createElement("button");
     const panel = document.createElement("div");
     document.body.append(anchor, panel);
-    // Pinch-zoomed / keyboard-shifted: the visible box starts 100px down.
     fakeVisualViewport({ offsetLeft: 0, offsetTop: 100, width: 1000, height: 200 });
     stubRect(anchor, 100, 110, 50, 10); // bottom 120; only 10px of visible room above
     stubSize(panel, 80, 180);
     placeAnchored(panel, anchor, { placement: "bottom" });
-    // Overflows below (120 + 4 + 180 > 292), but the room above is 110 - 100 =
-    // 10px, less than the 180px below — measuring from the document top (210)
-    // would flip it into the hidden strip above the visible box.
+    // Room above must be measured from the vv top (10px), not the document
+    // top, or it would flip into the hidden strip above the visible box.
     expect(topOf(panel)).toBe(124);
   });
 
@@ -568,8 +554,6 @@ describe("placeAnchored — visualViewport box", () => {
     stubRect(anchor, 110, 100, 10, 20); // right 120; only 10px of visible room left
     stubSize(panel, 180, 40);
     placeAnchored(panel, anchor, { placement: "right" });
-    // Overflows right (120 + 4 + 180 > 292), but the visible room left is 10px
-    // against 180px right, so it stays right.
     expect(leftOf(panel)).toBe(124);
   });
 });
@@ -647,14 +631,12 @@ describe("createPopover — show / hide / toggle + ARIA", () => {
     const c = createPopover(anchor, panel);
     c.show();
     c.hide();
-    // Logically closed at once; the panel fades (is-leaving) before it hides.
-    expect(c.isOpen).toBe(false);
+    expect(c.isOpen).toBe(false); // logically closed at once; the panel fades before it hides
     expect(panel.classList.contains("is-open")).toBe(false);
     expect(panel.classList.contains("is-leaving")).toBe(true);
     expect(panel.hidden).toBe(false); // still in the DOM, mid-fade
     expect(anchor.getAttribute("aria-expanded")).toBe("false");
     expect(anchor.getAttribute("aria-haspopup")).toBe("true");
-    // Transition ends → panel is hidden and the leave state is dropped.
     panel.dispatchEvent(new Event("transitionend"));
     expect(panel.hidden).toBe(true);
     expect(panel.classList.contains("is-leaving")).toBe(false);
@@ -755,8 +737,7 @@ describe("createPopover — outside click / Escape dismissal", () => {
     stubSize(panel, 80, 40);
     const c = createPopover(anchor, panel);
     c.show();
-    // Same-tick outside click: the handler is not installed yet.
-    outside.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    outside.dispatchEvent(new MouseEvent("click", { bubbles: true })); // same-tick: handler not installed yet
     expect(c.isOpen).toBe(true);
   });
 
@@ -903,7 +884,7 @@ describe("createPopover — reposition tracking", () => {
     vi.advanceTimersByTime(1);
     expect(topOf(panel)).toBe(124);
     stubRect(anchor, 100, 50, 50, 20); // the container scrolled the anchor up
-    // A real element scroll event does NOT bubble, so only a capture-phase
+    // A real element scroll event does not bubble, so only a capture-phase
     // listener on document sees it.
     scroller.dispatchEvent(new Event("scroll"));
     vi.advanceTimersToNextFrame();
@@ -962,8 +943,7 @@ describe("createPopover — dispose + listener hygiene", () => {
     const c = createPopover(anchor, panel);
     c.show();
     vi.advanceTimersByTime(1);
-    // Installed: click + keydown + capture scroll on document, resize on window.
-    expect(netListeners(docAdd, docRemove, "click")).toBe(1);
+    expect(netListeners(docAdd, docRemove, "click")).toBe(1); // click + keydown + capture scroll + resize
     expect(netListeners(docAdd, docRemove, "keydown")).toBe(1);
     expect(netListeners(docAdd, docRemove, "scroll")).toBe(1);
     expect(netListeners(winAdd, winRemove, "resize")).toBe(1);
@@ -973,8 +953,7 @@ describe("createPopover — dispose + listener hygiene", () => {
     expect(netListeners(docAdd, docRemove, "keydown")).toBe(0);
     expect(netListeners(docAdd, docRemove, "scroll")).toBe(0);
     expect(netListeners(winAdd, winRemove, "resize")).toBe(0);
-    // The caller owns the panel — dispose does not remove it.
-    expect(panel.isConnected).toBe(true);
+    expect(panel.isConnected).toBe(true); // caller owns the panel; dispose does not remove it
   });
 
   it("hide() and dispose() on a never-shown popover are safe no-ops", () => {
@@ -1129,13 +1108,11 @@ describe("createPopover — focus management", () => {
     opener.focus(); // the user's place before the popover opens
     stubRect(anchor, 100, 100, 50, 20);
     stubSize(panel, 80, 40);
-    // initialFocus set, returnFocus deliberately OMITTED — the focus-loss trap.
     const c = createPopover(anchor, panel, { initialFocus: field, flip: false, clamp: false });
     c.show();
     expect(document.activeElement).toBe(field); // controller moved focus into the panel
     c.hide();
-    // Focus is NOT stranded on the now-hidden panel field and NOT dropped to
-    // <body> — it returns to the opener so the user keeps their place (WCAG 2.4.3).
+    // Must return to the opener (WCAG 2.4.3), not strand on the hidden field or drop to body.
     expect(document.activeElement).toBe(opener);
     expect(document.activeElement).not.toBe(field);
   });
@@ -1155,8 +1132,7 @@ describe("createPopover — focus management", () => {
     expect(document.activeElement).toBe(field); // controller moved focus into the panel
     opener.remove(); // the restore target is removed while the popover is open
     c.hide();
-    // Restore target gone: focus can't return to it, so the controller must move
-    // focus OUT of the now-hidden panel (WCAG 2.4.3) rather than strand it on the field.
+    // Restore target gone: focus must move OUT of the hidden panel (WCAG 2.4.3).
     expect(document.activeElement).not.toBe(field);
     expect(panel.contains(document.activeElement)).toBe(false);
   });
@@ -1184,9 +1160,7 @@ describe("createPopover — Escape isolation", () => {
     document.body.appendChild(anchor);
     stubRect(anchor, 100, 100, 50, 20);
     stubSize(panel, 80, 40);
-    // An outer handler above the popover's document listener in the propagation
-    // path — e.g. a modal's own Escape-to-close handler.
-    const outer = vi.fn();
+    const outer = vi.fn(); // e.g. a modal's own Escape-to-close handler, above in the propagation path
     window.addEventListener("keydown", outer);
     const c = createPopover(anchor, panel);
     c.show();
@@ -1194,8 +1168,7 @@ describe("createPopover — Escape isolation", () => {
     const ev = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
     const stopSpy = vi.spyOn(ev, "stopPropagation");
     document.dispatchEvent(ev);
-    // Snapshot before assertions so cleanup always runs even if one fails.
-    const outerCalls = outer.mock.calls.length;
+    const outerCalls = outer.mock.calls.length; // snapshot so cleanup runs even if an assertion fails
     const stopCalls = stopSpy.mock.calls.length;
     window.removeEventListener("keydown", outer);
     expect(c.isOpen).toBe(false); // popover handled Escape and closed
@@ -1238,9 +1211,8 @@ describe("createPopover — rAF-throttled reposition tracking", () => {
     });
     c.show();
     vi.advanceTimersByTime(1); // install the deferred tracking listeners
-    // placeAnchored reads anchor.getBoundingClientRect() exactly once per call,
-    // so its call count is the reposition count. Spy after show() so we measure
-    // only tracking-driven repositions.
+    // getBoundingClientRect() call count is the reposition count; spy after
+    // show() to measure only tracking-driven repositions.
     const rectSpy = vi.spyOn(anchor, "getBoundingClientRect");
     document.dispatchEvent(new Event("scroll"));
     document.dispatchEvent(new Event("scroll"));
@@ -1248,8 +1220,7 @@ describe("createPopover — rAF-throttled reposition tracking", () => {
     expect(rectSpy).not.toHaveBeenCalled(); // coalesced — nothing until the frame
     vi.advanceTimersToNextFrame(); // run the single pending frame
     expect(rectSpy).toHaveBeenCalledOnce(); // ONE reposition for the whole burst
-    // A later burst in a new frame repositions again — the frame id resets.
-    document.dispatchEvent(new Event("scroll"));
+    document.dispatchEvent(new Event("scroll")); // a later burst in a new frame repositions again
     document.dispatchEvent(new Event("scroll"));
     vi.advanceTimersToNextFrame();
     expect(rectSpy).toHaveBeenCalledTimes(2);
@@ -1343,8 +1314,7 @@ describe("placeAnchored — virtual anchor", () => {
     const panel = document.createElement("div");
     document.body.appendChild(panel);
     stubSize(panel, 80, 40);
-    // Same rect an element test uses (left 100, top 100, w 50, h 20).
-    const virtual = { getBoundingClientRect: (): DOMRect => rectOf(100, 100, 50, 20) };
+    const virtual = { getBoundingClientRect: (): DOMRect => rectOf(100, 100, 50, 20) }; // same rect an element test uses
     placeAnchored(panel, virtual, {
       placement: "bottom",
       align: "start",
@@ -1361,8 +1331,7 @@ describe("placeAnchored — virtual anchor", () => {
 describe("createPopover — point (virtual) anchor", () => {
   it("show() does not throw and sets NO aria on any element", () => {
     const panel = document.createElement("div");
-    // A nearby real element that must stay untouched — there is no trigger
-    // element for a point anchor, so nothing should be annotated.
+    // No trigger element exists for a point anchor, so nothing may be annotated.
     const probe = document.createElement("button");
     document.body.appendChild(probe);
     stubSize(panel, 80, 40);
@@ -1428,8 +1397,7 @@ describe("createPopover — point (virtual) anchor", () => {
     const panel = document.createElement("div");
     document.body.appendChild(panel);
     stubSize(panel, 80, 40);
-    // A movable virtual rect source (not a point): re-read fresh each placement.
-    let top = 100;
+    let top = 100; // a movable virtual rect source (not a point): re-read fresh each placement
     const virtual = { getBoundingClientRect: (): DOMRect => rectOf(100, top, 50, 20) };
     const c = createPopover(virtual, panel, {
       placement: "bottom",
@@ -1531,8 +1499,7 @@ describe("placeAnchored — full-bleed (stretch: viewport)", () => {
     stubSize(panel, 80, 40);
     placeAnchored(panel, anchor, { placement: "bottom", stretch: "viewport", flip: false });
     expect(panel.style.right).toBe("8px");
-    // Re-place without stretch → the inline-end pin must drop so the panel's own
-    // width is honored again (placeAnchored stays idempotent across modes).
+    // Re-placing without stretch must drop the inline-end pin (idempotent across modes).
     placeAnchored(panel, anchor, { placement: "bottom", flip: false, clamp: false });
     expect(panel.style.right).toBe("");
     expect(leftOf(panel)).toBe(100); // start-aligned content-sized left
@@ -1560,11 +1527,9 @@ describe("placeAnchored — full-bleed (stretch: viewport)", () => {
             margin,
             flip: false,
           });
-          // Full-bleed always pins to the margins, whatever the anchor's x/width.
-          expect(panel.style.left).toBe(`${margin.toString()}px`);
+          expect(panel.style.left).toBe(`${margin.toString()}px`); // full-bleed pins to margins regardless of anchor
           expect(panel.style.right).toBe(`${margin.toString()}px`);
-          // Main axis stays anchored below the trigger (bottom + default offset 4).
-          expect(topOf(panel)).toBe(ay + 20 + 4);
+          expect(topOf(panel)).toBe(ay + 20 + 4); // main axis stays anchored below the trigger
         },
       ),
     );
@@ -1573,9 +1538,7 @@ describe("placeAnchored — full-bleed (stretch: viewport)", () => {
 
 // ===== createPopover: leave animation lifecycle ===========================
 
-/** A popover with a stubbed anchor rect + panel size, anchor mounted in the DOM.
- *  Focused helper for the leave-lifecycle tests (placement math is covered
- *  above); flip/clamp are off so positioning never interferes with the assertions. */
+/** A popover with a stubbed anchor rect + panel size; flip/clamp off. */
 function mountPopover(opts?: Parameters<typeof createPopover>[2]): {
   c: ReturnType<typeof createPopover>;
   anchor: HTMLButtonElement;
@@ -1663,10 +1626,8 @@ describe("createPopover — leave animation lifecycle", () => {
   });
 
   it("leave still completes without a transition event (the reduced-motion path)", () => {
-    // Under prefers-reduced-motion the CSS neutralizes the transition to ~0ms
-    // and no transitionend arrives, so the fallback timer is what guarantees
-    // the leave lifecycle still finishes promptly. Fake timers reproduce that
-    // shape: a suspended clock advances no CSS transition either.
+    // Under prefers-reduced-motion no transitionend arrives, so the fallback
+    // timer must guarantee the leave still finishes.
     const { c, panel } = mountPopover();
     c.show();
     c.hide();
@@ -1709,8 +1670,7 @@ describe("createPopover — leave animation lifecycle", () => {
     const { c, panel } = mountPopover();
     c.show();
     c.dispose();
-    // dispose triggers the fade rather than yanking the panel out instantly.
-    expect(panel.classList.contains("is-leaving")).toBe(true);
+    expect(panel.classList.contains("is-leaving")).toBe(true); // fades rather than yanking out instantly
     expect(panel.isConnected).toBe(true);
     vi.advanceTimersByTime(400);
     expect(panel.hidden).toBe(true);
@@ -1733,15 +1693,13 @@ describe("createPopover: setOptions (responsive placement)", () => {
     expect(leftOf(panel)).toBe(100);
     expect(topOf(panel)).toBe(96); // anchor bottom 90 + offset 6
 
-    // Breakpoint flip: full-bleed, flush to the edges, larger offset.
-    pop.setOptions({ stretch: "viewport", margin: 0, offset: 10 });
+    pop.setOptions({ stretch: "viewport", margin: 0, offset: 10 }); // breakpoint flip: full-bleed, flush, larger offset
     expect(panel.classList.contains("is-stretched")).toBe(true);
     expect(panel.style.left).toBe("0px");
     expect(panel.style.right).toBe("0px");
     expect(topOf(panel)).toBe(100); // anchor bottom 90 + offset 10
 
-    // And back: explicit undefined clears stretch; the inline-end pin is
-    // cleared so the panel is content-sized again.
+    // Explicit undefined clears stretch; the inline-end pin drops so the panel is content-sized again.
     pop.setOptions({ stretch: undefined, margin: 8, offset: 6 });
     expect(panel.classList.contains("is-stretched")).toBe(false);
     expect(panel.style.right).toBe("");
@@ -1785,7 +1743,7 @@ describe("createPopover: setOptions (responsive placement)", () => {
     c.setOptions({ offset: 12 }); // placement-only: no popup keys present
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     expect(c.isOpen).toBe(true); // still honored — the patch forwarded nothing
-    expect(topOf(panel)).toBe(132); // and the new offset did apply: 120 + 12
+    expect(topOf(panel)).toBe(132); // new offset applied: 120 + 12
     c.dispose();
   });
 
@@ -1795,8 +1753,7 @@ describe("createPopover: setOptions (responsive placement)", () => {
     vi.advanceTimersByTime(1); // deferred install done: an outside click closes
 
     c.setOptions({ offset: 12 }); // forwards nothing to the popup layer
-    // No re-arm happened, so the listeners are live in this very tick.
-    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    document.body.dispatchEvent(new MouseEvent("click", { bubbles: true })); // no re-arm; listeners live this tick
     expect(c.isOpen).toBe(false);
     c.dispose();
   });
@@ -1822,9 +1779,7 @@ describe("placeAnchored — clearing matchAnchorWidth", () => {
     placeAnchored(panel, anchor, { matchAnchorWidth: 220, flip: false, clamp: false });
     expect(panel.style.minWidth).toBe("220px");
 
-    // The setOptions({ matchAnchorWidth: undefined }) seam ends here: the
-    // next placement runs with the option at its default (false) and must
-    // clear the stale inline min-width, not leave it stuck on the panel.
+    // A placement back at the default must clear the stale inline min-width.
     placeAnchored(panel, anchor, { flip: false, clamp: false });
     expect(panel.style.minWidth).toBe("");
   });
@@ -1836,10 +1791,8 @@ describe("createPopover — pointAnchor panel hosting under a modal", () => {
     document.body.appendChild(modal);
     modal.showModal();
 
-    // A virtual anchor has no trigger element, so the trigger-derived dialog
-    // rule can't apply; the core's topmost-open-dialog fallback keeps the
-    // context menu usable (a body-hosted panel would be inert behind the
-    // modal).
+    // No trigger element exists for a virtual anchor, so the topmost-open-dialog
+    // fallback must host it, or a body-hosted panel would be inert behind the modal.
     const panel = document.createElement("div");
     stubSize(panel, 100, 40);
     const pop = createPopover(pointAnchor(50, 60), panel);
@@ -1863,20 +1816,15 @@ describe("createPopover — the tracking frame is released on hide", () => {
     document.dispatchEvent(new Event("scroll")); // schedules one frame
     expect(raf).toHaveBeenCalledOnce();
     const pending = raf.mock.results[0]!.value as number;
-    // Guard the assertion below against a vacuous pass: if the handle were
-    // undefined, `toHaveBeenCalledWith(pending)` would also match a cancel of
-    // undefined, and the test would prove nothing.
+    // Guards against a vacuous pass: an undefined handle would also match a
+    // cancel of undefined below.
     expect(pending).toBeTypeOf("number");
 
     c.hide();
+    expect(cancel).toHaveBeenCalledWith(pending); // the pending frame must be cancelled, not run into a torn-down tracker
 
-    // The frame belongs to a popover that is closing: it is cancelled, not left
-    // to run into a torn-down tracker.
-    expect(cancel).toHaveBeenCalledWith(pending);
-
-    // ...and the handle is cleared, so tracking re-arms. Without that, the
-    // throttle still believes a frame is pending and coalesces every later
-    // scroll into a frame that will never come.
+    // The handle must also clear, or the throttle believes a frame is still
+    // pending and coalesces every later scroll into one that never comes.
     c.show();
     vi.advanceTimersByTime(1);
     document.dispatchEvent(new Event("scroll"));
@@ -1892,10 +1840,8 @@ describe("createPopover — the tracking frame is released on hide", () => {
     vi.advanceTimersByTime(1);
     c.hide();
 
-    // Anchor tracking listens for scroll in the capture phase because a scroll
-    // in an ancestor container does not bubble. removeEventListener matches on
-    // that flag, so a mismatch leaves the tracker wired to a closed popover for
-    // the life of the page. The engine here honours the flag, so a mismatch leaks.
+    // Capture-phase scroll tracking (an ancestor's scroll does not bubble);
+    // removeEventListener matches on that flag, so a mismatch leaks the tracker.
     expect(docRemove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
     c.dispose();
   });

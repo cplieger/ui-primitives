@@ -9,16 +9,10 @@ interface MutableDoc {
 /**
  * Make `document.startViewTransition` absent to the module's feature detection.
  *
- * `delete document.startViewTransition` cannot do this in a real browser: the
- * method lives on `Document.prototype`, so deleting a property the instance
- * does not own is a silent no-op and the real API stays reachable. Every test
- * below that used the delete believed it was exercising the fallback path and
- * was in fact driving Chromium's real View Transitions API, which is how the
- * missing `updateCallbackDone` handler in view-transition.ts went unnoticed.
- *
- * Shadowing it with an own `undefined` property is what the detection actually
- * reads; the `afterEach` delete removes the shadow and restores the prototype
- * method.
+ * `delete document.startViewTransition` is a no-op: the method lives on
+ * `Document.prototype`, so deleting an instance property the instance does not
+ * own leaves the real API reachable. Shadow it with an own `undefined` property
+ * instead; `afterEach` deletes the shadow to restore the prototype method.
  */
 function hideViewTransitionAPI(): void {
   Object.defineProperty(document, "startViewTransition", {
@@ -29,8 +23,7 @@ function hideViewTransitionAPI(): void {
 }
 
 afterEach(() => {
-  // Removes either the shadow above or a test's own assigned stub; in both
-  // cases the prototype method comes back.
+  // Removes the shadow (or a test's own stub); the prototype method comes back.
   delete (document as MutableDoc).startViewTransition;
 });
 
@@ -125,8 +118,7 @@ describe("viewTransition", () => {
 
 describe("suspended-renderer safety", () => {
   afterEach(() => {
-    // Restore the prototype-backed accessor removed by the defineProperty
-    // override below.
+    // Restore the prototype-backed accessor removed by defineProperty below.
     delete (document as unknown as Record<string, unknown>)["hidden"];
     vi.useRealTimers();
   });
@@ -143,8 +135,7 @@ describe("suspended-renderer safety", () => {
 
   it("watchdog skips a transition whose finished never settles, and the queue survives", async () => {
     vi.useFakeTimers();
-    // A starved renderer grants no rendering opportunities: `finished` pends
-    // forever until skipTransition() flushes the update via task queues.
+    // A starved renderer never resolves `finished` until skipTransition() flushes it.
     let resolveFinished!: () => void;
     const finished = new Promise<void>((resolve) => {
       resolveFinished = resolve;
@@ -164,7 +155,7 @@ describe("suspended-renderer safety", () => {
     const fn = vi.fn();
     const first = viewTransition(fn);
     const queued = vi.fn();
-    const second = viewTransition(queued); // must not wedge behind the first
+    const second = viewTransition(queued);
     await vi.advanceTimersByTimeAsync(1_000);
     await first;
     expect(skipTransition).toHaveBeenCalledOnce();

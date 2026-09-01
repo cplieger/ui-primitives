@@ -1,20 +1,9 @@
-// modal.ts — Native-<dialog> modal built from caller content. The sibling to
-// the `dialog` member: `dialog` wraps an EXISTING <dialog> element; `modal`
-// BUILDS one from arbitrary content. The platform gives focus containment, the
-// top layer, background inerting, Escape, nested stacking, and focus-return-to-
-// opener for free; this module adds only what a native <dialog> does NOT:
-//   - wrapping content in a <dialog class="uip-modal"> with ARIA wiring,
-//   - drag-safe backdrop dismissal + the shared fade-out leave lifecycle
-//     (reusing openDialog / closeDialog), and
-//   - an iOS-safe, ref-counted background scroll-lock (a native <dialog> does
-//     NOT lock background scroll, and `overflow:hidden` on the root is ignored
-//     by iOS Safari for touch-scroll — so pin the body with position:fixed at
-//     the negated scroll offset and restore + scrollTo on release).
-//
-// The overlay-<div> incarnation (openModal / closeModal / closeTopModal on a
-// raw div, a hand-rolled focus-trap stack, ref-counted inert, and overlay
-// hoisting) was removed with this rewrite: every one of those is provided by
-// the platform once the modal is a real <dialog>.
+// modal.ts — Native-<dialog> modal built from caller content. `dialog` wraps
+// an EXISTING <dialog>; `modal` builds one from arbitrary content. Adds ARIA
+// wiring, drag-safe backdrop dismissal, the shared fade-out lifecycle, and an
+// iOS-safe scroll-lock — iOS Safari ignores `overflow:hidden` on the root for
+// touch-scroll, so the body is pinned via position:fixed at the negated
+// scroll offset instead.
 
 import { el } from "@cplieger/reactive";
 
@@ -58,8 +47,7 @@ export interface ModalController {
   dispose(): void;
 }
 
-// ----- iOS-safe, ref-counted background scroll-lock -------------------------
-// Ref-counted so nested modals lock once and release only when the last closes.
+// Ref-counted: nested modals lock once, release only when the last closes.
 interface SavedBodyStyle {
   position: string;
   top: string;

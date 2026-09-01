@@ -1,25 +1,14 @@
 // tooltip.ts — One delegated tooltip controller on `document`. Replaces bare
 // `title` attributes with positioned, delay-aware, accessible tooltips.
 //
-// pointerover/pointerout (which bubble) + focusin/focusout drive a single
-// delegated listener; Escape / capture-phase scroll / window blur hide. The
-// first tooltip in a group waits `delayCold`; peers show after `delayWarm`
-// while the group stays warm (`cooldown`). BY DEFAULT `delayWarm` IS
-// `delayCold`, so every hover waits the same time and the warm window is
-// unobservable — that is what a native `title` does, and it is what a reader
-// expects from a tooltip. A warm group (peers appearing faster once one has
-// shown) is opt-in through an explicit smaller `delayWarm`: it reads as help
-// arriving with no hover time at all on a dense pill row or toolbar, where
-// every neighbour inherits the first tooltip's warmth. The trigger text is wired to the
-// anchor via `aria-describedby` so AT announces it, and `\n` splits into
-// <br>-separated lines. Placement is `position: fixed` via getBoundingClientRect
-// with viewport clamping and above→below flip when there is no room above.
+// BY DEFAULT `delayWarm` IS `delayCold`, so every hover waits the same time —
+// matching native `title` behavior. A warm group (peers appearing faster once
+// one has shown) is opt-in through an explicit smaller `delayWarm`.
 //
-// Scroll HIDES the tooltip rather than repositioning it (popover, by contrast,
-// tracks its anchor and repositions). Deliberate: a tooltip is hover-context
-// help — once the user scrolls, the pointer is no longer meaningfully over the
-// anchor and native `title` behavior is to vanish; a popover is an opened
-// surface the user is interacting with, which must follow its anchor.
+// Scroll HIDES the tooltip rather than repositioning it, unlike popover:
+// once the user scrolls, the pointer is no longer meaningfully over the
+// anchor, matching native `title`; a popover is an opened surface the user is
+// interacting with and must follow its anchor instead.
 
 import { el } from "@cplieger/reactive";
 
@@ -69,11 +58,9 @@ class TooltipController {
     this.onLeave(e);
   };
   private readonly onFocusIn = (e: Event): void => {
-    // Focus-triggered tooltips are for KEYBOARD users only (:focus-visible).
-    // A bare focusin gate also fires on programmatic focus — a modal opening
-    // and focusing its first control, a focus-trap restoring focus on close,
-    // an autofocus — which popped tooltips with no hover and no keypress.
-    // Pointer-driven focus is covered by the pointerover path anyway.
+    // :focus-visible gate: a bare focusin also fires on programmatic focus
+    // (modal open, focus-trap restore, autofocus), popping tooltips with no
+    // hover or keypress.
     if (!isKeyboardFocus(e.target)) {
       return;
     }
@@ -98,9 +85,8 @@ class TooltipController {
     this.attribute = opts.attribute ?? "data-uip-tooltip";
     this.selector = `[${this.attribute}]`;
     this.delayCold = opts.delayCold ?? 500;
-    // Warm defaults to the cold delay rather than to a constant: a consumer
-    // that only sets `delayCold` gets that one wait on every hover, instead of
-    // a warm path faster than the delay it asked for.
+    // Defaults to delayCold, not a constant, so a partial override can't
+    // produce a warm path faster than the delay the caller asked for.
     this.delayWarm = opts.delayWarm ?? this.delayCold;
     this.cooldown = opts.cooldown ?? 500;
   }
@@ -168,7 +154,6 @@ class TooltipController {
     if (this.state.anchor !== anchor) {
       return;
     }
-    // Ignore transitions that stay within the same anchor subtree.
     const related = (e as { relatedTarget?: EventTarget | null }).relatedTarget ?? null;
     if (related instanceof Node && anchor.contains(related)) {
       return;
@@ -189,9 +174,7 @@ class TooltipController {
       { className: "uip-tooltip", role: "tooltip", id: tipId },
       ...renderLines(text),
     );
-    // When the anchor is inside an open modal <dialog>, render the tooltip into
-    // that dialog so it shares the dialog's top-layer stacking context;
-    // appending to document.body would leave it painted behind the modal.
+    // Shares the dialog's top-layer context; body-appended would paint behind a modal.
     const host: Element = anchor.closest("dialog[open]") ?? document.body;
     host.appendChild(tip);
     addDescribedBy(anchor, tipId);
@@ -204,11 +187,6 @@ class TooltipController {
   }
 
   private position(anchor: HTMLElement, tip: HTMLElement): void {
-    // Reuse the shared anchored positioner instead of re-deriving the math:
-    // centered above the anchor, gap 6, viewport margin 4, flipping below when
-    // there is no room above and clamping horizontally. placeAnchored also
-    // reads window.visualViewport, so the tooltip stays correct above the
-    // mobile on-screen keyboard.
     placeAnchored(tip, anchor, { placement: "top", align: "center", offset: 6, margin: 4 });
   }
 
@@ -227,9 +205,6 @@ class TooltipController {
     this.state = { kind: "fading", tip };
     this.warmUntil = Date.now() + this.cooldown;
 
-    // Each show builds a fresh tip, so this settle is the only one that can
-    // ever be pending on this element, and teardown() cancels it — nothing can
-    // reach here against a tip the controller has already moved on from.
     runTransition(tip, {
       change: () => {
         tip.classList.add("is-leaving");

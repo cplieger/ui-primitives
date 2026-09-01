@@ -80,11 +80,9 @@ export function createToaster(opts?: ToasterOptions): Toaster {
   return build(opts);
 }
 
-// The default toaster is built LAZILY, on first use: build() attaches a
-// document keydown (Escape) listener, so building at import time would be an
-// import-time side effect — it would throw in a DOM-less runtime and attach
-// the listener even for createToaster-only consumers (and it would contradict
-// the "no import-time side effects" contract this package publishes under).
+// Built lazily: eager construction would attach a document listener at
+// import time, throwing in a DOM-less runtime and violating the package's
+// no-import-side-effects contract.
 let singleton: Toaster | null = null;
 
 function getSingleton(): Toaster {

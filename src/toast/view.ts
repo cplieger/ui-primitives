@@ -1,14 +1,8 @@
-// view.ts — DOM implementation of the toast `ToastView` port. Builds a
-// purely-visual `.uip-toast-stack` container + per-toast nodes with `el`, wires
-// interaction to the engine's callbacks, and manages the enter/leave lifecycle
-// via `is-entering` → `is-shown` → `is-leaving` state classes (the leave goes
-// through `runTransition`, so the state it animates from is committed for us).
-// The countdown is driven by the `--uip-toast-duration` custom
-// property (the CSS animates the progress bar from it); pause/resume freeze the
-// progress animation via play-state. Screen-reader announcement is delegated to
-// `announce()`: neither the stack nor the toast nodes are live regions, so no
-// live region ever nests inside another, and importing this module mutates no
-// DOM (the stack is created lazily, on the first toast shown).
+// view.ts — DOM implementation of the toast `ToastView` port. Enter/leave
+// lifecycle via `is-entering` → `is-shown` → `is-leaving` state classes.
+// Screen-reader announcement is delegated to `announce()`, so neither the
+// stack nor a toast node is a live region — no live region ever nests inside
+// another.
 
 import { el } from "@cplieger/reactive";
 
@@ -27,34 +21,21 @@ export interface ToastHandle {
 }
 
 /**
- * Create a DOM-backed toast view. Owns a lazily-created `.uip-toast-stack` — a
- * purely VISUAL container (no `role` / `aria-live`), created on the first
- * `mount`, so importing this module appends nothing to the DOM. Screen-reader
- * announcement is handled separately by `announce()` in `mount`, which keeps
- * the visual stack and the SR live region from ever nesting.
+ * Create a DOM-backed toast view. The stack container is created lazily on
+ * first `mount`, so importing this module appends nothing to the DOM.
  *
- * The stack mounts on `document.body` by default; pass `host` to confine it to
- * an app-owned element instead (an embeddable widget's root, a specific pane),
- * so its stacking and positioning compose with the host page. The base
- * stylesheet positions the stack `fixed` relative to the viewport; a host with
- * a `transform`/`filter`/`contain` creates a new containing block, which scopes
- * the stack to the host — usually exactly what an embedded widget wants.
- *
- * Modal `<dialog>`s: `showModal()` inerts everything outside the dialog
- * subtree, so a body-mounted stack under an open modal would paint behind it
- * AND be dead to clicks/hover/AT. Without an explicit `host`, the stack
- * therefore auto-hosts into the topmost open modal dialog (re-evaluated on
- * every toast shown, and when that dialog closes), so toasts stay visible and
- * interactive over the modal, then return to `document.body`. An explicit
- * `host` pins the stack — an embedded widget's chrome must never escape its
- * root, so it is exempt from auto-hosting.
+ * Mounts on `document.body` by default; pass `host` to confine it to an
+ * app-owned element (an embeddable widget's root). Without an explicit
+ * `host`, the stack auto-hosts into the topmost open modal `<dialog>` while
+ * one is open — `showModal()` inerts everything outside the dialog subtree,
+ * so a body-mounted stack would paint behind it and be dead to interaction —
+ * and returns to `document.body` after. An explicit `host` is exempt from
+ * auto-hosting.
  */
 export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
   let container: HTMLElement | null = null;
-  // The open modal <dialog> currently hosting the stack (auto-hosting only;
-  // null when the stack sits on `host` / document.body). Its `close` event
-  // re-runs syncHost so a sticky toast is evacuated before the closed dialog
-  // hides it.
+  // The modal <dialog> currently auto-hosting the stack, if any. Its `close`
+  // event re-runs syncHost so a sticky toast is evacuated before it hides.
   let adoptedDialog: HTMLDialogElement | null = null;
 
   const onAdoptedClose = (): void => {
@@ -68,10 +49,9 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
     }
   };
 
-  /** Move the stack to where it must live RIGHT NOW: the explicit `host` when
-   *  configured, else the topmost open modal dialog, else `document.body`.
-   *  `appendChild` MOVES the stack, so live toasts (with their timers,
-   *  listeners, and progress state) ride along untouched. */
+  /** Move the stack to `host`, else the topmost open modal dialog, else
+   *  `document.body`. `appendChild` MOVES the stack, so live toasts (timers,
+   *  listeners, progress state) ride along untouched. */
   const syncHost = (): void => {
     if (container === null) {
       return;
@@ -91,14 +71,9 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
   };
 
   const ensureContainer = (): HTMLElement => {
-    // Visual-only container: deliberately NOT a live region. Announcement
-    // goes through announce() (see `mount`), so an error node's live region
-    // can never nest inside a polite stack, and nothing is appended to the
-    // DOM until a toast is actually shown.
     container ??= el("div", { className: "uip-toast-stack" });
-    // Re-resolve the host on every mount: a modal may have opened or closed
-    // since the last toast (and covers hosts that vanished, e.g. a disposed
-    // dialog that was removed while the stack sat inside it).
+    // Re-resolve on every mount: a modal may have opened/closed, or its host
+    // dialog may have been removed, since the last toast.
     syncHost();
     return container;
   };
@@ -120,13 +95,9 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
         tabindex: "0",
       });
 
-      // The visible message, then the dismiss hint as a visually-hidden (NOT
-      // aria-hidden) span. The node is not a live region, so this subtree is not
-      // auto-announced; the hint is here so the FOCUSABLE node is
-      // self-describing — the toast is `tabindex=0`, so a keyboard /
-      // screen-reader user who tabs to it hears the message plus how to dismiss
-      // it. (The transient "a toast appeared: <message>" announcement is
-      // announce()'s job, above.)
+      // Visually-hidden (not aria-hidden) dismiss hint: the node is
+      // tabindex=0 but not a live region, so a tabbed-to toast needs its own
+      // description of how to dismiss it.
       node.appendChild(el("span", { className: "uip-toast-msg" }, data.message));
       node.appendChild(el("span", { className: "uip-visually-hidden" }, "Click to dismiss."));
 
@@ -147,8 +118,7 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
 
       let progressEl: HTMLElement | null = null;
       if (data.duration > 0) {
-        // Documented contract: the duration lives in a custom property; the CSS
-        // animates the progress bar from it (no inline transition-duration).
+        // The CSS animates the progress bar off this property (no inline transition-duration).
         node.style.setProperty("--uip-toast-duration", `${data.duration}ms`);
         progressEl = el("span", { className: "uip-toast-progress", "aria-hidden": "true" });
         node.appendChild(progressEl);
@@ -157,9 +127,9 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
       node.addEventListener("click", () => {
         ctx.dismiss();
       });
-      // tabindex=0 is for pause-on-focus; make the FOCUSED toast dismissable by
-      // keyboard too (Escape only targets the newest toast, not the focused one).
-      // Guard to the node itself so it doesn't swallow the retry button's Enter.
+      // Escape only targets the newest toast, so make the focused one
+      // dismissable by keyboard too; guard to the node so it doesn't swallow
+      // the retry button's Enter.
       node.addEventListener("keydown", (e) => {
         if (e.target !== node) {
           return;
@@ -170,10 +140,9 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
         }
       });
 
-      // Two independent pause sources (hover and focus) share one engine timer,
-      // so ref-count them: pause on the first (0 -> 1) and resume only on the
-      // last (1 -> 0). Without this, un-hovering a still-focused toast would
-      // resume the countdown and it could auto-dismiss while focused.
+      // Ref-count hover + focus (two pause sources, one engine timer): resume
+      // only when both release, or un-hovering a still-focused toast would
+      // resume the countdown while focused.
       let pauseCount = 0;
       const addPause = (): void => {
         pauseCount++;
@@ -197,11 +166,9 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
 
       const handle: ToastHandle = { el: node, progressEl, enterRaf: null };
       stack.appendChild(node);
-      // Enter on the next frame. Deliberately a frame and not a synchronous
-      // style commit: the node's FIRST style resolution has no before-change
-      // style, so resolving it with `is-shown` already applied would produce no
-      // enter transition at all. The frame lets the resting `is-entering` state
-      // resolve first, which is what the transition animates from.
+      // Deferred a frame so the resting is-entering state resolves before
+      // is-shown is applied — the node's first style resolution has nothing
+      // to transition from otherwise.
       handle.enterRaf = requestAnimationFrame(() => {
         handle.enterRaf = null;
         node.classList.remove("is-entering");
@@ -213,13 +180,10 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
 
     scheduleLeave(handle: ToastHandle, done: () => void): void {
       const node = handle.el;
-      // A dismiss can land before the enter frame runs. Cancel it so it cannot
-      // re-add `is-shown` mid-leave, and put the node into `is-shown` now so the
-      // leave has a defined start state — without this the leave would run from
-      // `is-entering` (which the stylesheet has no rule for, so opacity 0) to
-      // `is-leaving` (also opacity 0), which is no change and starts no
-      // transition. Committing that start state is runTransition's job, not
-      // this block's.
+      // A dismiss can land before the enter frame runs. Force is-shown now so
+      // the leave has a defined start state — is-entering has no stylesheet
+      // rule (opacity 0, same as is-leaving), so that pairing is no change and
+      // starts no transition.
       if (handle.enterRaf !== null) {
         cancelAnimationFrame(handle.enterRaf);
         handle.enterRaf = null;

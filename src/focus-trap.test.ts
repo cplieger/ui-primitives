@@ -2,14 +2,10 @@ import { describe, it, expect, afterEach, vi } from "vitest";
 
 import { trapFocus } from "./focus-trap.js";
 
-// The trap's visibility filter reads `getClientRects()` and `checkVisibility()`,
-// and both mean what they say now that the suite runs in a real browser: a
-// detached or `display: none` element reports no rects and fails
-// `checkVisibility`, so a hidden element is expressed by actually hiding it
-// rather than by stubbing a measurement. Tests that need a specific engine
-// shape (an element whose `checkVisibility` rejects only on the visibility
-// property, or an older engine with no `checkVisibility` at all) still override
-// that one method per element, which is the behavior under test.
+// The trap's visibility filter reads getClientRects()/checkVisibility(), which
+// mean what they say in this real-browser suite, so hidden elements are
+// expressed by actually hiding them rather than stubbing a measurement.
+// Tests needing a specific engine shape still override that one method.
 function makeButton(label: string): HTMLButtonElement {
   const btn = document.createElement("button");
   btn.textContent = label;
@@ -129,8 +125,7 @@ describe("trapFocus", () => {
     container.appendChild(fixed);
     document.body.appendChild(container);
     const release = trapFocus(container);
-    // It counts as focusable despite a null offsetParent, so it takes the
-    // initial focus.
+    // Focusable despite a null offsetParent (position:fixed).
     expect(document.activeElement).toBe(fixed);
     release();
   });
@@ -169,7 +164,6 @@ describe("trapFocus", () => {
     expect(() => {
       release = trapFocus(container, { initialFocus: detached });
     }).not.toThrow();
-    // The detached target is never focused (would throw in some engines).
     expect(document.activeElement).not.toBe(detached);
     expect(focusSpy).not.toHaveBeenCalled();
     release();
@@ -178,8 +172,7 @@ describe("trapFocus", () => {
   it("skips an element with no client rects (display:none) when choosing focus", () => {
     const container = document.createElement("div");
     const unrendered = makeButton("unrendered");
-    // `display: none` in a real engine: laid out nowhere, so no client rects.
-    unrendered.getClientRects = (): DOMRectList => [] as unknown as DOMRectList;
+    unrendered.getClientRects = (): DOMRectList => [] as unknown as DOMRectList; // display:none
     const rendered = makeButton("rendered");
     container.append(unrendered, rendered);
     document.body.appendChild(container);
@@ -191,9 +184,8 @@ describe("trapFocus", () => {
   it("skips an element checkVisibility rejects on the visibility property", () => {
     const container = document.createElement("div");
     const invisible = makeButton("invisible");
-    // Model the platform contract: a `visibility: hidden` element is laid out
-    // (it has client rects) and only reports itself invisible when
-    // checkVisibility is asked with `{ visibilityProperty: true }`.
+    // visibility:hidden is laid out (has client rects) and only reports
+    // invisible when checkVisibility is asked with visibilityProperty: true.
     invisible.checkVisibility = (options?: CheckVisibilityOptions): boolean =>
       options?.visibilityProperty !== true;
     const shown = makeButton("shown");
@@ -207,8 +199,7 @@ describe("trapFocus", () => {
   it("treats an element as focusable in an engine without checkVisibility", () => {
     const container = document.createElement("div");
     const btn = makeButton("only");
-    // Older engines have no checkVisibility; the guard must not call it.
-    Object.defineProperty(btn, "checkVisibility", { value: undefined, configurable: true });
+    Object.defineProperty(btn, "checkVisibility", { value: undefined, configurable: true }); // absent in older engines
     container.appendChild(btn);
     document.body.appendChild(container);
     let release: () => void = () => undefined;
@@ -309,15 +300,8 @@ describe("trapFocus: releasing the document listener", () => {
 
     const phases = (spy: typeof add): unknown[] =>
       (spy.mock.calls as unknown[][]).filter((c) => c[0] === "keydown").map((c) => c[2]);
-    // The trap listens on `document` in the CAPTURE phase so focus already
-    // outside the container still routes through it. Capture-phase listeners are
-    // a distinct registration from bubble-phase ones, so a release that names
-    // the wrong phase removes nothing and leaks the trap for the life of the
-    // page — every keystroke keeps being redirected into a container the caller
-    // has finished with. Asserted on the registration arguments because that is
-    // the narrowest statement of the contract; note that a real engine DOES honour
-    // the capture flag on removal, so the leak is now observable behaviourally too
-    // and a stronger test than this one is available if it is ever wanted.
+    // Capture-phase is a distinct registration from bubble-phase; a release
+    // naming the wrong phase removes nothing and leaks the trap permanently.
     expect(phases(add)).toEqual([true]);
     expect(phases(remove)).toEqual([true]);
   });
@@ -333,7 +317,6 @@ describe("trapFocus: releasing the document listener", () => {
 
     const evt = tabEvent();
     document.dispatchEvent(evt);
-    // Tab belongs to the platform again: no redirect, no preventDefault.
     expect(evt.defaultPrevented).toBe(false);
     expect(document.activeElement).toBe(outside);
   });

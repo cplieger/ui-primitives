@@ -133,9 +133,6 @@ describe("keyboard activation", () => {
     const d = createDisclosure(trigger, region, { animate: false });
     const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
     trigger.dispatchEvent(enter);
-    // No synthetic toggle. A dispatched event is untrusted, so it runs no
-    // default action and the button never fires the click the disclosure
-    // relies on; a real keypress would.
     expect(d.isOpen).toBe(false);
   });
 });
@@ -147,11 +144,8 @@ describe("height animation", () => {
     d.open();
     expect(d.isOpen).toBe(true);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    // Mid-transition an explicit height is set (auto with interpolate-size, or a
-    // measured px fallback) — either way not empty.
     expect(region.style.height).not.toBe("");
     region.dispatchEvent(new Event("transitionend"));
-    // Settled back to auto (cleared) so the content can reflow.
     expect(region.style.height).toBe("");
   });
 
@@ -168,7 +162,6 @@ describe("height animation", () => {
     const { trigger, region } = mount();
     const d = createDisclosure(trigger, region);
     d.open();
-    // No px tween — expanded is cleared straight to auto.
     expect(region.style.height).toBe("");
     d.close();
     expect(region.style.height).toBe("0px");
@@ -198,7 +191,7 @@ describe("animation edge paths", () => {
       d.open(); // registers a pending settle
       d.close(); // interrupts it before transitionend/fallback
       expect(region.style.height).toBe("0px");
-      // The cancelled settle must not fire and reopen the height to auto.
+      // Cancelled settle must not fire and reopen the height.
       vi.advanceTimersByTime(400);
       expect(region.style.height).toBe("0px");
       expect(d.isOpen).toBe(false);
@@ -232,7 +225,6 @@ describe("dispose", () => {
     d.open(); // animated open sets an inline height mid-transition
     expect(region.style.height).not.toBe("");
     d.dispose(); // dispose while the open tween is still pending
-    // Open state settles to auto (cleared inline height), not a frozen value.
     expect(region.style.height).toBe("");
   });
 
@@ -282,12 +274,8 @@ describe("createDisclosure: onToggle source", () => {
 });
 
 describe("createDisclosure: the two height-animation engines", () => {
-  // 0 <-> auto is animated one of two ways, and which one runs is the whole
-  // reason `supportsInterpolateSize` exists. Both paths are documented
-  // behavior, so both are pinned with an explicit `CSS.supports` stub rather
-  // than left to whatever the running browser answers: Chromium supports
-  // `interpolate-size`, so without the stub the measured-px fallback — the
-  // path every engine without it takes — would run in no test at all.
+  // CSS.supports is stubbed per case: Chromium supports interpolate-size, so
+  // without the stub the measured-px fallback would never run in a test.
   it("interpolates the auto keyword when the engine supports it", () => {
     vi.stubGlobal("CSS", { supports: () => true });
     const { trigger, region } = mount();
@@ -351,11 +339,8 @@ describe("createDisclosure: which keys activate a non-button trigger", () => {
 });
 
 describe("createDisclosure: engine capability guards", () => {
-  // `prefersReducedMotion` and `supportsInterpolateSize` are written as feature
-  // probes — each `typeof` guard exists so an engine (or a non-browser render
-  // pass) that lacks the API degrades instead of throwing. The engine here
-  // provides all of them, so the degraded arms only run when a test takes the
-  // API away deliberately.
+  // Each capability is stubbed away to exercise the degrade-instead-of-throw
+  // guards; the real engine here provides all of them by default.
 
   it("treats an engine without matchMedia as expressing no motion preference", () => {
     vi.stubGlobal("CSS", { supports: () => true });
@@ -363,8 +348,7 @@ describe("createDisclosure: engine capability guards", () => {
     const { trigger, region } = mount();
     const d = createDisclosure(trigger, region);
     d.open();
-    // Nothing to ask ⇒ no reduce claim ⇒ the tween runs (and asking anyway
-    // would throw).
+    // No matchMedia to ask ⇒ no reduce claim ⇒ the tween runs.
     expect(region.style.height).toBe("auto");
     d.dispose();
   });
@@ -391,13 +375,9 @@ describe("createDisclosure: engine capability guards", () => {
 });
 
 describe("createDisclosure: the committed start height between the two writes", () => {
-  // Setting the start height and the target height in one tick collapses into a
-  // single frame and no transition starts; the layout read in between is what
-  // commits the first write. runTransition owns that read now, so these pin that
-  // disclosure hands it the two writes in the right order — the read is taken
-  // while the height still reads the START value. transition.motion.test.ts
-  // asserts the consequence against real CSS (a `height` transitionend); these
-  // pin the ordering, once, without needing motion.
+  // The layout read between the start-height and target-height writes must
+  // land while the height still reads the START value, or both writes
+  // collapse into one frame and no transition starts.
   function watchReflow(region: HTMLElement): string[] {
     const seen: string[] = [];
     const orig = region.getBoundingClientRect.bind(region);
@@ -414,7 +394,6 @@ describe("createDisclosure: the committed start height between the two writes", 
     const d = createDisclosure(trigger, region);
     const seen = watchReflow(region);
     d.open();
-    // Exactly one commit, and taken while the height still reads 0.
     expect(seen).toEqual(["0px"]);
     expect(region.style.height).toBe("auto");
     d.dispose();
@@ -426,8 +405,7 @@ describe("createDisclosure: the committed start height between the two writes", 
     const d = createDisclosure(trigger, region, { open: true });
     const seen = watchReflow(region);
     d.close();
-    // auto is not an animatable start, so the collapse begins from a measured
-    // px height — committed before the 0.
+    // auto is not an animatable start, so the collapse begins from a measured px height.
     expect(seen).toEqual(["90px"]);
     expect(region.style.height).toBe("0px");
     d.dispose();
@@ -441,8 +419,6 @@ describe("createDisclosure: generated region ids", () => {
     document.body.append(a, b);
     const d1 = createDisclosure(null, a, { animate: false });
     const d2 = createDisclosure(null, b, { animate: false });
-    // The documented shape is `uip-disclosure-<n>`; a negative or non-numeric
-    // suffix is not it, and ids must not collide.
     expect(a.id).toMatch(/^uip-disclosure-\d+$/);
     expect(b.id).toMatch(/^uip-disclosure-\d+$/);
     const seq = (id: string): number => Number(id.slice("uip-disclosure-".length));
@@ -467,8 +443,7 @@ describe("createDisclosure: a superseded settle must not fire late", () => {
       expect(region.style.height).toBe("auto");
 
       vi.advanceTimersByTime(200); // t=400 — #1's old deadline
-      // #1 was cancelled by the close. If it still fired it would settle this
-      // second open's height mid-tween, killing the animation.
+      // #1 must not fire and settle this second open's height mid-tween.
       expect(region.style.height).toBe("auto");
 
       vi.advanceTimersByTime(200); // t=600 — #2's deadline
@@ -488,10 +463,8 @@ describe("createDisclosure: a superseded settle must not fire late", () => {
       d.open(); // animated: a settle is armed, deadline t=400
       expect(region.style.height).toBe("auto");
 
-      // The user turns on "reduce motion" mid-animation. The close now takes the
-      // untweened path, which must still supersede the open's settle: if that
-      // settle lands it clears the inline height, and a CLOSED region rendered
-      // at `height: auto` is a region that reopened itself.
+      // The reduced-motion close must still supersede the open's settle, or a
+      // CLOSED region left at `height: auto` reads as reopened.
       forceReducedMotion();
       d.close();
       expect(region.style.height).toBe("0px");
@@ -514,9 +487,7 @@ describe("createDisclosure: a superseded settle must not fire late", () => {
       expect(vi.getTimerCount()).toBe(1); // the open's settle fallback
 
       d.close();
-      // A collapse ends at 0 and has nothing to settle afterwards. A fallback
-      // left armed here fires into whatever state the region is in 400ms later,
-      // which is not the state it was armed for.
+      // A collapse has nothing to settle; no fallback should stay armed.
       expect(vi.getTimerCount()).toBe(0);
       d.dispose();
     } finally {
@@ -534,7 +505,6 @@ describe("createDisclosure: a superseded settle must not fire late", () => {
       d.dispose(); // settles the height itself, and must drop the pending work
       expect(region.style.height).toBe("");
 
-      // The caller now owns the element again.
       region.style.height = "42px";
       vi.advanceTimersByTime(400);
       region.dispatchEvent(new Event("transitionend"));

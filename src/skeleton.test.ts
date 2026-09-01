@@ -2,10 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { skeletonTiming } from "./skeleton.js";
 
-// Pure timing, no DOM needed. It runs in the browser anyway because the whole
-// package does, which costs nothing and removes the split that used to make
-// this file unrunnable under a mutation run: with one runner there is no
-// second environment for a worker to be holding.
+// Pure timing, no DOM needed; runs in the browser project like the rest of the package.
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -61,8 +58,7 @@ describe("skeletonTiming", () => {
   });
 
   it("defaults the show delay to 150ms", () => {
-    // The documented default, and the whole anti-flicker premise: a load that
-    // settles inside this window must never paint the skeleton.
+    // The anti-flicker premise: a load settling inside this window never paints.
     const show = vi.fn();
     skeletonTiming(show);
     vi.advanceTimersByTime(149);

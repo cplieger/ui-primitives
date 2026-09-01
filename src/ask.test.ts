@@ -54,7 +54,6 @@ describe("ask (boolean shape)", () => {
     expect(d.querySelector(".uip-ask-title")!.textContent).toBe("Heads up");
     expect(d.querySelector(".uip-ask-ok")!.textContent).toBe("Yes");
     expect(d.querySelector(".uip-ask-cancel")!.textContent).toBe("No");
-    // Name = concise title; description = message body.
     expect(d.getAttribute("aria-labelledby")).toBe("uip-ask-title");
     expect(d.getAttribute("aria-describedby")).toBe("uip-ask-msg");
   });
@@ -101,8 +100,6 @@ describe("ask (boolean shape)", () => {
     click(d, ".uip-ask-ok");
     await expect(p).resolves.toBe(true);
     expect(d.classList.contains("is-leaving")).toBe(true); // fading out
-    // Fake timers suppress the CSS transition, so the 400ms fallback is the
-    // path that finalizes the close here.
     vi.advanceTimersByTime(400);
     expect(d.open).toBe(false);
   });
@@ -218,12 +215,10 @@ describe("ask (input shape)", () => {
     expect(input.placeholder).toBe("secret");
     expect(input.maxLength).toBe(32);
     expect(input.autocomplete).toBe("current-password");
-    // The pre-filled value is selected so typing replaces it.
     expect(document.activeElement).toBe(input);
     expect(input.selectionStart).toBe(0);
     expect(input.selectionEnd).toBe("hunter2".length);
 
-    // A later plain input ask must not inherit the previous configuration.
     inputDlg().dispatchEvent(new Event("cancel", { cancelable: true }));
     await Promise.resolve();
     void ask("Plain?", { input: true });
@@ -282,7 +277,6 @@ describe("ask — one preemption domain across shapes", () => {
 
     const p2 = ask("Name?", { input: true });
     await expect(p1).resolves.toBe(false);
-    // The boolean dialog is fading closed (is-leaving), the input one is open.
     expect(d1.classList.contains("is-leaving")).toBe(true);
     expect(inputDlg().open).toBe(true);
 
@@ -319,16 +313,9 @@ describe("ask — _resetForTest (test-only seam)", () => {
 type Listener = EventListenerOrEventListenerObject;
 
 /**
- * Wrap every listener `target` registers from now on, appending its event type
- * to `ran` whenever it actually fires. Registration options pass through
- * untouched — so an `AbortSignal` still governs removal exactly as it would
- * without the wrapper — and an explicit `removeEventListener` for the original
- * function still matches, because the same wrapper is looked up again.
- *
- * This is how "the ask no longer owns anything on the shared dialog" is
- * observed: the handlers a settled ask leaves behind are all inert (each
- * re-checks `settled` and returns), so nothing but their invocation
- * distinguishes a detached listener from a leaked one.
+ * Wraps every listener `target` registers from now on, appending its event
+ * type to `ran` when it fires. Registration options and `removeEventListener`
+ * for the original function still work, since the same wrapper is reused.
  */
 function watchListeners(target: EventTarget, ran: string[]): void {
   const wrappers = new Map<Listener, Map<string, EventListener>>();
@@ -364,9 +351,8 @@ function watchListeners(target: EventTarget, ran: string[]): void {
   vi.spyOn(target, "removeEventListener").mockImplementation(
     (type: string, listener: Listener | null, options?: EventListenerOptions | boolean) => {
       if (listener !== null) {
-        // Look up, never create: a removal we have no wrapper for (an abort
-        // signal firing hands back the wrapper itself) must pass through as-is,
-        // or the real registration is never taken off.
+        // Look up, never create: an unwrapped removal (e.g. from an abort
+        // signal) must pass through as-is or the registration is never taken off.
         remove(type, wrappers.get(listener)?.get(type) ?? listener, options);
       }
     },
@@ -405,9 +391,8 @@ describe("ask — an ask that is over owns nothing on the shared dialog", () => 
 
     const evt = new Event("cancel", { cancelable: true });
     d.dispatchEvent(evt);
-    // The dialog is shared and long-lived. A resolved ask must hand it back to
-    // the platform: an Escape that lands on it now has to reach the native
-    // close, not a dead handler that swallows it and does nothing.
+    // A resolved ask must hand the shared dialog back to the platform, so
+    // Escape reaches the native close instead of a dead handler.
     expect(evt.defaultPrevented).toBe(false);
   });
 
@@ -425,10 +410,7 @@ describe("ask — an ask that is over owns nothing on the shared dialog", () => 
 
     ran.length = 0;
     pokeEverything(d);
-    // Confirm, cancel, backdrop press and Escape: nothing the resolved ask
-    // registered may still run. Each leftover would be inert today (they all
-    // re-check `settled`), which is exactly why a leak here is invisible until
-    // something downstream stops being inert.
+    // Nothing the resolved ask registered may still run.
     expect(ran).toEqual([]);
   });
 
@@ -444,8 +426,7 @@ describe("ask — an ask that is over owns nothing on the shared dialog", () => 
     await expect(p1).resolves.toBe(false);
 
     ran.length = 0;
-    // A backdrop press (no release, so nothing settles) and then Escape. Each
-    // must find exactly ONE handler — the successor's. Two would mean the
+    // Each of these must find exactly ONE handler — the successor's — or the
     // preempted ask is still wired to a dialog it no longer owns.
     d.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     d.dispatchEvent(new Event("cancel", { cancelable: true }));
@@ -473,7 +454,6 @@ describe("ask — an ask that is over owns nothing on the shared dialog", () => 
     ran.length = 0;
     const late = new Event("submit", { cancelable: true });
     form.dispatchEvent(late);
-    // A resolved input ask must not keep swallowing the form's submission.
     expect(ran).toEqual([]);
     expect(late.defaultPrevented).toBe(false);
   });
@@ -486,9 +466,8 @@ describe("ask — preemption arms no stray leave lifecycle", () => {
     const p2 = ask("Second?");
     await expect(p1).resolves.toBe(false);
 
-    // The successor needs the dialog that is already on screen, so no leave may
-    // start against it: a leave armed here is the stale timer that yanks a
-    // reopened dialog shut moments later.
+    // No leave may start against the dialog the successor reuses, or the
+    // stale timer yanks it shut moments later.
     expect(d.open).toBe(true);
     expect(d.classList.contains("is-leaving")).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
@@ -502,12 +481,10 @@ describe("ask — preemption arms no stray leave lifecycle", () => {
     const d1 = booleanDlg();
     click(d1, ".uip-ask-ok");
     await expect(p1).resolves.toBe(true);
-    // Its own leave is in flight: exactly one fallback is armed against d1.
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(1); // its own leave fallback
 
     const p2 = ask("Name?", { input: true });
-    // The boolean ask already resolved. Treating it as still pending would run a
-    // second, overlapping leave on a dialog that is already closing.
+    // A resolved ask is not pending, so no second leave overlaps d1's own.
     expect(vi.getTimerCount()).toBe(1);
 
     vi.advanceTimersByTime(400);

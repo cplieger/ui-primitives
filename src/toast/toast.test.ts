@@ -5,14 +5,11 @@ import { _resetForTest as resetAnnounce } from "../announce.js";
 import { toast, info, error, createToaster, _resetForTest } from "./index.js";
 import { createToastView } from "./view.js";
 
-// The toast view delegates screen-reader announcement to the shared announce()
-// live region (see view.ts); the visual stack and toast nodes are NOT live
-// regions. announce() is used for real here (isolate:false makes vi.mock leak
-// across files), so the announcement is asserted through its actual region,
-// which is a stronger, end-to-end check.
+// announce() is used for real here (isolate:false makes vi.mock leak across
+// files), so announcements are asserted through the actual live region.
 afterEach(() => {
-  _resetForTest(); // clear toasts + remove the visual stack
-  resetAnnounce(); // clear announce timers + remove its live regions
+  _resetForTest();
+  resetAnnounce();
   document.body.innerHTML = "";
 });
 
@@ -36,8 +33,6 @@ describe("toast", () => {
   it("renders a non-live visual stack and node (no nested live regions, no aria-label)", () => {
     info("Saved");
 
-    // The stack is a purely visual container — NOT a live region, so nothing
-    // nests a live region inside another.
     const s = stack();
     expect(s).not.toBeNull();
     expect(s!.hasAttribute("role")).toBe(false);
@@ -47,13 +42,12 @@ describe("toast", () => {
     expect(nodes).toHaveLength(1);
     const node = nodes[0]!;
 
-    // The visual node carries no live-region semantics and no aria-label.
     expect(node.hasAttribute("role")).toBe(false);
     expect(node.hasAttribute("aria-live")).toBe(false);
     expect(node.hasAttribute("aria-label")).toBe(false);
 
-    // The message renders; the dismiss hint stays a visually-hidden (NOT
-    // aria-hidden) child so the focusable node is self-describing.
+    // Dismiss hint stays visually-hidden but not aria-hidden, so the focusable
+    // node is self-describing.
     expect(node.querySelector(".uip-toast-msg")!.textContent).toBe("Saved");
     const hint = node.querySelector<HTMLElement>(".uip-visually-hidden");
     expect(hint).not.toBeNull();
@@ -68,14 +62,12 @@ describe("toast", () => {
     vi.useFakeTimers();
     try {
       info("Saved");
-      // announce() creates its polite region synchronously; the text lands
-      // after its short delay (empty -> text is what re-announces reliably).
+      // Text lands after announce()'s short delay.
       const region = liveRegion("polite");
       expect(region).not.toBeNull();
       expect(region!.getAttribute("role")).toBe("status");
       vi.advanceTimersByTime(100);
       expect(region!.textContent).toBe("Saved");
-      // A non-error toast does not touch the assertive region.
       expect(liveRegion("assertive")).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -109,10 +101,7 @@ describe("toast", () => {
   });
 
   it("does not append the stack at import time — createToastView() is side-effect-free until mount", () => {
-    // Constructing the view must not touch the DOM; the stack appears only on
-    // the first mount. The ./index.js singleton builds a view at module-eval
-    // time, so a side-effect-free factory means importing the module appends
-    // nothing.
+    // Constructing the view must not touch the DOM; the stack appears only on mount.
     const view = createToastView();
     expect(stack()).toBeNull();
     expect(document.body.childElementCount).toBe(0);
@@ -129,10 +118,8 @@ describe("toast", () => {
     vi.resetModules();
     document.body.innerHTML = "";
     const fresh = await import("./index.js");
-    // No import-time DOM mutation: the stack is lazy, created on the first show.
     expect(document.querySelector(".uip-toast-stack")).toBeNull();
     expect(document.body.childElementCount).toBe(0);
-    // Clean up the fresh singleton's document Escape listener (no stack exists).
     fresh.toast.dispose();
   });
 
@@ -197,7 +184,7 @@ describe("toast", () => {
     });
     error("failed", { onClick });
     const btn = toasts()[0]!.querySelector<HTMLButtonElement>(".uip-toast-retry")!;
-    expect(btn.textContent).toBe("Retry"); // default label
+    expect(btn.textContent).toBe("Retry");
     expect(() => {
       btn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     }).not.toThrow();
@@ -225,16 +212,16 @@ describe("toast", () => {
   it("ref-counts pause: un-hovering a still-focused toast does not restart its timer", () => {
     vi.useFakeTimers();
     try {
-      info("hover+focus"); // timed (default 4000ms)
+      info("hover+focus");
       const node = toasts()[0]!;
-      node.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true })); // pause (0->1)
-      node.dispatchEvent(new Event("focusin", { bubbles: true })); // still paused (1->2)
-      node.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true })); // still paused (2->1)
-      vi.advanceTimersByTime(10000); // focused → paused → must NOT auto-dismiss
+      node.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      node.dispatchEvent(new Event("focusin", { bubbles: true }));
+      node.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+      vi.advanceTimersByTime(10000);
       expect(node.classList.contains("is-leaving")).toBe(false);
       expect(toasts()).toHaveLength(1);
-      node.dispatchEvent(new Event("focusout", { bubbles: true })); // resume (1->0)
-      vi.advanceTimersByTime(4000); // countdown resumes → dismisses
+      node.dispatchEvent(new Event("focusout", { bubbles: true }));
+      vi.advanceTimersByTime(4000);
       expect(node.classList.contains("is-leaving")).toBe(true);
     } finally {
       vi.useRealTimers();
@@ -243,14 +230,14 @@ describe("toast", () => {
 
   it("cancels the pending enter frame on dismiss and settles into a leaving state", () => {
     const cancelSpy = vi.spyOn(globalThis, "cancelAnimationFrame");
-    const dismiss = info("quick"); // dismissed before the enter rAF fires
+    const dismiss = info("quick");
     const node = toasts()[0]!;
     expect(node.classList.contains("is-entering")).toBe(true);
     dismiss();
     expect(cancelSpy).toHaveBeenCalled();
     expect(node.classList.contains("is-entering")).toBe(false);
     expect(node.classList.contains("is-leaving")).toBe(true);
-    endTransition(node); // transitionend fires (no 400ms fallback wait)
+    endTransition(node);
     expect(toasts()).toHaveLength(0);
   });
 
@@ -259,14 +246,12 @@ describe("toast", () => {
     const removeSpy = vi.spyOn(document, "removeEventListener");
 
     const toaster = createToaster();
-    // The ESC handler is live: a sticky toast is dismissed by Escape.
     toaster.show("sticky", { level: "error" });
     const node = document.querySelector<HTMLElement>(".uip-toast")!;
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(node.classList.contains("is-leaving")).toBe(true);
 
     toaster.dispose();
-    // Container + toasts gone, and the document listener was removed.
     expect(document.querySelector(".uip-toast-stack")).toBeNull();
     const adds = addSpy.mock.calls.filter((c) => c[0] === "keydown").length;
     const removes = removeSpy.mock.calls.filter((c) => c[0] === "keydown").length;
@@ -347,7 +332,7 @@ describe("toast", () => {
       info("entering");
       const node = toasts()[0]!;
       expect(node.classList.contains("is-entering")).toBe(true);
-      vi.advanceTimersToNextFrame(); // the enter rAF runs
+      vi.advanceTimersToNextFrame();
       expect(node.classList.contains("is-entering")).toBe(false);
       expect(node.classList.contains("is-shown")).toBe(true);
     } finally {
@@ -373,13 +358,12 @@ describe("toast", () => {
   it("a focusout with no matching focusin does not corrupt the pause ref-count", () => {
     vi.useFakeTimers();
     try {
-      info("stray focusout"); // timed (default 4000ms)
+      info("stray focusout");
       const node = toasts()[0]!;
-      // A focusout the toast never saw a focusin for (focus was inside when it
-      // mounted) must not push the count below zero, or hover would stop pausing.
+      // A focusout with no matching focusin must not push the count below zero.
       node.dispatchEvent(new Event("focusout", { bubbles: true }));
-      node.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true })); // pause (0->1)
-      vi.advanceTimersByTime(10000); // hovered → paused → must NOT auto-dismiss
+      node.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      vi.advanceTimersByTime(10000);
       expect(node.classList.contains("is-leaving")).toBe(false);
       expect(toasts()).toHaveLength(1);
     } finally {
@@ -391,8 +375,8 @@ describe("toast", () => {
     info("first");
     const s = stack()!;
     const sibling = document.createElement("div");
-    document.body.appendChild(sibling); // sits after the stack
-    info("second"); // re-resolves the host; the stack must not be re-appended
+    document.body.appendChild(sibling);
+    info("second");
     expect(document.body.lastElementChild).toBe(sibling);
     expect(s.parentElement).toBe(document.body);
   });
@@ -406,7 +390,6 @@ describe("createToaster: container option", () => {
     t.info("scoped");
     const scoped = host.querySelector(".uip-toast-stack");
     expect(scoped).not.toBeNull();
-    // Not a second stack on body: the only stack lives under the host.
     expect(document.querySelectorAll(".uip-toast-stack")).toHaveLength(1);
     t.dispose();
     expect(host.querySelector(".uip-toast-stack")).toBeNull();
@@ -433,15 +416,7 @@ describe("toast: modal <dialog> auto-hosting", () => {
     return dlg;
   }
 
-  /**
-   * Close a dialog and wait for its `close` event to be delivered.
-   *
-   * `HTMLDialogElement.close()` queues the close event as a task rather than
-   * dispatching it synchronously, so an assertion placed straight after the
-   * call runs before the stack's evacuation handler does. The DOM emulator this
-   * suite used to run under dispatched it synchronously, which is why these
-   * assertions used to read correctly without a wait.
-   */
+  /** Close a dialog and await its `close` event (queued as a task, not synchronous). */
   async function closeAndSettle(dlg: HTMLDialogElement): Promise<void> {
     const delivered = new Promise<void>((resolve) => {
       dlg.addEventListener("close", () => resolve(), { once: true });
@@ -453,25 +428,24 @@ describe("toast: modal <dialog> auto-hosting", () => {
   it("hosts the default stack inside an open modal so toasts stay interactive (not inert)", () => {
     const dlg = openModal();
     info("over the modal");
-    // Inertness is DOM-tree-scoped: only a stack INSIDE the dialog subtree is
-    // clickable/hoverable while the modal is open.
+    // Inertness is DOM-tree-scoped: only a stack inside the dialog subtree is usable.
     expect(stack()!.parentElement).toBe(dlg);
     dlg.close();
     dlg.remove();
   });
 
   it("moves a live stack in and back out, carrying visible toasts along", async () => {
-    error("sticky"); // sticky error toast, no auto-dismiss
+    error("sticky");
     expect(stack()!.parentElement).toBe(document.body);
 
     const dlg = openModal();
-    info("raised over modal"); // mount re-resolves the host → stack moves INTO the dialog
+    info("raised over modal");
     expect(stack()!.parentElement).toBe(dlg);
-    expect(toasts()).toHaveLength(2); // the sticky toast rode along
+    expect(toasts()).toHaveLength(2);
 
-    await closeAndSettle(dlg); // close event → evacuation without needing a new toast
+    await closeAndSettle(dlg);
     expect(stack()!.parentElement).toBe(document.body);
-    expect(toasts()).toHaveLength(2); // both toasts survived both moves
+    expect(toasts()).toHaveLength(2);
     dlg.remove();
   });
 
@@ -487,10 +461,10 @@ describe("toast: modal <dialog> auto-hosting", () => {
 
   it("nested modals: hosts into the most recent, steps back one per close", async () => {
     const outer = openModal();
-    const inner = openModal(); // appended after outer → resolves as topmost
+    const inner = openModal();
     info("nested");
     expect(stack()!.parentElement).toBe(inner);
-    await closeAndSettle(inner); // re-sync lands on the still-open outer modal
+    await closeAndSettle(inner);
     expect(stack()!.parentElement).toBe(outer);
     await closeAndSettle(outer);
     expect(stack()!.parentElement).toBe(document.body);
@@ -504,7 +478,6 @@ describe("toast: modal <dialog> auto-hosting", () => {
     const t = createToaster({ container: host });
     const dlg = openModal();
     t.info("scoped");
-    // The embedded-widget contract: chrome never escapes the configured root.
     expect(host.querySelector(".uip-toast-stack")).not.toBeNull();
     dlg.close();
     dlg.remove();
@@ -515,9 +488,9 @@ describe("toast: modal <dialog> auto-hosting", () => {
     const dlg = openModal();
     info("inside");
     expect(stack()!.parentElement).toBe(dlg);
-    dlg.remove(); // dispose-style teardown that skips the close event
-    expect(stack()).toBeNull(); // stack left the document with the dialog
-    info("recovers"); // next mount re-resolves the host
+    dlg.remove();
+    expect(stack()).toBeNull();
+    info("recovers");
     expect(stack()!.parentElement).toBe(document.body);
   });
 
@@ -536,14 +509,12 @@ describe("toast: modal <dialog> auto-hosting", () => {
     expect(closeCalls(addSpy)).toBe(1);
 
     dlg.close();
-    // close() queues the close event as an element task, so it has not fired
-    // yet on the statement after the call.
+    // close() queues the close event, so it has not fired on the next statement.
     await new Promise<void>((resolve) => {
       dlg.addEventListener("close", () => resolve(), { once: true });
     });
     expect(stack()!.parentElement).toBe(document.body);
-    // The listener is app-owned DOM the view no longer has any use for; a
-    // retained one keeps a closed dialog wired to a stack that has left it.
+    // A retained listener keeps a closed dialog wired to a stack that left it.
     expect(closeCalls(removeSpy)).toBe(1);
     dlg.remove();
   });
@@ -557,8 +528,7 @@ describe("toast: modal <dialog> auto-hosting", () => {
     expect(dlg.querySelector(".uip-toast-stack")).not.toBeNull();
 
     t.dispose();
-    // A disposed toaster leaves nothing of itself on the page — the dialog's
-    // close listener included.
+    // A disposed toaster leaves nothing of itself on the page.
     expect(closeCalls(removeSpy)).toBe(1);
     dlg.close();
     dlg.remove();
@@ -570,11 +540,10 @@ describe("toast: modal <dialog> auto-hosting", () => {
     const removeSpy = vi.spyOn(dlg, "removeEventListener");
 
     info("first");
-    info("second"); // same host: the adoption already stands
+    info("second");
     expect(stack()!.parentElement).toBe(dlg);
 
-    // Re-registering per toast would open a window in which a `close` racing
-    // the swap is heard by nobody.
+    // Re-registering per toast would open a window where a racing close is missed.
     expect(closeCalls(addSpy)).toBe(1);
     expect(closeCalls(removeSpy)).toBe(0);
     dlg.close();
@@ -589,8 +558,7 @@ describe("toast: modal <dialog> auto-hosting", () => {
     t.info("pinned");
     expect(dlg.querySelector(".uip-toast-stack")).not.toBeNull();
 
-    // Pinned means exempt from auto-hosting: the view takes no interest in the
-    // element's dialog-ness, so it never watches it for `close`.
+    // Pinned means exempt from auto-hosting: never watched for close.
     expect(closeCalls(addSpy)).toBe(0);
     t.dispose();
     dlg.close();
@@ -605,12 +573,10 @@ describe("toast: default toaster laziness", () => {
     const fresh = await import("./index.js");
     const keydownCalls = (): number => spy.mock.calls.filter(([type]) => type === "keydown").length;
 
-    // Import-time: no Escape listener, no stack container (the module import
-    // must be side-effect free — DOM-less runtimes import it too).
+    // Import-time: no Escape listener, no stack container.
     expect(keydownCalls()).toBe(0);
     expect(document.querySelector(".uip-toast-stack")).toBeNull();
 
-    // First use builds the singleton: listener attaches, stack appears.
     fresh.info("first use");
     expect(keydownCalls()).toBe(1);
     expect(document.querySelector(".uip-toast-stack")).not.toBeNull();
@@ -645,9 +611,9 @@ describe("createToaster: option pass-through", () => {
 
   it("honors maxQueue, dropping the oldest queued toast", () => {
     const { t, host } = scoped({ maxVisible: 1, maxQueue: 1 });
-    const dismiss = t.info("one"); // visible
-    t.info("two"); // queued
-    t.info("three"); // queued — evicts "two" at the cap of 1
+    const dismiss = t.info("one");
+    t.info("two");
+    t.info("three");
 
     dismiss();
     endTransition(host.querySelector<HTMLElement>(".uip-toast")!);
@@ -659,7 +625,6 @@ describe("createToaster: option pass-through", () => {
     const { t, host } = scoped({ defaultDuration: 100 });
     t.info("timed");
     const node = host.querySelector<HTMLElement>(".uip-toast")!;
-    // The countdown the CSS animates from — written inline per timed toast.
     expect(node.style.getPropertyValue("--uip-toast-duration")).toBe("100ms");
     t.dispose();
   });
@@ -696,7 +661,7 @@ describe("the default toaster's teardown seams", () => {
     expect(stack()).not.toBeNull();
     _resetForTest();
     expect(stack()).toBeNull();
-    info("again"); // lazily rebuilt
+    info("again");
     expect(stack()).not.toBeNull();
   });
 });
@@ -711,9 +676,7 @@ describe("toast: the engine port the view drives", () => {
     );
     const node = handle.el;
 
-    // Hover and focus are two DOM sources over ONE engine timer, so the view
-    // ref-counts them: the engine hears a single pause, and a single resume
-    // only once the last source lets go.
+    // Two DOM sources over one engine timer: ref-counted, resume fires once.
     node.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
     node.dispatchEvent(new Event("focusin", { bubbles: true }));
     expect(ctx.pause).toHaveBeenCalledTimes(1);
@@ -743,8 +706,8 @@ describe("toast: teardown cancels pending work", () => {
       const first = document.querySelector<HTMLElement>(".uip-toast")!;
       expect(first.classList.contains("is-entering")).toBe(true);
 
-      t.info("second"); // replace mode removes "first" on the spot
-      vi.advanceTimersToNextFrame(); // a surviving enter frame would run here
+      t.info("second");
+      vi.advanceTimersToNextFrame();
       expect(first.isConnected).toBe(false);
       expect(first.classList.contains("is-shown")).toBe(false);
       t.dispose();
@@ -758,15 +721,14 @@ describe("toast: teardown cancels pending work", () => {
     try {
       const t = createToaster({ container: makeHost() });
       const dismiss = t.info("bye");
-      vi.advanceTimersByTime(100); // the announce timer lands and clears
-      expect(vi.getTimerCount()).toBe(1); // the auto-dismiss countdown
+      vi.advanceTimersByTime(100);
+      expect(vi.getTimerCount()).toBe(1);
 
       dismiss();
-      expect(vi.getTimerCount()).toBe(1); // countdown cancelled, leave fallback armed
+      expect(vi.getTimerCount()).toBe(1);
 
       t.clear();
-      // The leave's fallback timer goes with the node it would have removed:
-      // nothing may fire into a cleared toaster.
+      // The leave's fallback timer goes with the node it would have removed.
       expect(vi.getTimerCount()).toBe(0);
       t.dispose();
     } finally {
@@ -779,12 +741,11 @@ describe("toast: teardown cancels pending work", () => {
     try {
       const t = createToaster({ container: makeHost() });
       t.info("timed");
-      vi.advanceTimersByTime(100); // the announce timer lands and clears
-      expect(vi.getTimerCount()).toBe(1); // the auto-dismiss countdown
+      vi.advanceTimersByTime(100);
+      expect(vi.getTimerCount()).toBe(1);
 
       t.dispose();
-      // The view is gone, so a countdown that outlived it would dismiss into a
-      // torn-down stack.
+      // A countdown outliving the view would dismiss into a torn-down stack.
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
@@ -809,8 +770,7 @@ describe("toast: a failing retry handler", () => {
     t.error("failed", { onClick: vi.fn() });
     clickRetry(host);
 
-    // The retry button owns the click: an app listening on the root it handed
-    // us must not also see it as a click of its own.
+    // The retry button owns the click; a listener on the app's root must not see it.
     expect(onHostClick).not.toHaveBeenCalled();
     t.dispose();
   });

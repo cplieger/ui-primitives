@@ -92,39 +92,32 @@ export function createDisclosure(
   const reflectAria = (): void => {
     trigger?.setAttribute("aria-expanded", open ? "true" : "false");
     region.setAttribute("aria-hidden", open ? "false" : "true");
-    // Collapsed content must also leave the tab order + a11y tree. height:0 +
-    // overflow:hidden clips paint but keeps descendants keyboard-focusable, and
-    // aria-hidden on focusable content is itself invalid. `inert` removes focus,
-    // interaction, and a11y participation without touching layout/animation.
+    // height:0 clips paint but keeps descendants keyboard-focusable, and
+    // aria-hidden on focusable content is invalid; `inert` removes both.
     region.inert = !open;
   };
 
   const applyHeight = (targetOpen: boolean, animate: boolean): void => {
     if (!animate || prefersReducedMotion()) {
-      // No tween: expanded is auto (cleared inline height), collapsed is 0.
-      // A settle armed by an earlier animated toggle must not land on this
-      // untweened state — reachable when the OS motion preference flips while
-      // an animation is in flight.
+      // Cancel any in-flight tween: a reduced-motion flip mid-animation must
+      // not let its settle land on this untweened state.
       cancelTransition(region);
       region.style.height = targetOpen ? "" : "0px";
       return;
     }
     if (targetOpen) {
-      // The collapsed start height is written here and committed by
-      // runTransition, so scrollHeight is read against a settled height:0 box.
+      // Committed by runTransition first, so scrollHeight reads a settled height:0 box.
       region.style.height = "0px";
       runTransition(region, {
         change: () => {
           region.style.height = supportsInterpolateSize() ? "auto" : `${region.scrollHeight}px`;
         },
-        // Settle to auto so the content can reflow/grow later.
         settled: () => {
           region.style.height = "";
         },
       });
     } else {
-      // Collapse from a concrete height (auto isn't an animatable start on the
-      // fallback path) down to 0, and stay there.
+      // auto isn't an animatable start on the fallback path, so measure first.
       region.style.height = `${region.scrollHeight}px`;
       runTransition(region, {
         change: () => {
@@ -144,7 +137,6 @@ export function createDisclosure(
     onToggle?.(next, source);
   };
 
-  // Initial state, applied without animation or an onToggle callback.
   reflectAria();
   applyHeight(open, false);
 

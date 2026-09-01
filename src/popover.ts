@@ -1,33 +1,10 @@
-// popover.ts — An anchored floating panel and the placement engine under it.
-// Two exports, deliberately split:
-//
-//   - placeAnchored(panel, anchor, opts) — the pure positioner. Given a panel
-//     (position:fixed) and an anchor, it reads the anchor's rect + the panel's
-//     measured size and writes panel.style.left/top so the panel sits on the
-//     requested side (placement) and edge (align), gapped by `offset`, flipped
-//     to the opposite side when it would overflow, and clamped into the
-//     viewport on the cross axis. Idempotent — safe to call on every
-//     scroll/resize or after the panel's content changes size. Uses
-//     window.visualViewport for the viewport box when present so it stays
-//     correct above the mobile on-screen keyboard.
-//
-//   - createPopover(anchor, panel, opts) — the interactive controller for
-//     dropdowns, filter panels, and pickers (the interactive superset of
-//     tooltip, and the substrate a menu/listbox sits on). It reveals the
-//     caller-supplied panel, positions it with placeAnchored, wires
-//     outside-click / Escape dismissal and scroll/resize/visualViewport
-//     reposition tracking, and manages aria-expanded/aria-haspopup on the
-//     anchor. It never builds or owns the panel: dispose hides + unlistens but
-//     leaves the caller's element in the DOM.
+// popover.ts — An anchored floating panel: placeAnchored (pure positioner) and
+// createPopover (interactive controller), layered on the shared popup
+// lifecycle core (popup-core.ts, internal) which owns reveal/dismiss; popover
+// adds anchored placement, scroll/resize tracking, and the stretch mode.
 //
 // JS positioning (getBoundingClientRect + fixed) rather than the native Popover
 // API / CSS anchor positioning, for testability and consistency with tooltip.
-
-// createPopover is layered on the shared popup lifecycle core (popup-core.ts,
-// internal): the core owns the reveal / light-dismiss lifecycle (state
-// classes, outside-click, Escape isolation, trigger ARIA, groups, opt-in
-// focus) and popover adds anchored placement, scroll/resize/visualViewport
-// tracking, and the full-bleed stretch mode through the core's hooks seam.
 
 import { createPopupCore } from "./popup-core.js";
 import type { PopupOptions, PopupOptionsPatch } from "./popup-core.js";
@@ -91,16 +68,11 @@ export interface PlacementOptions {
   /** Viewport edge margin used by flip + clamp — and, in `stretch: "viewport"`
    *  mode, the inline inset from each viewport edge — in px. Default `8`. */
   margin?: number;
-  /** Full-bleed / edge-pinned mode. `"viewport"` makes the panel span the
-   *  viewport's inline axis (pinned to both inline edges, respecting `margin`)
-   *  instead of being sized to its content and cross-aligned to the anchor —
-   *  the mobile full-width dropdown / action-sheet pattern. The main axis stays
-   *  anchored to the trigger (below for `placement: "bottom"`, above for
-   *  `"top"`) and still flips when there is no room. Only meaningful for a
-   *  top/bottom `placement`; ignored for left/right. The inset is written as an
-   *  inline style, so a consumer never needs `!important` to express it in their
-   *  own CSS. `align`, cross-axis `clamp`, and `matchAnchorWidth` do not apply in
-   *  this mode. Default unset (content-sized). */
+  /** Full-bleed / edge-pinned mode: `"viewport"` spans the panel across the
+   *  viewport's inline axis (respecting `margin`) instead of content-sizing
+   *  and cross-aligning it — the mobile full-width action-sheet pattern. Only
+   *  meaningful for a top/bottom `placement`; `align`, cross-axis `clamp`, and
+   *  `matchAnchorWidth` do not apply. Default unset (content-sized). */
   stretch?: "viewport";
 }
 
@@ -261,13 +233,6 @@ export function placeAnchored(
   panel.style.position = "fixed";
   const vp = viewportBox();
 
-  // Full-bleed / edge-pinned mode: the panel spans the viewport's inline axis
-  // (pinned to both inline edges with `margin`) instead of being sized to its
-  // content. Only for a top/bottom placement — a left/right panel can't also
-  // span the full width. The main axis stays anchored to the trigger and still
-  // flips when there is no room below/above, which is the mobile full-width
-  // dropdown / action-sheet pattern. Everything is written as inline style so a
-  // consumer never needs `!important` to express it.
   if (opts?.stretch === "viewport" && (placement === "top" || placement === "bottom")) {
     // Pin both inline edges. In fixed positioning `right` is measured from the
     // viewport's inline-end edge, so left + right together span the width minus

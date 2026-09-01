@@ -20,10 +20,8 @@ function mount(): HTMLElement {
 describe("runTransition: the start state is committed before the change", () => {
   it("reads a layout property before running the change, so the change has something to animate from", () => {
     const el = mount();
-    // The commit leaves no observable state behind — the flush IS the read — so
-    // that a layout property is read, and read BEFORE the change, is the whole
-    // contract. Ordering is what the two measured defects got wrong, so the
-    // ordering is what this pins.
+    // The commit leaves no observable state behind, so ordering (read before
+    // change) is the only thing a test can pin.
     const order: string[] = [];
     vi.spyOn(el, "getBoundingClientRect").mockImplementation(() => {
       order.push("commit");
@@ -40,7 +38,7 @@ describe("runTransition: the start state is committed before the change", () => 
   it("commits unconditionally, so a caller has no placement decision to get wrong", () => {
     const el = mount();
     const read = vi.spyOn(el, "getBoundingClientRect");
-    // No settled, nothing pending, nothing to supersede: the commit still happens.
+    // No settled, nothing pending: the commit still happens.
     runTransition(el, { change: () => undefined });
     expect(read).toHaveBeenCalledOnce();
   });
@@ -52,7 +50,7 @@ describe("runTransition: settled", () => {
     const settled = vi.fn();
     runTransition(el, { change: () => undefined, settled });
     el.dispatchEvent(new Event("transitionend"));
-    el.dispatchEvent(new Event("transitionend")); // a second event must not re-run
+    el.dispatchEvent(new Event("transitionend"));
     expect(settled).toHaveBeenCalledOnce();
   });
 
@@ -63,8 +61,8 @@ describe("runTransition: settled", () => {
     const settled = vi.fn();
     runTransition(el, { change: () => undefined, settled });
     child.dispatchEvent(new Event("transitionend", { bubbles: true }));
-    expect(settled).not.toHaveBeenCalled(); // a descendant's transition is not the element's
-    el.dispatchEvent(new Event("transitionend")); // the element's own still settles it
+    expect(settled).not.toHaveBeenCalled();
+    el.dispatchEvent(new Event("transitionend"));
     expect(settled).toHaveBeenCalledOnce();
   });
 
@@ -132,11 +130,8 @@ describe("runTransition: supersession is per element", () => {
 });
 
 describe("runTransition: 'settled' means it stops touching the element", () => {
-  // Every overlay primitive here hands the helper ONE long-lived, shared
-  // element (the reused <dialog>, a toast node), so finishing has to mean it
-  // stops touching that element — not merely that it stops calling back. Same
-  // reason toast.test.ts pins that a re-resolved dialog's close listener does
-  // not churn.
+  // Overlay primitives hand this helper one long-lived, shared element, so
+  // finishing must mean it stops touching that element, not just calling back.
   function arm(): { el: HTMLElement; detach: ReturnType<typeof vi.spyOn> } {
     const el = mount();
     const detach = vi.spyOn(el, "removeEventListener");
@@ -146,7 +141,7 @@ describe("runTransition: 'settled' means it stops touching the element", () => {
 
   it("cancelTransition after the settle has already run detaches nothing a second time", () => {
     const { el, detach } = arm();
-    el.dispatchEvent(new Event("transitionend")); // settles, taking the listener off
+    el.dispatchEvent(new Event("transitionend"));
     expect(detach).toHaveBeenCalledTimes(1);
     cancelTransition(el);
     expect(detach).toHaveBeenCalledTimes(1);
