@@ -1,16 +1,6 @@
-// transition.motion.test.ts — the transition primitive's contract measured
-// against REAL CSS motion in a real browser, at the modules that use it.
-//
-// Separate from transition.test.ts for the same reason toast/view.test.ts is
-// separate from toast.test.ts: these tests inject stylesheets and run on real
-// timers so an actual CSS transition can start, progress and end, which a
-// synthetic `dispatchEvent(new Event("transitionend"))` fixture cannot observe.
-// `transitionend` is the assertion throughout — never elapsed time, which goes
-// flaky on a loaded box.
-//
-// The property under test: whatever a caller writes before runTransition is
-// COMMITTED as the start state, so the change animates. Both defects the
-// primitive exists to prevent were a missing commit.
+// Injects real stylesheets and uses real timers so an actual CSS transition can
+// run, which a synthetic transitionend event cannot observe. `transitionend` is
+// the assertion throughout, never elapsed time (flaky on a loaded box).
 import { describe, it, expect, afterEach, beforeAll, afterAll } from "vitest";
 
 import { createDialog } from "./dialog.js";
@@ -50,9 +40,8 @@ function settle(): Promise<void> {
 function ownTransitionEndWithin(node: HTMLElement, ms: number): Promise<string | null> {
   return new Promise<string | null>((resolve) => {
     const onEnd = (e: TransitionEvent): void => {
-      // A <dialog>'s ::backdrop transitions opacity too, and its transitionend
-      // targets the dialog; require the element's own transition so a test
-      // cannot pass on the backdrop's behalf.
+      // A dialog's ::backdrop transitions opacity too and targets the dialog;
+      // require the element's own transition.
       if (e.target !== node || e.pseudoElement !== "") {
         return;
       }
@@ -93,8 +82,7 @@ describe("the committed start state, against real CSS", () => {
   });
 
   it("animates a disclosure open from the collapsed height, not straight to auto", async () => {
-    // The shipped CSS only animates height when motion is allowed; without that
-    // this test would pass vacuously, so state the precondition.
+    // Without motion allowed this test would pass vacuously; state the precondition.
     expect(window.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false);
 
     const trigger = document.createElement("button");
@@ -103,16 +91,13 @@ describe("the committed start state, against real CSS", () => {
     document.body.append(trigger, region);
     const ctl = createDisclosure(trigger, region);
 
-    // The open path writes `height: 0px`, then `height: auto`. The 0 has to be
-    // committed in between or the engine coalesces both writes and the region
-    // snaps open with no transition. This is the site whose private, duplicated
-    // forceReflow the design deleted.
+    // The open path writes height:0px then height:auto; the 0 must be committed
+    // in between or the engine coalesces both writes and skips the transition.
     const ended = ownTransitionEndWithin(region, 2000);
     ctl.open();
 
     expect(await ended).toBe("height");
     await settle();
-    // The settle clears the inline height so later content growth is not clipped.
     expect(region.style.height).toBe("");
 
     ctl.dispose();
@@ -140,9 +125,8 @@ describe("the committed start state, against real CSS", () => {
   it("fades a popup on hide, finishing on its own transitionend rather than the ceiling", async () => {
     expect(window.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false);
 
-    // App-owned motion, the shape vibekit's find box documents: the RESTING
-    // state is also the leave target, so one declaration covers both directions
-    // and `is-leaving` needs no rule of its own.
+    // The resting state is also the leave target, so one declaration covers both
+    // directions and is-leaving needs no rule of its own.
     const style = document.createElement("style");
     style.textContent = `
       .probe { opacity: 0; transition: opacity 60ms linear; }
@@ -156,8 +140,7 @@ describe("the committed start state, against real CSS", () => {
     document.body.appendChild(panel);
     const ctl = createPopup(panel);
 
-    // Reveal, and let `is-open` resolve — the enter's own committed start state
-    // is the resting `opacity: 0`.
+    // The enter's own committed start state is the resting opacity: 0.
     const entered = ownTransitionEndWithin(panel, 2000);
     ctl.show();
     expect(await entered).toBe("opacity");
@@ -166,7 +149,6 @@ describe("the committed start state, against real CSS", () => {
     ctl.hide();
     expect(await left).toBe("opacity");
     await settle();
-    // 60ms of transition, not the 400ms ceiling.
     expect(panel.hidden).toBe(true);
 
     ctl.dispose();
@@ -174,11 +156,8 @@ describe("the committed start state, against real CSS", () => {
   });
 
   it("settles once when one change ends two transitions", async () => {
-    // The primitive has no "already ran" latch: detaching both sources before
-    // invoking settled is what makes it run once. A single change really can end
-    // several transitions — the shipped toast animates opacity AND transform —
-    // so pin it against two, with a settled that leaves the element in place so
-    // the second event is not swallowed by a removal cancelling it.
+    // No "already ran" latch: detaching both sources before invoking settled is
+    // what makes it run once, pinned against two real transitionend events.
     expect(window.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false);
 
     const style = document.createElement("style");
@@ -210,16 +189,15 @@ describe("the committed start state, against real CSS", () => {
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 300);
     });
-    expect(ended.length).toBeGreaterThan(1); // the premise: two events really arrive
+    expect(ended.length).toBeGreaterThan(1);
     expect(settles).toBe(1);
 
     style.remove();
   });
 
   it("still fades a dialog closed in the same task it opened", async () => {
-    // A regression guard, not evidence of a fix: this passed before the redesign
-    // too. showModal() moves focus, which needs layout, which resolves the
-    // opacity-1 state — so the dialog family never depended on the commit.
+    // showModal() moves focus, which needs layout and resolves opacity-1, so the
+    // dialog family never depended on the commit.
     expect(window.matchMedia("(prefers-reduced-motion: reduce)").matches).toBe(false);
 
     const dialog = document.createElement("dialog");
@@ -260,13 +238,9 @@ describe("the committed start state, against real CSS", () => {
     document.body.appendChild(panel);
     const ctl = createPopup(panel);
 
-    // Committing the start state is what LETS the enter transition begin — and
-    // a hide in the same task then reverses a transition at zero progress,
-    // whose target equals its current value, so CSS starts no transition at
-    // all. No amount of flushing changes that; the panel snaps to its resting
-    // state and `[hidden]` waits for the ceiling. Pinned so the limitation is a
-    // stated behaviour rather than a surprise, and so a future fix has a test
-    // to flip.
+    // A hide in the show's own task reverses a transition at zero progress whose
+    // target equals its current value, so CSS starts no transition at all; the
+    // panel snaps to resting and [hidden] waits for the ceiling.
     const ended = ownTransitionEndWithin(panel, 250);
     ctl.show();
     ctl.hide();

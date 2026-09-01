@@ -1,10 +1,8 @@
 // announce.ts — Screen-reader announcements via shared visually-hidden ARIA
-// live regions. One region per politeness level is created lazily and reused.
-// The message is cleared synchronously then set after a short delay so the
-// empty -> text mutation is a distinct change the assistive technology will
-// re-announce even when the text is identical to the previous message. A
-// microtask is too fast for AT to register two separate mutations, so a real
-// timer gap is used; a pending set is cancelled if a newer announce arrives.
+// live regions, one per politeness level, created lazily and reused. The
+// message clears then sets after a delay: the empty->text mutation is what
+// forces AT to re-announce identical text, and a microtask gap is too fast
+// for AT to register as two distinct mutations.
 
 import { el } from "@cplieger/reactive";
 
@@ -36,12 +34,9 @@ function ensureRegion(politeness: Politeness): Region {
     region = { el: node, timer: null };
     regions.set(politeness, region);
   }
-  // Host the region where assistive technology can hear it. `showModal()`
-  // inerts everything outside the dialog subtree — inert content is hidden
-  // from AT, so a body-hosted region is silent while a modal is open. Re-home
-  // the region into the topmost open modal (or back to body) at announce
-  // time; the ANNOUNCE_DELAY_MS clear→set gap below also gives AT time to
-  // register a re-homed region before the text lands.
+  // showModal() inerts everything outside the dialog subtree, so a body-hosted
+  // region is silent to AT while a modal is open; re-home into the topmost
+  // open modal (or back to body) on every announce.
   const host: HTMLElement = topmostOpenDialog() ?? document.body;
   if (region.el.parentElement !== host) {
     host.appendChild(region.el);
@@ -53,15 +48,11 @@ function ensureRegion(politeness: Politeness): Region {
  *  `"assertive"` interrupts (uses a separate region + `role="alert"`). */
 export function announce(message: string, politeness: Politeness = "polite"): void {
   const region = ensureRegion(politeness);
-  // Cancel a still-pending set so a rapid second announce wins (and its text is
-  // the one that lands), rather than both firing in sequence.
+  // Cancel a pending set so a rapid second announce wins outright.
   if (region.timer !== null) {
     clearTimeout(region.timer);
     region.timer = null;
   }
-  // Clear synchronously, set after a short delay: the empty → text change is
-  // what forces AT to re-announce even when the text is unchanged, and the gap
-  // is what lets it register the two mutations as distinct.
   region.el.textContent = "";
   region.timer = setTimeout(() => {
     region.el.textContent = message;

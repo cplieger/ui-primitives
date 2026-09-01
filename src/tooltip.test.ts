@@ -35,10 +35,8 @@ function tipCount(): number {
 /**
  * Present a viewport of exactly `width` x `height` at the origin.
  *
- * The tooltip positioner reads window.visualViewport first and only falls back
- * to innerWidth/innerHeight, so a test that stubs the two inner* globals alone
- * silently measures the real window and its clamp/flip assertions read the
- * unclamped value.
+ * The positioner reads visualViewport first, falling back to inner*; stub both
+ * or the test silently measures the real window.
  */
 function stubViewport(width: number, height: number): void {
   vi.stubGlobal("visualViewport", {
@@ -86,7 +84,7 @@ describe("initTooltips", () => {
     const a = anchor("Hello");
     pointerOver(a);
     vi.advanceTimersByTime(499);
-    expect(tip()).toBeNull(); // still pending during the 500ms default delay
+    expect(tip()).toBeNull();
     vi.advanceTimersByTime(1);
     const t = tip();
     expect(t).not.toBeNull();
@@ -106,7 +104,7 @@ describe("initTooltips", () => {
     pointerOut(a, null);
     expect(a.getAttribute("aria-describedby")).toBeNull();
     expect(tip()!.classList.contains("is-leaving")).toBe(true);
-    vi.advanceTimersByTime(400); // the shared leave-fallback ceiling
+    vi.advanceTimersByTime(400);
     expect(tip()).toBeNull();
   });
 
@@ -118,16 +116,14 @@ describe("initTooltips", () => {
     pointerOver(a);
     vi.advanceTimersByTime(1000);
     expect(tip()).not.toBeNull();
-    pointerOut(a, child); // relatedTarget inside the anchor -> transition ignored
+    pointerOut(a, child);
     expect(tip()).not.toBeNull();
     expect(tip()!.classList.contains("is-leaving")).toBe(false);
   });
 
   it("makes every hover wait the same delay by default — no instant peer", () => {
-    // The default a native `title` sets: warm defaults to the cold delay, so a
-    // peer hovered right after a tooltip hid still costs the full wait. An
-    // instant peer here is what makes a pill row or a toolbar read as popping
-    // tooltips with no hover time at all.
+    // Warm defaults to the cold delay, so a peer hovered right after a tooltip
+    // hid still costs the full wait.
     initTooltips();
     const a = anchor("A");
     const b = anchor("B");
@@ -135,7 +131,7 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(500);
     expect(tip()!.textContent).toBe("A");
     pointerOut(a, null);
-    vi.advanceTimersByTime(400); // remove A; the cooldown window is still open
+    vi.advanceTimersByTime(400);
     pointerOver(b);
     vi.advanceTimersByTime(499);
     expect(tip()).toBeNull();
@@ -151,9 +147,9 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(500);
     expect(tip()!.textContent).toBe("A");
     pointerOut(a, null);
-    vi.advanceTimersByTime(400); // remove A; group is now warm
+    vi.advanceTimersByTime(400);
     pointerOver(b);
-    vi.advanceTimersByTime(1); // opted-in warm delay is 0
+    vi.advanceTimersByTime(1);
     expect(tip()!.textContent).toBe("B");
   });
 
@@ -168,7 +164,7 @@ describe("initTooltips", () => {
     vi.advanceTimersByTime(400);
     pointerOver(b);
     vi.advanceTimersByTime(1999);
-    expect(tip()).toBeNull(); // never faster than the delay the caller asked for
+    expect(tip()).toBeNull();
     vi.advanceTimersByTime(1);
     expect(tip()!.textContent).toBe("B");
   });
@@ -224,9 +220,9 @@ describe("initTooltips", () => {
   it("cancels a still-pending tooltip when the pointer leaves during the cold delay", () => {
     initTooltips();
     const a = anchor("Hi");
-    pointerOver(a); // schedules the cold-delay timer (state = pending)
-    pointerOut(a, null); // leaves before the delay elapses -> clears the pending timer
-    vi.advanceTimersByTime(1000); // the cancelled timer must not fire
+    pointerOver(a);
+    pointerOut(a, null);
+    vi.advanceTimersByTime(1000);
     expect(tip()).toBeNull();
   });
 
@@ -261,7 +257,7 @@ describe("initTooltips", () => {
     const t = tip()!;
     expect(a.getAttribute("aria-describedby")).toBe(`foo ${t.id}`);
     pointerOut(a, null);
-    expect(a.getAttribute("aria-describedby")).toBe("foo"); // prior token restored
+    expect(a.getAttribute("aria-describedby")).toBe("foo");
     vi.advanceTimersByTime(400);
   });
 
@@ -276,7 +272,7 @@ describe("initTooltips", () => {
     pointerOver(a);
     vi.advanceTimersByTime(1000);
     const t = tip()!;
-    expect(t.parentElement).toBe(d); // appended into the dialog, not document.body
+    expect(t.parentElement).toBe(d);
   });
 });
 
@@ -295,9 +291,7 @@ describe("focus-triggered tooltips (:focus-visible gate)", () => {
   });
 
   it("stays quiet on programmatic or pointer focus (no :focus-visible)", () => {
-    // The regression this gate exists for: a modal opening and focusing its
-    // first control (or a focus-trap restoring focus) popped a tooltip with
-    // no hover and no keypress.
+    // A modal focusing its first control must not pop a tooltip with no hover.
     initTooltips();
     const a = anchor("hint");
     vi.spyOn(a, "matches").mockReturnValue(false);
@@ -336,8 +330,7 @@ describe("focus-triggered tooltips (:focus-visible gate)", () => {
 
 describe("dismissal triggers are specific", () => {
   it("leaves the tooltip up for a keydown that is not Escape", () => {
-    // Only Escape dismisses: a tooltip that vanished on Tab or on any typed
-    // character would make hover help unreadable for a keyboard user.
+    // Only Escape dismisses; Tab or typed characters must leave it up.
     initTooltips();
     const a = anchor("Hi");
     pointerOver(a);
@@ -349,8 +342,7 @@ describe("dismissal triggers are specific", () => {
   });
 
   it("hides on a nested scroller's scroll, which does not bubble", () => {
-    // Real scroll events do not bubble, so only a CAPTURE-phase document
-    // listener sees a scroll inside a nested scroll container.
+    // Scroll events do not bubble; only a capture-phase listener sees a nested one.
     initTooltips();
     const scroller = document.createElement("div");
     document.body.appendChild(scroller);
@@ -369,21 +361,20 @@ describe("dismissal triggers are specific", () => {
     const b = anchor("B");
     pointerOver(a);
     vi.advanceTimersByTime(500);
-    pointerOut(b, null); // a different anchor's leave must not hide A's tooltip
+    pointerOut(b, null);
     expect(tip()!.classList.contains("is-leaving")).toBe(false);
   });
 });
 
 describe("re-entering an anchor the tooltip already tracks", () => {
   it("does not restart a pending tooltip's delay", () => {
-    // pointerover fires again for every descendant the pointer crosses; a
-    // restarted timer would mean a tooltip that never appears on a rich anchor.
+    // pointerover refires per descendant crossed; a restart would delay forever.
     initTooltips();
     const a = anchor("Hi");
     pointerOver(a);
     vi.advanceTimersByTime(400);
     pointerOver(a);
-    vi.advanceTimersByTime(100); // the original 500ms deadline
+    vi.advanceTimersByTime(100);
     expect(tip()).not.toBeNull();
   });
 
@@ -395,7 +386,7 @@ describe("re-entering an anchor the tooltip already tracks", () => {
     const first = tip();
     expect(first).not.toBeNull();
     pointerOver(a);
-    expect(tip()).toBe(first); // the same node, not torn down and re-created
+    expect(tip()).toBe(first);
   });
 });
 
@@ -407,7 +398,7 @@ describe("handing the tooltip from one anchor to another", () => {
     pointerOver(a);
     vi.advanceTimersByTime(500);
     expect(a.getAttribute("aria-describedby")).not.toBeNull();
-    pointerOver(b); // the controller tears A down itself
+    pointerOver(b);
     expect(tipCount()).toBe(0);
     expect(a.getAttribute("aria-describedby")).toBeNull();
   });
@@ -417,7 +408,7 @@ describe("handing the tooltip from one anchor to another", () => {
     const a = anchor("A");
     const b = anchor("B");
     pointerOver(a);
-    vi.advanceTimersByTime(400); // A pending, 100ms short of its deadline
+    vi.advanceTimersByTime(400);
     pointerOver(b);
     vi.advanceTimersByTime(500);
     expect(tipCount()).toBe(1);
@@ -425,17 +416,15 @@ describe("handing the tooltip from one anchor to another", () => {
   });
 
   it("never paints the tooltip of an anchor the pointer already left", () => {
-    // The superseded timer must be dead, not merely outlived: A's deadline
-    // falls inside B's wait, so a surviving timer paints A while B is pending
-    // — and the end state converges again afterwards, which is why only this
-    // mid-wait moment can see it.
+    // A's deadline falls inside B's wait, so a surviving timer would paint A
+    // while B is pending — only observable at this mid-wait moment.
     initTooltips();
     const a = anchor("A");
     const b = anchor("B");
     pointerOver(a);
     vi.advanceTimersByTime(400);
-    pointerOver(b); // A's pending timer is cancelled here
-    vi.advanceTimersByTime(100); // A's original 500ms deadline passes
+    pointerOver(b);
+    vi.advanceTimersByTime(100);
     expect(tip()).toBeNull();
   });
 
@@ -446,27 +435,24 @@ describe("handing the tooltip from one anchor to another", () => {
     vi.advanceTimersByTime(500);
     pointerOut(a, null);
     expect(tip()!.classList.contains("is-leaving")).toBe(true);
-    pointerOver(a); // re-hover mid-fade
+    pointerOver(a);
     vi.advanceTimersByTime(1);
-    expect(tipCount()).toBe(1); // the fading node is gone, not stacked under the new one
+    expect(tipCount()).toBe(1);
   });
 
   it("an older tooltip's fade is cancelled outright, so it cannot reach the newer one", () => {
-    // A superseded fade used to be left running and made harmless by a guard in
-    // its own finalizer ("only reset the state I own"). It is now cancelled when
-    // the controller tears the old tip down, so there is no late finalizer to
-    // guard against — and B stays live and dismissable across the window where
-    // A's ceiling would have fired.
+    // A superseded fade is cancelled outright, so B stays dismissable across the
+    // window where A's ceiling would have fired.
     initTooltips({ delayWarm: 0 });
     const a = anchor("A");
     const b = anchor("B");
     pointerOver(a);
     vi.advanceTimersByTime(500);
-    pointerOut(a, null); // A begins fading; its ceiling would land 400ms out
+    pointerOut(a, null);
     pointerOver(b);
     vi.advanceTimersByTime(1);
     expect(liveTip()!.textContent).toBe("B");
-    vi.advanceTimersByTime(600); // past A's ceiling: nothing of A's runs
+    vi.advanceTimersByTime(600);
     expect(liveTip()!.textContent).toBe("B");
     pointerOut(b, null);
     vi.advanceTimersByTime(400);
@@ -482,14 +468,13 @@ describe("the warm window", () => {
     pointerOver(a);
     vi.advanceTimersByTime(500);
     expect(tip()!.textContent).toBe("A");
-    pointerOver(b); // showing A opened the warm window
+    pointerOver(b);
     vi.advanceTimersByTime(1);
     expect(liveTip()!.textContent).toBe("B");
   });
 
   it("still makes the first tooltip of a cold group wait the cold delay", () => {
-    // delayWarm only applies once the group IS warm; the opening hover of a
-    // cold group pays delayCold whatever delayWarm says.
+    // delayWarm only applies once warm; a cold group's opening hover pays delayCold.
     initTooltips({ delayWarm: 0 });
     const a = anchor("A");
     pointerOver(a);
@@ -503,7 +488,7 @@ describe("the warm window", () => {
     const b = anchor("B");
     pointerOver(a);
     vi.advanceTimersByTime(100);
-    pointerOut(a, null); // cancels the pending tooltip; the group warms anyway
+    pointerOut(a, null);
     pointerOver(b);
     vi.advanceTimersByTime(1);
     expect(tip()!.textContent).toBe("B");
@@ -515,18 +500,14 @@ describe("show-time guards and placement", () => {
     initTooltips();
     const a = anchor("Hi");
     pointerOver(a);
-    a.remove(); // a re-render dropped the anchor mid-delay
+    a.remove();
     vi.advanceTimersByTime(1000);
     expect(tip()).toBeNull();
   });
 
   it("positions the tooltip above its anchor, centered", () => {
-    // Asserted as a relationship, not as two magic pixel values: a real browser
-    // measures the tooltip (about 18px tall for one line), so the old
-    // `top === 194px` / `left === 120px` pair only held because the emulator
-    // this replaced reported every box as 0x0. The contract is that the
-    // tooltip's bottom edge sits GAP above the anchor top and its horizontal
-    // centre matches the anchor's, which is true at any measured size.
+    // Asserted as a relationship, not magic pixels: the tooltip's bottom edge
+    // sits GAP above the anchor top, centred horizontally, at any measured size.
     stubViewport(2000, 2000);
     initTooltips();
     const a = anchor("Hi");
@@ -537,9 +518,7 @@ describe("show-time guards and placement", () => {
     const box = t.getBoundingClientRect();
     expect(t.style.position).toBe("fixed");
     expect(box.height).toBeGreaterThan(0);
-    // Anchor top 200, 6px gap.
     expect(parseFloat(t.style.top) + box.height).toBe(194);
-    // Anchor centre: 100 + 40 / 2.
     expect(parseFloat(t.style.left) + box.width / 2).toBe(120);
   });
 
@@ -586,8 +565,7 @@ describe("teardown leaves the document as it found it", () => {
     initTooltips();
     _resetForTest();
 
-    // One controller on `document` is the whole design, so a listener it fails
-    // to give back accumulates across every init/reset cycle an app performs.
+    // A listener not given back accumulates across every init/reset cycle.
     for (const type of ["pointerover", "pointerout", "focusin", "focusout", "keydown", "scroll"]) {
       expect(callsFor(docAdd, type)).toBe(1);
       expect(callsFor(docRemove, type)).toBe(1);
@@ -602,10 +580,8 @@ describe("teardown leaves the document as it found it", () => {
     initTooltips();
     _resetForTest();
 
-    // scroll is registered in the capture phase (it does not bubble from a
-    // nested scroller). removeEventListener matches on that flag, so dropping
-    // it leaves the listener installed for the life of the page. The engine here
-    // honours the flag, so the leak is real rather than notional.
+    // scroll is registered capture-phase; removeEventListener must match the flag
+    // or the listener leaks for the life of the page.
     expect(docRemove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
   });
 
@@ -627,21 +603,20 @@ describe("teardown leaves the document as it found it", () => {
 
 describe("the warm window's edges", () => {
   it("a hover exactly at the warm deadline waits the cold delay, not the warm one", () => {
-    // The window is [hide, hide + cooldown): at the deadline itself the group is
-    // cold again, so "warm" can never outlast the cooldown the caller asked for.
+    // The window is [hide, hide + cooldown): at the deadline the group is cold again.
     initTooltips({ delayCold: 500, delayWarm: 100, cooldown: 500 });
     const a = anchor("A");
     const b = anchor("B");
 
     pointerOver(a);
-    vi.advanceTimersByTime(500); // A shows
-    pointerOut(a, null); // the warm window now ends 500ms out
-    vi.advanceTimersByTime(500); // ...and this is that exact moment
+    vi.advanceTimersByTime(500);
+    pointerOut(a, null);
+    vi.advanceTimersByTime(500);
 
     pointerOver(b);
-    vi.advanceTimersByTime(100); // the warm delay would have painted B here
+    vi.advanceTimersByTime(100);
     expect(liveTip()).toBeNull();
-    vi.advanceTimersByTime(400); // the cold delay is what B actually waits
+    vi.advanceTimersByTime(400);
     expect(liveTip()!.textContent).toBe("B");
   });
 
@@ -685,7 +660,7 @@ describe("pointer traffic that is not over an anchor", () => {
     box.appendChild(a);
     document.body.appendChild(box);
 
-    pointerOver(box); // closest() looks up, not down: the box is not an anchor
+    pointerOver(box);
     vi.advanceTimersByTime(1000);
 
     expect(tip()).toBeNull();
@@ -694,24 +669,22 @@ describe("pointer traffic that is not over an anchor", () => {
 
 describe("a superseded fade", () => {
   it("is cancelled outright, so only one fade is ever in flight", () => {
-    // Two fades used to be able to run at once, with each finalizer guarded to
-    // touch only its own tip. Superseding now CANCELS the older fade, so the
-    // older tip's ceiling never arrives and cannot adopt the newer tip — and
-    // the newer tip is still cleaned up by whatever shows next.
+    // Superseding cancels the older fade outright, so its ceiling never arrives
+    // and cannot adopt the newer tip.
     initTooltips({ delayCold: 0, delayWarm: 0, cooldown: 0 });
     const a = anchor("A");
     const b = anchor("B");
 
     pointerOver(a);
-    vi.advanceTimersByTime(1); // A visible
-    pointerOut(a, null); // A begins fading
-    pointerOver(b); // takes A's node down early and cancels its fade
-    vi.advanceTimersByTime(1); // B visible
-    expect(tipCount()).toBe(1); // A's node is gone, not stacked under B
-    pointerOut(b, null); // B fades — the only fade in flight
-    vi.advanceTimersByTime(600); // past where A's ceiling would have been
+    vi.advanceTimersByTime(1);
+    pointerOut(a, null);
+    pointerOver(b);
+    vi.advanceTimersByTime(1);
+    expect(tipCount()).toBe(1);
+    pointerOut(b, null);
+    vi.advanceTimersByTime(600);
 
-    pointerOver(a); // whatever owns the state now must have cleared B's node
+    pointerOver(a);
     expect(tipCount()).toBe(0);
   });
 });
@@ -724,13 +697,12 @@ describe("handing an app-owned aria-describedby back", () => {
     pointerOver(a);
     vi.advanceTimersByTime(500);
     const t = tip()!;
-    // The app rewrites the attribute while the tooltip is up — its formatting is
-    // its own business, and the tooltip still has to leave nothing behind.
+    // The app may rewrite the attribute while the tooltip is up; the tooltip must
+    // still leave nothing behind.
     a.setAttribute("aria-describedby", ` ${t.id} `);
 
     pointerOut(a, null);
 
-    // An empty aria-describedby is worse than none: it points at nothing.
     expect(a.hasAttribute("aria-describedby")).toBe(false);
   });
 });

@@ -1,7 +1,5 @@
-// engine.ts is DOM-free, so these tests do not need a DOM. The pragma is for
-// the mutation harness: Stryker's vitest runner does not run test files whose
-// environment differs from the rest of the project, so without it none of the
-// assertions below are ever executed against a toast-engine mutant.
+// DOM-free by design; kept in the browser project so Stryker's vitest runner
+// (which skips files whose environment differs) still executes these.
 import { describe, it, expect, vi, afterEach } from "vitest";
 import fc from "fast-check";
 
@@ -119,7 +117,7 @@ describe("ToastEngine", () => {
     engine.show("visible");
     engine.show("q1");
     engine.show("q2");
-    engine.show("q3"); // drops q1
+    engine.show("q3");
     expect(engine.visibleCount).toBe(1);
     expect(engine.queuedCount).toBe(2);
   });
@@ -134,7 +132,7 @@ describe("ToastEngine", () => {
     });
     engine.show("visible");
     const dropped = engine.show("will-queue");
-    engine.show("evicts-the-previous"); // drops "will-queue"
+    engine.show("evicts-the-previous");
     expect(engine.queuedCount).toBe(1);
     expect(() => {
       dropped();
@@ -159,7 +157,7 @@ describe("ToastEngine", () => {
     mounts[0]!.ctx.resume();
     expect(mounts[0]!.paused).toBe(false);
 
-    vi.advanceTimersByTime(599); // 600 remained, not yet elapsed
+    vi.advanceTimersByTime(599);
     expect(engine.visibleCount).toBe(1);
     vi.advanceTimersByTime(2);
     expect(engine.visibleCount).toBe(0);
@@ -191,7 +189,7 @@ describe("ToastEngine", () => {
     const engine = new ToastEngine<FakeToast>({ view, maxVisible: 2, defaultDuration: 0 });
     engine.show("1");
     engine.show("2");
-    engine.show("3"); // queued
+    engine.show("3");
     engine.clear();
     expect(engine.visibleCount).toBe(0);
     expect(engine.queuedCount).toBe(0);
@@ -226,7 +224,7 @@ describe("ToastEngine", () => {
           const dismissers: (() => void)[] = [];
           for (const isShow of ops) {
             if (isShow) {
-              dismissers.push(engine.show("m", { level: "error" })); // sticky
+              dismissers.push(engine.show("m", { level: "error" }));
             } else {
               const dismiss = dismissers.shift();
               if (dismiss) {
@@ -286,7 +284,7 @@ describe("ToastEngine: mode replace (single-slot latest-wins)", () => {
     const engine = new ToastEngine<FakeToast>({ view, mode: "replace", defaultDuration: 0 });
     const dismissFirst = engine.show("first");
     engine.show("second");
-    dismissFirst(); // must not throw or touch the new toast
+    dismissFirst();
     expect(engine.visibleCount).toBe(1);
     expect(mounts[1]?.left).toBe(false);
     expect(mounts[1]?.removed).toBe(false);
@@ -329,7 +327,7 @@ describe("ToastEngine: dismissing a queued toast", () => {
     const dismissQueued = engine.show("queued");
 
     dismissVisible();
-    mounts[0]!.done?.(); // leave finished -> the queued toast is promoted
+    mounts[0]!.done?.();
     expect(mounts[1]!.data.message).toBe("queued");
 
     dismissQueued();
@@ -382,7 +380,6 @@ describe("ToastEngine: per-toast targeting", () => {
     mounts[0]!.ctx.resume(); // never paused: nothing to resume
     expect(mounts[0]!.resumes).toBe(0);
 
-    // ...and the original deadline still stands.
     vi.advanceTimersByTime(400);
     expect(engine.visibleCount).toBe(0);
   });
@@ -491,10 +488,8 @@ describe("ToastEngine: timer hygiene", () => {
 
 describe("ToastEngine: a dismiss that lands mid-promotion", () => {
   it("dismisses a queued toast that is dismissed from inside the view's mount", () => {
-    // The queue shift and the dismiss-fn rebind straddle view.mount(), so a
-    // dismiss arriving from inside mount() finds neither the queued entry (it
-    // has been shifted off) nor a mounted dismiss fn (not bound yet). It must
-    // not be swallowed: the toast has to leave again.
+    // The queue shift and dismiss-fn rebind straddle view.mount(), so a dismiss
+    // arriving from inside mount() finds neither the queued entry nor a bound fn.
     const { view, mounts } = makeFakeView(true);
     let dismissQueued: (() => void) | null = null;
     const dismissingView: ToastView<FakeToast> = {
@@ -515,7 +510,7 @@ describe("ToastEngine: a dismiss that lands mid-promotion", () => {
     const dismissVisible = engine.show("visible");
     dismissQueued = engine.show("queued");
 
-    dismissVisible(); // frees the slot: "queued" is promoted, then dismissed
+    dismissVisible();
 
     expect(mounts[1]!.data.message).toBe("queued");
     expect(mounts[1]!.left).toBe(true);
@@ -528,11 +523,8 @@ describe("ToastEngine: a countdown that drained while the toast was held", () =>
     vi.useRealTimers();
   });
 
-  // A throttled or backgrounded tab lets the wall clock pass a toast's deadline
-  // before its pending setTimeout runs. Hovering/focusing in that window drains
-  // `remaining` to 0 and clears the timer, so nothing is armed to auto-dismiss
-  // it any more. Holding it there is the documented policy; RELEASING it has to
-  // let the expired countdown finish, or the toast is on screen forever.
+  // A backgrounded tab can let the wall clock pass a toast's deadline before its
+  // setTimeout runs; hovering then drains `remaining` to 0 with no timer armed.
   function expireWhileHeld(): {
     engine: ToastEngine<FakeToast>;
     mounts: FakeToast[];
@@ -541,7 +533,7 @@ describe("ToastEngine: a countdown that drained while the toast was held", () =>
     const { view, mounts } = makeFakeView(true);
     const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1, defaultDuration: 1000 });
     engine.show("t", { level: "info", duration: 1000 });
-    vi.setSystemTime(Date.now() + 1500); // clock jumps the deadline; no timer runs
+    vi.setSystemTime(Date.now() + 1500);
     mounts[0]!.ctx.pause();
     return { engine, mounts };
   }
@@ -549,9 +541,7 @@ describe("ToastEngine: a countdown that drained while the toast was held", () =>
   it("keeps a toast whose countdown drained while it is still hovered or focused", () => {
     const { engine, mounts } = expireWhileHeld();
 
-    // docs/toast.md: hover/focus pauses the countdown, "so a focused toast
-    // never auto-dismisses under the cursor". An expired countdown is no
-    // exception: while the user still holds the toast it stays put.
+    // Hover/focus pauses the countdown; an expired one is no exception.
     vi.advanceTimersByTime(10_000);
     expect(mounts[0]!.left).toBe(false);
     expect(engine.visibleCount).toBe(1);
@@ -562,8 +552,7 @@ describe("ToastEngine: a countdown that drained while the toast was held", () =>
 
     mounts[0]!.ctx.resume();
 
-    // Its time is up and no timer is left to notice, so the release is the last
-    // chance to run the auto-dismiss the toast was promised.
+    // No timer is left to notice; release is the last chance to auto-dismiss.
     expect(mounts[0]!.left).toBe(true);
     expect(engine.visibleCount).toBe(0);
     expect(vi.getTimerCount()).toBe(0);
@@ -573,10 +562,9 @@ describe("ToastEngine: a countdown that drained while the toast was held", () =>
     vi.useFakeTimers();
     const { view, mounts } = makeFakeView(true);
     const engine = new ToastEngine<FakeToast>({ view, maxVisible: 1 });
-    engine.show("e", { level: "error" }); // sticky: duration 0, so remaining 0
+    engine.show("e", { level: "error" });
 
-    // A sticky toast sits at remaining = 0 from birth, which must not be read as
-    // an expired countdown: hovering it and letting go dismisses nothing.
+    // remaining=0 from birth must not be read as an expired countdown.
     mounts[0]!.ctx.pause();
     mounts[0]!.ctx.resume();
 

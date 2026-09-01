@@ -99,7 +99,6 @@ export class ToastEngine<H> {
   constructor(opts: ToastEngineOptions<H>) {
     this.view = opts.view;
     this.replace = opts.mode === "replace";
-    // Replace mode is single-slot by definition; maxVisible is ignored there.
     this.maxVisible = this.replace ? 1 : Math.max(1, opts.maxVisible ?? DEFAULT_MAX_VISIBLE);
     this.maxQueue = Math.max(0, opts.maxQueue ?? DEFAULT_MAX_QUEUE);
     this.defaultDuration = opts.defaultDuration ?? DEFAULT_DURATION_MS;
@@ -120,8 +119,7 @@ export class ToastEngine<H> {
     const retry = opts?.retry;
     const id = ++this.idSeq;
 
-    // Latest-wins: instantly remove whatever is showing (no leave animation —
-    // the new message must not visually coexist with or wait for the old one).
+    // No leave animation — the new message must not coexist with or wait for the old one.
     if (this.replace && this.visible.length > 0) {
       for (const t of [...this.visible]) {
         if (t.timer !== null) {
@@ -234,10 +232,8 @@ export class ToastEngine<H> {
 
   private enqueue(entry: QueuedToast): void {
     if (this.maxQueue <= 0) {
-      // No queue capacity — drop the new toast (its dismiss fn stays a no-op).
       return;
     }
-    // Drop the oldest queued toast(s) to stay within the cap, then append.
     while (this.queue.length >= this.maxQueue) {
       this.queue.shift();
     }
@@ -285,13 +281,10 @@ export class ToastEngine<H> {
       return;
     }
     if (t.remaining <= 0) {
-      // The countdown drained while the toast was held: a throttled or
-      // backgrounded tab can let the wall clock pass the deadline before the
-      // pending timeout runs, and pausing in that window takes `remaining` to 0
-      // with no timer left to fire. Releasing the hold is therefore the last
-      // chance to run the auto-dismiss this toast was promised — without this
-      // it stays on screen until it is clicked, Escaped or cleared. (Sticky
-      // toasts never reach here: `duration <= 0` returns above.)
+      // A backgrounded tab can let the wall clock pass the deadline before the
+      // pending timeout runs, draining `remaining` to 0 with no timer left to
+      // fire. Releasing the hold is the last chance to run the promised
+      // auto-dismiss, or it stays on screen until clicked/Escaped/cleared.
       this.dismiss(id);
       return;
     }

@@ -2,9 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 import { createPopup, closePopupGroup } from "./popup.js";
 
-// The install timer (listener arming) is a setTimeout(0) and the leave
-// fallback a setTimeout(400); both are driven with fake timers. popup never
-// measures or positions anything, so nothing here depends on layout.
+// Fake timers drive the install (setTimeout 0) and leave-fallback (setTimeout 400) timers.
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -46,10 +44,8 @@ describe("popup: reveal lifecycle", () => {
   it("show() flushes the un-hide with a layout read before is-open lands", () => {
     const { panel } = fixture();
     const pop = createPopup(panel);
-    // Without a forced reflow between `hidden = false` and `is-open`, the
-    // browser coalesces both into one frame and the CSS transition from the
-    // resting state never plays. A forced reflow leaves no observable state
-    // behind, so that the read HAPPENS is the only thing a test can pin.
+    // No forced reflow between hidden=false and is-open means the browser
+    // coalesces both into one frame and the transition never plays.
     const read = vi.spyOn(panel, "getBoundingClientRect");
     pop.show();
     expect(read).toHaveBeenCalled();
@@ -70,7 +66,6 @@ describe("popup: reveal lifecycle", () => {
     expect(pop.isOpen).toBe(false);
     expect(panel.classList.contains("is-open")).toBe(false);
     expect(panel.classList.contains("is-leaving")).toBe(true);
-    // Still visible until the transition (fallback) completes.
     expect(panel.hidden).toBe(false);
 
     finishLeave();
@@ -107,7 +102,7 @@ describe("popup: reveal lifecycle", () => {
     expect(panel.classList.contains("is-leaving")).toBe(false);
     expect(pop.isOpen).toBe(true);
 
-    // The stale leave must not fire later and yank the panel hidden.
+    // The stale leave must not fire later and hide the panel.
     finishLeave();
     expect(panel.hidden).toBe(false);
     expect(panel.classList.contains("is-open")).toBe(true);
@@ -160,7 +155,6 @@ describe("popup: light dismiss", () => {
     const { panel } = fixture();
     const pop = createPopup(panel);
     pop.show();
-    // Same tick as show(): no listeners yet.
     clickOn(document.body);
     expect(pop.isOpen).toBe(true);
     armListeners();
@@ -296,11 +290,10 @@ describe("popup: groups", () => {
     const a = createPopup(fixture().panel, { group: "g" });
     const b = createPopup(fixture().panel, { group: "g" });
     a.show();
-    // b stays closed; closing the group must only touch open members.
     closePopupGroup("g");
     expect(a.isOpen).toBe(false);
     expect(b.isOpen).toBe(false);
-    closePopupGroup("does-not-exist"); // no-op, no throw
+    closePopupGroup("does-not-exist");
     a.dispose();
     b.dispose();
   });
@@ -314,7 +307,7 @@ describe("popup: setOptions", () => {
     armListeners();
 
     pop.setOptions({ closeOnOutside: false });
-    armListeners(); // the re-arm is deferred a tick, like show()
+    armListeners();
     clickOn(document.body);
     expect(pop.isOpen).toBe(true);
 
@@ -332,7 +325,6 @@ describe("popup: setOptions", () => {
     pressEscape(panel);
     expect(pop.isOpen).toBe(true);
 
-    // Clearing restores the default (true).
     pop.setOptions({ closeOnEscape: undefined });
     armListeners();
     pressEscape(panel);
@@ -357,8 +349,7 @@ describe("disconnected-panel hosting under a modal (no trigger to derive it from
     document.body.appendChild(modal);
     modal.showModal();
 
-    // No trigger: the old rule fell back to <body>, where the open modal
-    // inerts the panel. The core now falls back to the topmost open dialog.
+    // No trigger: falls back to the topmost open dialog (was <body>).
     const loose = document.createElement("div");
     const pop = createPopup(loose);
     pop.show();
@@ -380,8 +371,7 @@ describe("disconnected-panel hosting under a modal (no trigger to derive it from
     document.body.appendChild(topmost);
     topmost.showModal();
 
-    // The trigger lives in `outer`, so its panel belongs there — the
-    // trigger-derived host wins over the global topmost fallback.
+    // Trigger-derived host wins over the global topmost fallback.
     const panel = document.createElement("div");
     const pop = createPopup(panel, { trigger });
     pop.show();
@@ -415,14 +405,14 @@ describe("popup: hide() is idempotent", () => {
     const pop = createPopup(panel);
 
     pop.show();
-    pop.hide(); // fade 1
+    pop.hide();
     vi.advanceTimersByTime(300);
-    pop.show(); // cancels fade 1
-    pop.hide(); // fade 2, with its own full window
+    pop.show();
+    pop.hide();
 
-    vi.advanceTimersByTime(100); // fade 1's old deadline
+    vi.advanceTimersByTime(100);
     expect(panel.hidden).toBe(false);
-    vi.advanceTimersByTime(300); // fade 2's deadline
+    vi.advanceTimersByTime(300);
     expect(panel.hidden).toBe(true);
   });
 });
@@ -435,7 +425,7 @@ describe("popup: focus the controller never moved", () => {
     const pop = createPopup(panel);
 
     pop.show();
-    input.focus(); // the app moves focus in, not the controller
+    input.focus();
     pop.hide();
     expect(document.activeElement).toBe(input);
   });
@@ -447,13 +437,13 @@ describe("popup: focus the controller never moved", () => {
     trigger.focus();
     const pop = createPopup(panel, { trigger, initialFocus: input });
 
-    pop.show(); // the controller moves focus in...
-    pop.hide(); // ...so it also takes it back out
+    pop.show();
+    pop.hide();
     expect(document.activeElement).toBe(trigger);
 
     pop.setOptions({ initialFocus: undefined });
     pop.show();
-    input.focus(); // this time the app owns the focus move
+    input.focus();
     pop.hide();
     expect(document.activeElement).toBe(input);
   });
@@ -466,7 +456,7 @@ describe("popup: groups, on leaving one", () => {
 
     b.setOptions({ group: "g2" });
     b.show();
-    a.show(); // a is alone in g1 now: it must not close b
+    a.show();
     expect(b.isOpen).toBe(true);
     expect(a.isOpen).toBe(true);
 
@@ -477,15 +467,14 @@ describe("popup: groups, on leaving one", () => {
 
 describe("popup: the group registry outlives its members", () => {
   it("one member leaving a group leaves the rest coordinating", () => {
-    // Unregistering the LAST member drops the group; unregistering any other
-    // must leave the group standing, or its survivors stop seeing each other.
+    // Unregistering the LAST member drops the group; any other must not.
     const a = createPopup(fixture().panel, { group: "g" });
     const b = createPopup(fixture().panel, { group: "g" });
     const c = createPopup(fixture().panel, { group: "g" });
 
-    c.dispose(); // g still holds a and b
+    c.dispose();
     a.show();
-    b.show(); // single-open still applies between the survivors
+    b.show();
 
     expect(a.isOpen).toBe(false);
     expect(b.isOpen).toBe(true);
@@ -497,9 +486,9 @@ describe("popup: the group registry outlives its members", () => {
     const a = createPopup(fixture().panel, { group: "g" });
     const b = createPopup(fixture().panel, { group: "g" });
 
-    a.dispose(); // a is no longer a member of g
-    a.show(); // ...so opening it must not close a peer,
-    b.show(); // ...and a peer opening must not close it.
+    a.dispose();
+    a.show();
+    b.show();
 
     expect(a.isOpen).toBe(true);
     expect(b.isOpen).toBe(true);
@@ -514,12 +503,11 @@ describe("popup: nothing is left armed", () => {
     const pop = createPopup(panel);
 
     pop.show();
-    expect(vi.getTimerCount()).toBe(1); // the deferred install, and only it
+    expect(vi.getTimerCount()).toBe(1);
 
-    pop.hide(); // the install is cancelled; the leave fallback takes its place
-    panel.dispatchEvent(new Event("transitionend")); // ends the leave, clearing its timer
-    // A pending install that outlives the popup is a callback holding the
-    // controller alive after it closed.
+    pop.hide();
+    panel.dispatchEvent(new Event("transitionend"));
+    // A pending install outliving the popup keeps the controller alive after close.
     expect(vi.getTimerCount()).toBe(0);
     pop.dispose();
   });
@@ -530,8 +518,7 @@ describe("popup: nothing is left armed", () => {
 
     pop.setOptions({ closeOnOutside: false });
 
-    // Only an OPEN popup re-arms dismissal: a closed one has nothing to re-arm,
-    // and must not schedule work that fires after the caller moved on.
+    // Only an OPEN popup re-arms dismissal; a closed one must schedule nothing.
     expect(vi.getTimerCount()).toBe(0);
     pop.dispose();
   });
@@ -548,8 +535,7 @@ describe("popup: nothing is left armed", () => {
     pop.dispose();
 
     expect(dismissal(add)).toBe(0);
-    // Not even a defensive removal: the controller starts disarmed, so there is
-    // nothing of its to take off the document.
+    // Controller starts disarmed, so there is nothing of its to remove.
     expect(dismissal(remove)).toBe(0);
   });
 });
@@ -560,18 +546,16 @@ describe("popup: a panel handed to a new owner mid-fade", () => {
     const first = createPopup(panel);
     first.show();
     armListeners();
-    first.hide(); // the leave is in flight: is-leaving is on, the fallback armed
+    first.hide();
 
-    // The caller reuses the element for a fresh popup — the case the finalizer's
-    // is-leaving re-check exists for. The new owner clears is-leaving on show().
+    // The finalizer's is-leaving re-check exists for exactly this reuse case.
     const second = createPopup(panel);
     second.show();
     expect(panel.hidden).toBe(false);
 
-    finishLeave(); // the first controller's stale finalizer comes due here
+    finishLeave();
 
-    // Finalizing regardless of the class would set [hidden] on a panel the new
-    // owner has open: an open popup, invisible, with nothing to hint why.
+    // Finalizing regardless of class would hide a panel the new owner has open.
     expect(panel.hidden).toBe(false);
     expect(second.isOpen).toBe(true);
     second.dispose();
@@ -597,15 +581,14 @@ describe("popup: dispose disarms even what a callback re-armed", () => {
     pop.show();
     armListeners();
     reopen = true;
-    pop.dispose(); // hide() → onClose → show(), which arms a fresh install
+    pop.dispose();
     reopen = false;
-    armListeners(); // an install that outlived dispose would land here
+    armListeners();
     expect(closes).toBe(1);
 
     clickOn(document.body);
 
-    // Dismissal wiring installed after the teardown began still belongs to a
-    // disposed controller: it must not be listening to the document at all.
+    // Wiring installed after teardown began still belongs to a disposed controller.
     expect(closes).toBe(1);
   });
 });

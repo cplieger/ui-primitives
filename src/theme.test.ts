@@ -99,11 +99,11 @@ describe("createTheme", () => {
     const onChange = vi.fn();
     const t = createTheme({ storageKey: "k", storage: memoryStorage(), onChange });
     expect(t.resolved()).toBe("light");
-    fireSystemChange(true); // -> dark
+    fireSystemChange(true);
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     expect(onChange).toHaveBeenCalledWith("dark");
-    t.set("light"); // pin
-    fireSystemChange(false); // system flips, but pinned stays light
+    t.set("light");
+    fireSystemChange(false);
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
     t.dispose();
   });
@@ -131,7 +131,7 @@ describe("createTheme", () => {
   it("ignores an OS change once a concrete choice is pinned", () => {
     const onChange = vi.fn();
     const t = createTheme({ storageKey: "k", storage: memoryStorage(), onChange });
-    t.set("light"); // pin
+    t.set("light");
     onChange.mockClear();
     fireSystemChange(true); // OS flips to dark
     expect(onChange).not.toHaveBeenCalled();
@@ -199,7 +199,7 @@ describe("themeInitSnippet", () => {
     const snippet = themeInitSnippet("k");
     document.documentElement.removeAttribute("data-theme");
     (0, eval)(snippet);
-    // Storage threw → catch runs → resolves system (dark), not a flash of light.
+    // catch resolves system (dark), not a flash of light.
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     spy.mockRestore();
   });
@@ -210,8 +210,7 @@ describe("createTheme — default localStorage adapter", () => {
     localStorage.removeItem("dt");
     const t = createTheme({ storageKey: "dt" });
     t.set("dark");
-    expect(localStorage.getItem("dt")).toBe("dark"); // persisted to the bare key
-    // A fresh controller reads the same key back.
+    expect(localStorage.getItem("dt")).toBe("dark");
     const t2 = createTheme({ storageKey: "dt" });
     expect(t2.get()).toBe("dark");
     t.dispose();
@@ -236,10 +235,10 @@ describe("createTheme — custom storage adapter", () => {
       },
     };
     const t = createTheme({ storageKey: "unused", storage });
-    expect(getCalls).toBeGreaterThan(0); // read the stored preference on creation
+    expect(getCalls).toBeGreaterThan(0);
     expect(t.get()).toBe("dark");
     t.set("light");
-    expect(writes).toEqual(["light"]); // wrote through the adapter
+    expect(writes).toEqual(["light"]);
     expect(stored).toBe("light");
     t.dispose();
   });
@@ -256,9 +255,7 @@ describe("createTheme — custom storage adapter", () => {
         },
       },
     });
-    // get() threw → falls back to the "system" default.
     expect(t.get()).toBe("system");
-    // set() throws, but the choice still applies in memory.
     expect(() => {
       t.set("dark");
     }).not.toThrow();
@@ -287,11 +284,11 @@ describe("createTheme — custom storage adapter", () => {
       },
     };
     const t = createTheme({ storageKey: KEY, storage: jsonAdapter });
-    expect(t.get()).toBe("dark"); // read the theme field out of the blob
-    t.set("light"); // read-modify-write the field, preserving siblings
+    expect(t.get()).toBe("dark");
+    t.set("light");
     const after = JSON.parse(localStorage.getItem(KEY) ?? "{}") as Record<string, unknown>;
     expect(after["theme"]).toBe("light");
-    expect(after["sidebar"]).toBe("open"); // sibling field untouched
+    expect(after["sidebar"]).toBe("open");
     t.dispose();
     localStorage.removeItem(KEY);
   });
@@ -317,7 +314,7 @@ describe("themeInitSnippetFromJSON", () => {
 
   it("resolves the system preference when the field is absent (2-state first paint)", () => {
     media.matches = true; // system = dark
-    localStorage.setItem("st", JSON.stringify({ sidebar: "open" })); // no theme field
+    localStorage.setItem("st", JSON.stringify({ sidebar: "open" }));
     const snippet = themeInitSnippetFromJSON("st", "theme");
     document.documentElement.removeAttribute("data-theme");
     (0, eval)(snippet);
@@ -348,7 +345,7 @@ describe("themeInitSnippetFromJSON", () => {
     const snippet = themeInitSnippetFromJSON("st", "theme");
     document.documentElement.removeAttribute("data-theme");
     (0, eval)(snippet);
-    // JSON.parse throws → catch → resolves system (dark), not a flash of light.
+    // catch resolves system (dark), not a flash of light.
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
     localStorage.removeItem("st");
   });
@@ -368,12 +365,10 @@ describe("createTheme: an engine with no matchMedia", () => {
   it("degrades to light and attaches no OS listener", () => {
     vi.stubGlobal("matchMedia", undefined);
     const t = createTheme({ storageKey: "k", storage: memoryStorage() });
-    // With no media query to consult there is no dark signal and nothing to
-    // subscribe to; consulting it anyway would throw at construction, before
-    // the controller ever gets built.
+    // No matchMedia means nothing to subscribe to; consulting it would throw.
     expect(t.getSystem()).toBe("light");
     expect(t.resolved()).toBe("light");
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    t.dispose(); // must not throw either — there is no listener to detach
+    t.dispose();
   });
 });

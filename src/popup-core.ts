@@ -1,19 +1,7 @@
 // popup-core.ts — INTERNAL lifecycle core shared by popup and popover (not a
-// subpath export; the package `exports` map does not expose it). One reveal +
-// light-dismiss implementation, two public shapes: `popup` re-exports it
-// as-is (no hooks), `popover` layers anchored placement on top through the
-// `PopupHooks` seam below. Keeping the core (and the single group registry)
-// in one module is what lets a popup and a popover share a `group`.
-//
-// The lifecycle: reveal/conceal a caller-supplied panel through the shared
-// enter/leave state-class pattern, dismiss on outside-click and Escape
-// (isolated by default), wire aria-expanded / aria-haspopup on an optional
-// trigger, coordinate single-open groups, and manage opt-in focus. Motion is
-// entirely the app's: both directions go through `runTransition`, so the state
-// the change animates from is committed for us — `is-open` transitions from the
-// panel's resting state, and `is-leaving` from a resolved `is-open`. `[hidden]`
-// follows on the panel's first transitionend, or the shared fallback ceiling
-// when no transition runs.
+// subpath export). `popup` re-exports it as-is; `popover` layers placement on
+// top through the `PopupHooks` seam. One module keeps the group registry
+// shared, so a popup and a popover can share a `group`.
 
 import { topmostOpenDialog } from "./modal-host.js";
 import { cancelTransition, runTransition } from "./transition.js";
@@ -67,10 +55,9 @@ export interface PopupController {
   readonly isOpen: boolean;
   /** The panel element (the caller's, never one this controller created). */
   readonly el: HTMLElement;
-  /** Merge-patch the options. Keys present in the patch override (an explicit
-   *  `undefined` clears back to the default); absent keys are unchanged.
-   *  Dismissal listeners re-arm if the popup is open; a `trigger` or
-   *  `haspopup` change applies on the next `show()`. */
+  /** Merge-patch the options (see {@link PopupOptionsPatch}). Dismissal
+   *  listeners re-arm if open; a `trigger`/`haspopup` change applies on the
+   *  next `show()`. */
   setOptions(patch: PopupOptionsPatch): void;
   dispose(): void;
 }
@@ -133,35 +120,25 @@ export function closePopupGroup(group: string): void {
   }
 }
 
-/**
- * Wire a caller-supplied `panel` into a revealable, light-dismissing popup.
- * The controller reveals/conceals the panel and dismisses on outside-click /
- * Escape, but never positions it and never removes it from the DOM — the
- * caller owns the element, its placement, and its motion.
- */
+/** Core implementation behind `createPopup` and `createPopover`. */
 export function createPopupCore(
   panel: HTMLElement,
   opts?: PopupOptions,
   hooks?: PopupHooks,
 ): PopupController {
-  // Mutable option state — setOptions() merge-patches this. Reads go through
-  // `current` everywhere so a patch takes effect immediately (or, where wiring
-  // is bound at arm/show time, on the next re-arm/show as documented).
+  // Reads go through `current` so a setOptions patch takes effect immediately.
   const current: PopupOptions = { ...opts };
   const stateClass = hooks?.stateClass ?? "uip-popup";
 
   let open = false;
   let listening = false;
   let installTimer: ReturnType<typeof setTimeout> | null = null;
-  // Focus-restore target, captured at show() time when `returnFocus` is set OR
-  // when the controller is about to move focus into the panel (initialFocus).
   let restoreFocus: HTMLElement | null = null;
-  // Whether show() moved focus INTO the panel. On hide() this forces focus
-  // back out even without returnFocus, so it is never stranded on the
-  // now-hidden panel (WCAG 2.4.3 focus-loss).
+  // Whether show() moved focus into the panel — hide() forces focus back out
+  // even without returnFocus, so it is never stranded on the hidden panel
+  // (WCAG 2.4.3).
   let movedFocusIn = false;
 
-  // --- Single-open group registration -----------------------------------
   const entry: GroupEntry = {
     isOpen: () => open,
     hide: () => {
@@ -183,9 +160,8 @@ export function createPopupCore(
   };
   syncGroup();
 
-  // Cancel a pending leave synchronously WITHOUT running its settle, then drop
-  // the leaving state — used by show() so a re-show mid-fade re-reveals cleanly
-  // rather than letting the stale leave fire and hide the panel again.
+  // Lets a re-show mid-fade re-reveal cleanly instead of the stale leave
+  // firing later and hiding the panel again.
   const clearLeave = (): void => {
     cancelTransition(panel);
     panel.classList.remove("is-leaving");
@@ -193,8 +169,7 @@ export function createPopupCore(
 
   const onDocClick = (e: MouseEvent): void => {
     const target = e.target;
-    // A click inside the panel — or on the trigger, whose own click handler
-    // typically toggles — keeps the popup open.
+    // A click on the trigger keeps the popup open — its own handler typically toggles.
     if (
       target instanceof Node &&
       (panel.contains(target) || current.trigger?.contains(target) === true)
@@ -206,8 +181,7 @@ export function createPopupCore(
 
   const onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === "Escape") {
-      // Isolate Escape (default): a popup opened inside a modal consumes the
-      // key so the same keystroke doesn't also close the modal underneath.
+      // Isolate by default so the same Escape doesn't also close a parent modal.
       if (current.isolateEscape ?? true) {
         e.stopPropagation();
       }
@@ -244,8 +218,7 @@ export function createPopupCore(
     hooks?.onListeners?.(false);
   };
 
-  // Defer listener install one tick so the click that opened the popup doesn't
-  // immediately trip the outside-click handler and self-close.
+  // Deferred so the click that opened the popup doesn't immediately self-close.
   const armListenersDeferred = (): void => {
     if (installTimer !== null) {
       clearTimeout(installTimer);
@@ -254,14 +227,11 @@ export function createPopupCore(
   };
 
   const show = (): void => {
-    // A show() during the leave fade cancels it and re-reveals immediately, so
-    // a rapid hide→show (or toggle) doesn't strand the panel half-faded.
     clearLeave();
     if (open) {
       hooks?.onShowWhileOpen?.();
       return;
     }
-    // Single-open: close any open peer in the same group first.
     if (groupName !== undefined) {
       const set = groups.get(groupName);
       if (set !== undefined) {
@@ -276,19 +246,13 @@ export function createPopupCore(
     panel.classList.add(stateClass);
     panel.hidden = false;
     if (!panel.isConnected) {
-      // Host a disconnected panel where it stays usable: in the trigger's
-      // nearest open <dialog> ancestor when there is one, else the topmost
-      // open dialog (covers trigger-less and virtual-anchor popups opened
-      // while a modal is up — showModal() inerts everything outside the
-      // dialog subtree, so a body-hosted panel would paint behind the modal
-      // AND be dead to interaction), else <body>. A caller-connected panel
-      // stays where the caller put it.
+      // showModal() inerts everything outside the dialog subtree, so a
+      // disconnected panel must host inside the open dialog to stay usable.
       const host = current.trigger?.closest("dialog[open]") ?? topmostOpenDialog() ?? document.body;
       host.appendChild(panel);
     }
-    // Reveal, then let a CSS *transition* from the resting state play: the
-    // primitive commits everything written above before adding is-open (an
-    // animation on is-open would play either way).
+    // runTransition commits the resting state before adding is-open, so the
+    // transition plays from it.
     runTransition(panel, {
       change: () => {
         panel.classList.add("is-open");
@@ -297,10 +261,8 @@ export function createPopupCore(
     hooks?.onReveal?.();
     current.trigger?.setAttribute("aria-expanded", "true");
     current.trigger?.setAttribute("aria-haspopup", String(current.haspopup ?? "true"));
-    // Focus management is opt-in — with neither initialFocus nor returnFocus
-    // the controller leaves focus untouched at both ends. Capture the restore
-    // target BEFORE moving initial focus, so it records whatever was focused
-    // when we opened rather than the initialFocus element.
+    // Capture the restore target before moving initial focus, so it records
+    // what was focused at open time rather than initialFocus itself.
     const returnFocus = current.returnFocus;
     const initialFocus = current.initialFocus;
     const willMoveFocusIn = initialFocus?.isConnected === true;
@@ -320,17 +282,13 @@ export function createPopupCore(
 
   const hide = (): void => {
     if (!open) {
-      // Idempotent: already closed, or a leave animation is already running
-      // (open flips to false the instant hide() begins).
       return;
     }
     open = false;
     removeListeners();
     current.trigger?.setAttribute("aria-expanded", "false");
-    // Restore focus to the target captured/supplied at show() time if it is
-    // still connected. If the controller moved focus INTO the panel but that
-    // target is gone, blur the panel so focus is not stranded on the
-    // now-hidden node. Done synchronously — focus must not wait for the fade.
+    // Synchronous — focus must not wait for the fade. Blur as a fallback when
+    // the moved-in focus has no restore target left.
     const target = restoreFocus;
     const didMoveFocusIn = movedFocusIn;
     restoreFocus = null;
@@ -343,11 +301,8 @@ export function createPopupCore(
         active.blur();
       }
     }
-    // Leave lifecycle: swap is-open → is-leaving and keep the panel in the DOM
-    // until its transition ends — or the fallback fires when there is no
-    // transition / reduced motion / an interruption — then set [hidden] and
-    // drop the state classes. Mirrors dialog/modal/toast/popover. A re-show
-    // cancels this settle (clearLeave), so it cannot yank a re-shown panel shut.
+    // A re-show cancels this settle (clearLeave), so it can't yank a
+    // re-shown panel shut.
     runTransition(panel, {
       change: () => {
         panel.classList.remove("is-open");
@@ -379,26 +334,20 @@ export function createPopupCore(
       return panel;
     },
     setOptions(patch: PopupOptionsPatch): void {
-      // Merge-patch: Object.assign copies exactly the keys PRESENT in the
-      // patch (including explicit `undefined`, which clears back to default)
-      // and leaves absent keys untouched.
       Object.assign(current, patch);
       syncGroup();
       if (open) {
-        // Re-arm dismissal listeners under the new flags. Deferred a tick for
-        // the same reason as show(): a setOptions inside the opening click's
-        // handler must not install a document listener that same click trips.
+        // Deferred for the same reason as show(): must not install a listener
+        // the same click trips.
         removeListeners();
         armListenersDeferred();
       }
     },
     dispose(): void {
       hide();
-      // Defensive: drop listeners / pending install even if already hidden.
-      // The panel is the caller's — never removed from the DOM here.
       removeListeners();
-      // The controller is gone: the trigger no longer owns a popup, so drop
-      // the ARIA it advertised (hide() only flips aria-expanded to "false").
+      // hide() only flips aria-expanded to "false"; the trigger no longer
+      // owns a popup at all, so drop the ARIA it advertised entirely.
       current.trigger?.removeAttribute("aria-haspopup");
       current.trigger?.removeAttribute("aria-expanded");
       if (groupName !== undefined) {

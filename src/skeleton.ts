@@ -2,12 +2,6 @@
 // with content" load. Pure timing, no DOM: the caller paints the skeleton and
 // the content; this owns WHEN.
 //
-// Two flickers are avoided:
-//   - a fast load flashing the skeleton for a couple of frames (show-delay:
-//     a load that settles inside the window never paints the skeleton), and
-//   - a medium load showing the skeleton then yanking it away almost at once
-//     (opt-in min-visible: once painted, the skeleton stays up long enough).
-//
 // Two consumption styles, unified:
 //
 //   // commit-style: the content render replaces the skeleton in place
@@ -80,8 +74,6 @@ export function skeletonTiming(
       return;
     }
     shownAt = Date.now();
-    // `show` either returns a teardown or nothing (a union of the two
-    // callback shapes, so plain void callbacks assign cleanly).
     const result = show();
     teardown = typeof result === "function" ? result : undefined;
   }, showDelayMs);

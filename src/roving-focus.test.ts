@@ -39,9 +39,9 @@ describe("rovingFocus", () => {
     expect(document.activeElement).toBe(items[1]);
     key(container, "ArrowDown");
     expect(document.activeElement).toBe(items[2]);
-    key(container, "ArrowDown"); // wraps
+    key(container, "ArrowDown");
     expect(document.activeElement).toBe(items[0]);
-    key(container, "ArrowUp"); // wraps back
+    key(container, "ArrowUp");
     expect(document.activeElement).toBe(items[2]);
     key(container, "Home");
     expect(document.activeElement).toBe(items[0]);
@@ -66,7 +66,7 @@ describe("rovingFocus", () => {
     items[0]?.focus();
     key(container, "ArrowRight");
     expect(document.activeElement).toBe(items[1]);
-    key(container, "ArrowDown"); // not handled
+    key(container, "ArrowDown");
     expect(document.activeElement).toBe(items[1]);
     key(container, "ArrowLeft");
     expect(document.activeElement).toBe(items[0]);
@@ -111,7 +111,7 @@ describe("rovingFocus", () => {
     // Brand-new items have no tabindex until refresh restores the invariant.
     nav.refresh();
     expect(items[0]?.getAttribute("tabindex")).toBe("-1");
-    expect(added.getAttribute("tabindex")).toBe("0"); // focused item keeps the stop
+    expect(added.getAttribute("tabindex")).toBe("0");
   });
 
   it("focusFirst focuses the first item", () => {
@@ -134,7 +134,7 @@ describe("rovingFocus", () => {
     const container = document.createElement("div");
     document.body.appendChild(container);
     const nav = rovingFocus(container, ".item");
-    key(container, "ArrowDown"); // must not throw
+    key(container, "ArrowDown");
     expect(nav).toBeDefined();
     nav.dispose();
   });
@@ -240,10 +240,8 @@ describe("rovingFocus: nothing holds focus at all", () => {
     const { container, items } = menu(["a", "b", "c"]);
     rovingFocus(container, ".item");
 
-    // The "active element is not an element" arm only exists for this state, and no
-    // engine produces it on its own: activeElement falls back to document.body,
-    // which is an HTMLElement. So it has to be forced. "The item after none" must
-    // resolve to the first item.
+    // No engine produces a non-Element activeElement on its own; it must be forced
+    // to exercise that arm.
     Object.defineProperty(document, "activeElement", { value: null, configurable: true });
     try {
       key(container, "ArrowDown");

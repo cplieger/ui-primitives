@@ -209,10 +209,7 @@ describe("iOS-safe scroll-lock (ref-counted)", () => {
   });
 
   it("restores the scroll position when the lock is released", () => {
-    // A real browser refuses to scroll a document with no overflow, so the page
-    // needs real content before scrollY can hold anything. Under the DOM
-    // emulator this suite used to run on, scrollTo wrote through to scrollY
-    // regardless of document height, so no spacer was needed.
+    // A document with no overflow cannot scroll, so scrollY needs real content.
     const spacer = document.createElement("div");
     spacer.style.height = "3000px";
     document.body.appendChild(spacer);
@@ -387,7 +384,6 @@ describe("createModal — dispose hands the element back to the platform", () =>
     m.open();
     m.dispose();
 
-    // While wired, the modal preventDefaults `cancel` so its own fade can run.
     // A disposed modal has no fade left to protect, so Escape must go back to
     // meaning what the platform says it means.
     const evt = new Event("cancel", { cancelable: true });
@@ -405,17 +401,15 @@ describe("createModal — dispose hands the element back to the platform", () =>
 
     m.dispose();
 
-    // The dialog must not be left reporting itself as open just because the
-    // engine lacks close() — the attribute is the fallback for that engine.
+    // Must not report itself open just because the engine lacks close().
     expect(m.el.open).toBe(false);
   });
 
   it("leaves the return value of an already-closed dialog alone", () => {
     const m = createModal(makeContent().content);
     m.open();
-    // The platform closes dialogs too (a <form method="dialog"> submit), and it
-    // records why in returnValue. Tearing the wrapper down must not overwrite
-    // the answer the app has not read yet.
+    // A <form method="dialog"> submit also closes the dialog and records why
+    // in returnValue; tearing the wrapper down must not overwrite it.
     m.el.close("save");
     expect(m.el.returnValue).toBe("save");
 
@@ -437,8 +431,7 @@ describe("scroll-lock accounting cannot go negative", () => {
     const b = createModal(makeContent().content);
     b.open();
 
-    // An underflowed count would leave the next modal one increment short of
-    // locking, and the page scrolls behind it.
+    // An underflowed count leaves this lock one increment short.
     expect(document.body.style.position).toBe("fixed");
     b.dispose();
   });
