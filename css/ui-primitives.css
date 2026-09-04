@@ -18,6 +18,7 @@
   --uip-z-tooltip: 10000;
   --uip-toast-offset: 1rem;
   --uip-toast-gap: 0.5rem;
+  --uip-toast-row-gap: 0.5rem;
   --uip-toast-max-width: 24rem;
   --uip-toast-enter-duration: 250ms;
   --uip-toast-enter-easing: ease;
@@ -73,9 +74,18 @@
 }
 
 /* Each toast owns pointer events; the stack itself lets clicks fall through the
- * gaps to the app beneath. */
+ * gaps to the app beneath.
+ *
+ * A COLUMN, because the retry button is a sibling of the message span: with no
+ * layout here it flows inline and lands wherever the wrapped message's last line
+ * ends, which moves with every message length. The visually-hidden dismiss hint
+ * and the progress bar are both out of flow, so the column holds exactly the
+ * message and the action row. */
 .uip-toast {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--uip-toast-row-gap, 0.5rem);
   overflow: hidden;
   pointer-events: auto;
   cursor: pointer;
@@ -97,6 +107,22 @@
   transition:
     opacity var(--uip-toast-leave-duration, 150ms) var(--uip-toast-leave-easing, ease),
     transform var(--uip-toast-leave-duration, 150ms) var(--uip-toast-leave-easing, ease);
+}
+
+/* The action shrinks to its label and sits at the inline END of its own row,
+ * rather than stretching to the column's width like the message above it. */
+.uip-toast-retry {
+  align-self: flex-end;
+}
+
+/* The progress bar is absolutely positioned and comes LAST in the DOM, so it
+ * paints over both of these. A skin with little block padding would have the bar
+ * crossing the message's descenders or the action's lower border, so the content
+ * takes the higher layer here rather than in every consumer's skin. */
+.uip-toast-msg,
+.uip-toast-retry {
+  position: relative;
+  z-index: 1;
 }
 
 /* Countdown bar. Its duration comes from the --uip-toast-duration custom
