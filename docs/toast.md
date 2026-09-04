@@ -50,6 +50,7 @@ widgetToast.info("Copied");
 | `--uip-z-toast`                                            | toast stack z-index                                            | `9999`         |
 | `--uip-toast-offset`                                       | toast stack inset from the viewport edge                       | `1rem`         |
 | `--uip-toast-gap`                                          | gap between stacked toasts                                     | `0.5rem`       |
+| `--uip-toast-row-gap`                                      | gap between a toast's message and its action row               | `0.5rem`       |
 | `--uip-toast-max-width`                                    | toast stack max inline size                                    | `24rem`        |
 | `--uip-toast-enter-duration`                               | toast enter transition                                         | `250ms`        |
 | `--uip-toast-enter-easing`                                 | toast enter easing (timing function)                           | `ease`         |
@@ -67,6 +68,12 @@ widgetToast.info("Copied");
 
 State classes toggled at runtime: the `.uip-toast` lifecycle is `is-entering` →
 `is-shown` → `is-leaving`.
+
+**Layout contract:** a toast is a flex column. The message takes the first row
+and the retry button takes a row of its own, at the inline end, separated by
+`--uip-toast-row-gap`. Style the button freely, but do not give it a margin to
+separate it from the message: the gap owns that spacing. Both rows sit above the
+countdown bar, so a skin needs no stacking rule of its own.
 
 **Countdown contract:** the toast progress bar animates from the
 `--uip-toast-duration` custom property, which the library writes inline on each
