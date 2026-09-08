@@ -3,8 +3,9 @@
 // lifecycle core (popup-core.ts, internal) which owns reveal/dismiss; popover
 // adds anchored placement, scroll/resize tracking, and the stretch mode.
 //
-// JS positioning (getBoundingClientRect + fixed) rather than the native Popover
-// API / CSS anchor positioning, for testability and consistency with tooltip.
+// No native `popover`: the top layer re-roots a panel's containing block to the
+// viewport, moving the in-flow panels `/popup` exists for, and is unconditional —
+// no z-index can lower a promoted panel back under the --uip-z-* ladder.
 
 import { createPopupCore } from "./popup-core.js";
 import type { PopupOptions, PopupOptionsPatch } from "./popup-core.js";
