@@ -18,6 +18,45 @@ function mount(triggerTag = "button"): {
   return { trigger, region };
 }
 
+/** Mount a disclosure whose region sits inside `wrapper`, appended for real:
+ *  `checkVisibility()` reads the live tree, so a detached node answers false. */
+function mountInside(wrapper: HTMLElement): {
+  trigger: HTMLElement;
+  region: HTMLElement;
+} {
+  const trigger = document.createElement("button");
+  const region = document.createElement("div");
+  region.textContent = "panel body";
+  wrapper.append(region);
+  document.body.append(trigger, wrapper);
+  return { trigger, region };
+}
+
+/** Two rendering updates, which is what it takes for the engine to have decided
+ *  a `content-visibility: auto` subtree's relevancy. */
+function nextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        resolve();
+      });
+    });
+  });
+}
+
+/** Count `scrollHeight` reads on `el`, so a case can assert the measurement did not happen. */
+function watchScrollHeight(el: HTMLElement): { reads: number } {
+  const seen = { reads: 0 };
+  Object.defineProperty(el, "scrollHeight", {
+    configurable: true,
+    get() {
+      seen.reads += 1;
+      return 120;
+    },
+  });
+  return seen;
+}
+
 /** Force `prefers-reduced-motion: reduce` to match. */
 function forceReducedMotion(): void {
   vi.spyOn(window, "matchMedia").mockReturnValue({
@@ -198,6 +237,56 @@ describe("animation edge paths", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("a region the page is not rendering", () => {
+  it("collapses without measuring inside content-visibility: hidden", () => {
+    const wrap = document.createElement("div");
+    wrap.style.contentVisibility = "hidden";
+    const { trigger, region } = mountInside(wrap);
+    const d = createDisclosure(trigger, region, { open: true });
+    const seen = watchScrollHeight(region);
+
+    d.close();
+    expect(seen.reads).toBe(0);
+    expect(region.style.height).toBe("0px");
+    d.dispose();
+  });
+
+  it("collapses without measuring inside display: none", () => {
+    const wrap = document.createElement("div");
+    wrap.style.display = "none";
+    const { trigger, region } = mountInside(wrap);
+    const d = createDisclosure(trigger, region, { open: true });
+    const seen = watchScrollHeight(region);
+
+    d.close();
+    expect(seen.reads).toBe(0);
+    expect(region.style.height).toBe("0px");
+    d.dispose();
+  });
+
+  it("still measures inside a SKIPPED content-visibility: auto subtree", async () => {
+    const spacer = document.createElement("div");
+    spacer.style.height = "4000px";
+    document.body.append(spacer);
+    const wrap = document.createElement("div");
+    wrap.style.cssText = "content-visibility: auto; contain-intrinsic-size: auto 200px";
+    const { trigger, region } = mountInside(wrap);
+    await nextFrame();
+    expect(
+      region.checkVisibility({ contentVisibilityAuto: true }),
+      "the subtree is genuinely skipped, or this case passes for the wrong reason",
+    ).toBe(false);
+
+    const d = createDisclosure(trigger, region, { open: true });
+    const seen = watchScrollHeight(region);
+
+    d.close();
+    expect(seen.reads).toBeGreaterThan(0);
+    expect(region.style.height).toBe("0px");
+    d.dispose();
   });
 });
 

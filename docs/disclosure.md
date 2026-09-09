@@ -58,3 +58,4 @@ checkbox.addEventListener("change", () => {
 - The trigger gets button semantics (`aria-expanded` reflecting the state, plus `role="button"` + `tabindex="0"` + Enter/Space handling when it isn't already a native `<button>`) and is linked to the region via `aria-controls`.
 - The region is marked `aria-hidden` **and** `inert` when collapsed, so collapsed content leaves the tab order and the accessibility tree entirely.
 - Height animates `0 ↔ auto` (with a measured-height fallback on engines that can't interpolate the `auto` keyword), honoring `prefers-reduced-motion`.
+- A region the page isn't rendering (`content-visibility: hidden`, a `display: none` ancestor, a closed `<details>`, not in a document) skips the tween and takes its target height directly — no transition can run there. A **skipped** `content-visibility: auto` region deliberately still animates, since it becomes relevant again on the next scroll.
