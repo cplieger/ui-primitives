@@ -54,6 +54,14 @@ function supportsInterpolateSize(): boolean {
   );
 }
 
+/** Whether the page is rendering `el` at all. Measuring a region it does not
+ *  render to animate it is a forced render for a transition that cannot run.
+ *  No options object: `contentVisibilityAuto` would also catch a SKIPPED
+ *  `content-visibility: auto` region, which the next scroll makes relevant again. */
+function isRendered(el: HTMLElement): boolean {
+  return typeof el.checkVisibility !== "function" || el.checkVisibility();
+}
+
 /** Wire `trigger` (a button, or any element given button semantics) to `region`
  *  as an animated disclosure.
  *
@@ -98,9 +106,9 @@ export function createDisclosure(
   };
 
   const applyHeight = (targetOpen: boolean, animate: boolean): void => {
-    if (!animate || prefersReducedMotion()) {
-      // Cancel any in-flight tween: a reduced-motion flip mid-animation must
-      // not let its settle land on this untweened state.
+    if (!animate || prefersReducedMotion() || !isRendered(region)) {
+      // Cancel any in-flight tween: a mid-animation flip to this untweened branch
+      // (reduced motion, or a region no longer rendered) must not settle onto it.
       cancelTransition(region);
       region.style.height = targetOpen ? "" : "0px";
       return;
