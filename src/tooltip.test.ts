@@ -706,3 +706,137 @@ describe("handing an app-owned aria-describedby back", () => {
     expect(a.hasAttribute("aria-describedby")).toBe(false);
   });
 });
+
+// A TRIGGER WHOSE HIT BOX IS BIGGER THAN ITS INK names that ink, and the tip is
+// placed against the MARK while everything else stays on the trigger.
+//
+// The consumer shape this exists for: a row-wide disclosure whose only ink is a
+// leading glyph, and a full-width file row whose name sits at its leading edge.
+// Both anchored the tip at the centre of their own box, which is empty space —
+// measured at 269px and 243px from the ink respectively.
+describe("a marked mark inside the trigger", () => {
+  /** A 600x24 row with `w`x16 of ink at its leading edge, marked. Returns the
+   *  trigger and the mark, each with a stubbed box. */
+  function row(text: string, w: number): { trigger: HTMLElement; mark: HTMLElement } {
+    const trigger = anchor(text);
+    anchorRect(trigger, 100, 200, 600, 24);
+    const mark = document.createElement("span");
+    mark.setAttribute("data-uip-tooltip-anchor", "");
+    trigger.appendChild(mark);
+    anchorRect(mark, 112, 204, w, 16);
+    return { trigger, mark };
+  }
+
+  /** The tip's centre on the inline axis, from the styles the positioner wrote. */
+  function tipCenterX(t: HTMLElement): number {
+    return parseFloat(t.style.left) + t.getBoundingClientRect().width / 2;
+  }
+
+  it("centres the tip on the mark rather than on the trigger's own box", () => {
+    stubViewport(2000, 2000);
+    initTooltips();
+    const { trigger, mark } = row("Show turn details", 16);
+    pointerOver(trigger);
+    vi.advanceTimersByTime(500);
+
+    const t = tip()!;
+    const inkCenter = mark.getBoundingClientRect().left + 8;
+    expect(tipCenterX(t)).toBeCloseTo(inkCenter, 0);
+    // The trigger's own centre is 280px away, which is what it used to read.
+    expect(Math.abs(tipCenterX(t) - 400)).toBeGreaterThan(200);
+    // Vertically it still sits GAP above what it points at — the mark's top edge
+    // rather than the row's, so a tall band does not push the tip off the ink.
+    expect(parseFloat(t.style.top) + t.getBoundingClientRect().height).toBe(198);
+  });
+
+  it("clips the mark to the trigger, so ellipsised ink cannot drag the tip off the row", () => {
+    // A file name's own rect runs past the row that clips it; the tip belongs over
+    // the part a reader can see.
+    stubViewport(2000, 2000);
+    initTooltips();
+    const { trigger, mark } = row("a/long/path.ts", 16);
+    anchorRect(mark, 112, 204, 2000, 16);
+    pointerOver(trigger);
+    vi.advanceTimersByTime(500);
+
+    // Visible ink is 112..700 (the row's own right edge), so the centre is 406.
+    // `toBeCloseTo` because the positioner writes a rounded `left`, so a centre
+    // derived from it is fractional whenever the tip's own width is.
+    expect(tipCenterX(tip()!)).toBeCloseTo(406, 0);
+    expect(trigger.getBoundingClientRect().right).toBe(700);
+  });
+
+  it("falls back to the trigger when the mark renders nothing", () => {
+    // A glyph slot with no content yet, or a mark behind `display: none`: there is
+    // no ink to point at, so the trigger is what is left.
+    stubViewport(2000, 2000);
+    initTooltips();
+    const { trigger, mark } = row("Show turn details", 16);
+    anchorRect(mark, 0, 0, 0, 0);
+    pointerOver(trigger);
+    vi.advanceTimersByTime(500);
+    expect(tipCenterX(tip()!)).toBeCloseTo(400, 0);
+  });
+
+  it("falls back to the trigger when the mark is scrolled fully out of it", () => {
+    stubViewport(2000, 2000);
+    initTooltips();
+    const { trigger, mark } = row("Show turn details", 16);
+    anchorRect(mark, 900, 204, 16, 16);
+    pointerOver(trigger);
+    vi.advanceTimersByTime(500);
+    expect(tipCenterX(tip()!)).toBeCloseTo(400, 0);
+  });
+
+  it("ignores a mark that belongs to a nested trigger", () => {
+    stubViewport(2000, 2000);
+    initTooltips();
+    const outer = anchor("Outer");
+    anchorRect(outer, 100, 200, 600, 24);
+    const inner = document.createElement("span");
+    inner.setAttribute("data-uip-tooltip", "Inner");
+    const innerMark = document.createElement("span");
+    innerMark.setAttribute("data-uip-tooltip-anchor", "");
+    inner.appendChild(innerMark);
+    outer.appendChild(inner);
+    anchorRect(inner, 600, 200, 40, 24);
+    anchorRect(innerMark, 604, 204, 16, 16);
+
+    pointerOver(outer);
+    vi.advanceTimersByTime(500);
+    expect(tipCenterX(tip()!)).toBeCloseTo(400, 0);
+  });
+
+  it("keeps the trigger as the hover target and the described element", () => {
+    // The mark is POSITIONING only: a reader pointing anywhere in the row still
+    // gets the tip, and the description still belongs to the control that has a
+    // name and takes focus.
+    stubViewport(2000, 2000);
+    initTooltips();
+    const { trigger, mark } = row("Show turn details", 16);
+
+    // Entering over a child of the row is what a pointer actually does.
+    mark.dispatchEvent(new Event("pointerover", { bubbles: true }));
+    vi.advanceTimersByTime(500);
+    const t = tip()!;
+    expect(trigger.getAttribute("aria-describedby")).toBe(t.id);
+    expect(mark.hasAttribute("aria-describedby")).toBe(false);
+  });
+
+  it("derives the mark attribute from a renamed trigger attribute", () => {
+    stubViewport(2000, 2000);
+    initTooltips({ attribute: "data-tooltip" });
+    const trigger = document.createElement("button");
+    trigger.setAttribute("data-tooltip", "Show turn details");
+    document.body.appendChild(trigger);
+    anchorRect(trigger, 100, 200, 600, 24);
+    const mark = document.createElement("span");
+    mark.setAttribute("data-tooltip-anchor", "");
+    trigger.appendChild(mark);
+    anchorRect(mark, 112, 204, 16, 16);
+
+    pointerOver(trigger);
+    vi.advanceTimersByTime(500);
+    expect(tipCenterX(tip()!)).toBeCloseTo(120, 0);
+  });
+});
