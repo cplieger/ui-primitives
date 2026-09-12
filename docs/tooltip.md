@@ -18,9 +18,21 @@ initTooltips(); // idempotent; installs one delegated controller
 <button data-uip-tooltip="Line one&#10;Line two">Multi</button>
 ```
 
+A trigger whose hit box is bigger than the ink it paints names that ink, and the
+tooltip is placed against the mark instead of the trigger's own centre:
+
+```html
+<!-- a row-wide control whose only ink is a leading glyph -->
+<button data-uip-tooltip="Show details">
+  <span data-uip-tooltip-anchor><svg>...</svg></span>
+  <span class="row-label"></span>
+</button>
+```
+
 ## API
 
 - `initTooltips(opts?)`: install once. `TooltipOptions` = `{ attribute?; delayCold?; delayWarm?; cooldown? }` (defaults `data-uip-tooltip`, 500ms, `delayCold`, 500ms).
+- `<attribute>-anchor` on a descendant of a trigger: the ink the tooltip points at. Derived from `attribute`, so renaming the trigger attribute renames this one.
 
 ## CSS
 
@@ -38,4 +50,5 @@ initTooltips(); // idempotent; installs one delegated controller
 - The trigger text is appended to the anchor's `aria-describedby` (any token the app already set is preserved); `\n` in the value splits into `<br>`-separated lines.
 - Escape, scroll, and window blur hide it; on scroll a tooltip vanishes like a native `title`, where [popover](popover.md), an opened surface, tracks and repositions instead.
 - Positioned `fixed` above the anchor (flips below when there is no room), clamped to the viewport.
+- A marked anchor moves the POSITION only: hover, focus and `aria-describedby` stay on the trigger. The mark's box is intersected with the trigger's, so ink the trigger clips — an ellipsised file name — cannot pull the tooltip off the control, and a mark that renders nothing falls back to the trigger.
 - When the anchor sits inside an open modal `<dialog>`, the tooltip is appended into that dialog so it stacks over the modal.

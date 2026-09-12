@@ -9,14 +9,24 @@
 // once the user scrolls, the pointer is no longer meaningfully over the
 // anchor, matching native `title`; a popover is an opened surface the user is
 // interacting with and must follow its anchor instead.
+//
+// A TRIGGER'S HIT BOX IS NOT ALWAYS THE INK THE TOOLTIP IS ABOUT, so the trigger
+// may name that ink with `<attribute>-anchor` on a descendant and the tip is
+// placed against the MARK while hover, focus and `aria-describedby` stay on the
+// trigger. Without it a row-wide trigger anchors the tip at the centre of its own
+// box, which is empty space: measured on a consumer, a 570px disclosure row whose
+// only ink is a 16px leading glyph put the tip 269px to the right of that glyph,
+// and a 546px file row whose name sits at its leading edge 243px away.
 
 import { el } from "@cplieger/reactive";
 
-import { placeAnchored } from "./popover.js";
+import { placeAnchored, type PopoverAnchor } from "./popover.js";
 import { cancelTransition, runTransition } from "./transition.js";
 
 export interface TooltipOptions {
-  /** Trigger attribute holding the tooltip text. Default `data-uip-tooltip`. */
+  /** Trigger attribute holding the tooltip text. Default `data-uip-tooltip`.
+   *  The MARK attribute below is derived from it, so an app that renames one
+   *  renames both. */
   attribute?: string;
   /** Delay (ms) before the first tooltip of a cold group. Default 500, the
    *  hover time a native `title` waits out (Firefox's `ui.tooltipDelay`
@@ -47,6 +57,7 @@ class TooltipController {
   private warmUntil = 0;
   private readonly attribute: string;
   private readonly selector: string;
+  private readonly markSelector: string;
   private readonly delayCold: number;
   private readonly delayWarm: number;
   private readonly cooldown: number;
@@ -84,6 +95,10 @@ class TooltipController {
   constructor(opts: TooltipOptions) {
     this.attribute = opts.attribute ?? "data-uip-tooltip";
     this.selector = `[${this.attribute}]`;
+    // Derived rather than a second option: one trigger vocabulary, so an app
+    // renaming the text attribute cannot end up with a mark attribute in the
+    // library's namespace and a trigger attribute in its own.
+    this.markSelector = `[${this.attribute}-anchor]`;
     this.delayCold = opts.delayCold ?? 500;
     // Defaults to delayCold, not a constant, so a partial override can't
     // produce a warm path faster than the delay the caller asked for.
@@ -187,7 +202,56 @@ class TooltipController {
   }
 
   private position(anchor: HTMLElement, tip: HTMLElement): void {
-    placeAnchored(tip, anchor, { placement: "top", align: "center", offset: 6, margin: 4 });
+    placeAnchored(tip, this.positionAnchor(anchor), {
+      placement: "top",
+      align: "center",
+      offset: 6,
+      margin: 4,
+    });
+  }
+
+  /** What the tip is placed against: the trigger's marked ink when it has any,
+   *  otherwise the trigger itself.
+   *
+   *  The mark's rect is INTERSECTED with the trigger's, so ink the trigger clips
+   *  cannot drag the tip off the control — an ellipsised file name's own rect
+   *  runs past the row's edge, and a mark inside a scrolled or overflow-hidden
+   *  trigger can sit outside it entirely. An empty intersection (a mark scrolled
+   *  fully out of view) falls back to the trigger rather than positioning against
+   *  nothing. */
+  private positionAnchor(anchor: HTMLElement): PopoverAnchor {
+    const mark = this.markInside(anchor);
+    if (mark === null) {
+      return anchor;
+    }
+    const a = anchor.getBoundingClientRect();
+    const m = mark.getBoundingClientRect();
+    const left = Math.max(a.left, m.left);
+    const top = Math.max(a.top, m.top);
+    const width = Math.min(a.right, m.right) - left;
+    const height = Math.min(a.bottom, m.bottom) - top;
+    if (width <= 0 || height <= 0) {
+      return anchor;
+    }
+    const rect = new DOMRect(left, top, width, height);
+    return { getBoundingClientRect: (): DOMRect => rect };
+  }
+
+  /** The trigger's own marked ink: the first mark in document order that belongs
+   *  to THIS trigger and has a box. A mark inside a nested trigger is that
+   *  trigger's, and one that renders nothing (a glyph slot with no content yet, a
+   *  `display: none` mark) is not ink to point at. */
+  private markInside(anchor: HTMLElement): HTMLElement | null {
+    for (const mark of anchor.querySelectorAll<HTMLElement>(this.markSelector)) {
+      if (mark.closest(this.selector) !== anchor) {
+        continue;
+      }
+      const r = mark.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) {
+        return mark;
+      }
+    }
+    return null;
   }
 
   private hide(): void {
