@@ -1,15 +1,23 @@
-// modal.ts — Native-<dialog> modal built from caller content. `dialog` wraps
-// an EXISTING <dialog>; `modal` builds one from arbitrary content. Adds ARIA
-// wiring, drag-safe backdrop dismissal, the shared fade-out lifecycle, and an
-// iOS-safe scroll-lock — iOS Safari ignores `overflow:hidden` on the root for
-// touch-scroll, so the body is pinned via position:fixed at the negated
-// scroll offset instead.
+/**
+ * modal.ts — Native-`<dialog>` modal built from caller content. `dialog` wraps
+ * an EXISTING `<dialog>`; `modal` builds one from arbitrary content. Adds ARIA
+ * wiring, drag-safe backdrop dismissal, the shared fade-out lifecycle, and an
+ * iOS-safe scroll-lock — iOS Safari ignores `overflow:hidden` on the root for
+ * touch-scroll, so the body is pinned via position:fixed at the negated
+ * scroll offset instead.
+ *
+ * @module
+ */
 
 import { el } from "@cplieger/reactive";
 
 import { closeDialog, openDialog, wireBackdropDismiss } from "./dialog.js";
 import { cancelTransition } from "./transition.js";
 
+/** Everything {@link createModal} needs beyond the content: the dismissal
+ *  gestures and their veto, the ARIA role and the label/description ids (both
+ *  auto-detected from a `-title` / `-desc` suffix when omitted), initial focus,
+ *  the background scroll lock, and a post-close hook. All optional. */
 export interface ModalOptions {
   /** Close when the backdrop is clicked (drag-safe). Default `true`. */
   closeOnBackdrop?: boolean;
@@ -39,11 +47,23 @@ export interface ModalOptions {
   onClose?: () => void;
 }
 
+/** Handle on a modal built from caller content. The `<dialog>` is built once
+ *  and reused across open/close, so a controller is worth keeping for the
+ *  lifetime of the thing it belongs to and disposing with it. */
 export interface ModalController {
+  /** Show as a platform modal — focus containment, top layer and background
+   *  inerting come from `showModal()` — and take the scroll lock. */
   open(): void;
+  /** Close through the fade-out lifecycle. Programmatic, so `canDismiss` does
+   *  not apply. */
   close(): void;
+  /** The `<dialog>` this controller built, with the caller's content inside.
+   *  `dispose()` spends it: the node, and the caller's content with it, leaves
+   *  the document, while this reference keeps reading it back. */
   readonly el: HTMLDialogElement;
   readonly isOpen: boolean;
+  /** Unwire the dismissal listeners, close immediately (no fade), release the
+   *  scroll lock, and remove the dialog from the document. */
   dispose(): void;
 }
 

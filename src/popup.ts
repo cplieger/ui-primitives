@@ -1,7 +1,11 @@
-// popup.ts — Reveal + light-dismiss lifecycle for a caller-supplied panel,
-// WITHOUT placement. Use for an in-flow or self-positioned panel; use popover
-// when the panel floats anchored to something. Public facade over the shared
-// lifecycle core (`popup-core.ts`, internal).
+/**
+ * popup.ts — Reveal + light-dismiss lifecycle for a caller-supplied panel,
+ * WITHOUT placement. Use for an in-flow or self-positioned panel; use popover
+ * when the panel floats anchored to something. Public facade over the shared
+ * lifecycle core (`popup-core.ts`, internal).
+ *
+ * @module
+ */
 
 import { createPopupCore } from "./popup-core.js";
 import type { PopupController, PopupOptions } from "./popup-core.js";

@@ -1,8 +1,12 @@
-// announce.ts — Screen-reader announcements via shared visually-hidden ARIA
-// live regions, one per politeness level, created lazily and reused. The
-// message clears then sets after a delay: the empty->text mutation is what
-// forces AT to re-announce identical text, and a microtask gap is too fast
-// for AT to register as two distinct mutations.
+/**
+ * announce.ts — Screen-reader announcements via shared visually-hidden ARIA
+ * live regions, one per politeness level, created lazily and reused. The
+ * message clears then sets after a delay: the empty->text mutation is what
+ * forces AT to re-announce identical text, and a microtask gap is too fast
+ * for AT to register as two distinct mutations.
+ *
+ * @module
+ */
 
 import { el } from "@cplieger/reactive";
 

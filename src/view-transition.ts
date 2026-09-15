@@ -1,15 +1,19 @@
-// view-transition.ts — Queued, feature-detected, rejection-safe wrapper over
-// document.startViewTransition. Overlapping calls serialize through a
-// module-level pending promise; the returned promise never rejects, even when
-// the transition rejects or `fn` throws.
-//
-// Suspended-renderer safety: a hidden tab (and some remote/virtualized
-// sessions that stay "visible" while the compositor is suspended) never
-// grants startViewTransition a rendering opportunity, so `finished` never
-// settles and every later call chains behind it forever. Two guards: a
-// `document.hidden` fast-path that skips the transition entirely, and a
-// watchdog that calls `skipTransition()` when `finished` hasn't settled in
-// time (skipping still runs the update callback and settles via task queues).
+/**
+ * view-transition.ts — Queued, feature-detected, rejection-safe wrapper over
+ * document.startViewTransition. Overlapping calls serialize through a
+ * module-level pending promise; the returned promise never rejects, even when
+ * the transition rejects or `fn` throws.
+ *
+ * Suspended-renderer safety: a hidden tab (and some remote/virtualized
+ * sessions that stay "visible" while the compositor is suspended) never
+ * grants startViewTransition a rendering opportunity, so `finished` never
+ * settles and every later call chains behind it forever. Two guards: a
+ * `document.hidden` fast-path that skips the transition entirely, and a
+ * watchdog that calls `skipTransition()` when `finished` hasn't settled in
+ * time (skipping still runs the update callback and settles via task queues).
+ *
+ * @module
+ */
 
 let pending: Promise<void> = Promise.resolve();
 

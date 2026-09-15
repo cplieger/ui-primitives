@@ -1,10 +1,17 @@
-// dialog.ts — Thin behavior layer over the native <dialog> element. The
-// platform gives us focus containment, the top layer, and Escape-to-close for
-// free; this module adds backdrop-click dismissal (drag-safe) and a fade-out
-// lifecycle via a namespaced `is-leaving` class before the element is closed.
+/**
+ * dialog.ts — Thin behavior layer over the native `<dialog>` element. The
+ * platform gives us focus containment, the top layer, and Escape-to-close for
+ * free; this module adds backdrop-click dismissal (drag-safe) and a fade-out
+ * lifecycle via a namespaced `is-leaving` class before the element is closed.
+ *
+ * @module
+ */
 
 import { cancelTransition, runTransition } from "./transition.js";
 
+/** Which user gestures dismiss a wrapped `<dialog>`, an optional veto over
+ *  them, and a hook that runs once the fade-out has finished. All optional; by
+ *  default both backdrop and Escape dismiss it. */
 export interface DialogOptions {
   /** Close when the backdrop is clicked. Default `true`. */
   closeOnBackdrop?: boolean;
@@ -20,10 +27,22 @@ export interface DialogOptions {
   onClose?: () => void;
 }
 
+/** Handle on a wrapped `<dialog>`. The element is the caller's throughout: this
+ *  controller adds wiring and classes, and never creates or removes a node. */
 export interface DialogController {
+  /** Open as a platform modal, cancelling a leave fade still in flight so a
+   *  reopen mid-fade is safe. A no-op while already open. */
   open(): void;
+  /** Close through the fade-out lifecycle. Programmatic, so `canDismiss` does
+   *  not apply. */
   close(): void;
+  /** The `<dialog>` handed to `createDialog`, never a node this controller
+   *  made. Only the caller may remove it, and removing it neither unwires the
+   *  controller nor clears this reference: it keeps reading back a detached
+   *  node, listeners and all, until `dispose()` runs. */
   readonly el: HTMLDialogElement;
+  /** Remove the dismissal wiring and the `uip-dialog` class. Does not close an
+   *  open dialog. */
   dispose(): void;
 }
 

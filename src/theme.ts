@@ -1,10 +1,17 @@
-// theme.ts — Persisted tri-state theme controller (light / dark / system).
-// While the choice is "system" it follows the OS preference live via
-// matchMedia; concrete choices are pinned. The resolved concrete value is
-// written to a document-element attribute (default `data-theme`) so CSS can
-// key off it. `themeInitSnippet` produces an inline blocking-script string for
-// paint-time application (a real import can't run before first paint).
+/**
+ * theme.ts — Persisted tri-state theme controller (light / dark / system).
+ * While the choice is "system" it follows the OS preference live via
+ * matchMedia; concrete choices are pinned. The resolved concrete value is
+ * written to a document-element attribute (default `data-theme`) so CSS can
+ * key off it. `themeInitSnippet` produces an inline blocking-script string for
+ * paint-time application (a real import can't run before first paint).
+ *
+ * @module
+ */
 
+/** The persisted preference: a pinned concrete theme, or `"system"` to follow
+ *  the OS preference live. Distinct from the resolved value written to the
+ *  document element, which is always concrete. */
 export type ThemeChoice = "light" | "dark" | "system";
 type Resolved = "light" | "dark";
 
@@ -18,6 +25,10 @@ export interface ThemeStorage {
   set(value: string): void;
 }
 
+/** Where the preference is persisted, which attribute carries the resolved
+ *  theme, and a hook for each application. `storageKey` is the only required
+ *  field; supply `storage` when the value must live somewhere other than a
+ *  bare localStorage key. */
 export interface ThemeOptions {
   /** localStorage key the default adapter persists under. Unused when a custom
    *  `storage` adapter is supplied (the adapter owns where the value lives). */
@@ -35,6 +46,9 @@ export interface ThemeOptions {
   onChange?: (resolved: Resolved) => void;
 }
 
+/** A live theme controller. The preference (`get`) and the theme actually
+ *  applied (`resolved`) are separate values and differ whenever the preference
+ *  is `"system"`. A controller keeps a matchMedia listener until `dispose`. */
 export interface ThemeController {
   /** The stored preference (may be `"system"`). */
   get(): ThemeChoice;

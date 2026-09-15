@@ -1,14 +1,24 @@
-// roving-focus.ts — WAI-ARIA roving-tabindex keyboard navigation for
-// composite widgets (menus, listboxes, pickers, toolbars): one Tab stop,
-// arrow keys move focus. Items are queried live each keystroke; call
-// `refresh()` after a bulk re-render to restore the single-Tab-stop invariant.
-//
-// Pairs with popover for the WAI-ARIA menu pattern:
-//
-//   const pop = createPopover(button, panel, { haspopup: "menu" });
-//   const nav = rovingFocus(panel, "[role=menuitem]");
-//   // on open: nav.focusFirst();
+/**
+ * roving-focus.ts — WAI-ARIA roving-tabindex keyboard navigation for
+ * composite widgets (menus, listboxes, pickers, toolbars): one Tab stop,
+ * arrow keys move focus. Items are queried live each keystroke; call
+ * `refresh()` after a bulk re-render to restore the single-Tab-stop invariant.
+ *
+ * Pairs with popover for the WAI-ARIA menu pattern:
+ *
+ * ```ts
+ * const pop = createPopover(button, panel, { haspopup: "menu" });
+ * const nav = rovingFocus(panel, "[role=menuitem]");
+ * // on open: nav.focusFirst();
+ * ```
+ *
+ * @module
+ */
 
+/** Keyboard behavior of a roving-tabindex container: which arrow pair moves
+ *  focus, whether the ends wrap, whether Home/End jump, and whether
+ *  Enter/Space activate the focused item. The defaults are the WAI-ARIA
+ *  vertical-menu shape. */
 export interface RovingFocusOptions {
   /** Which arrow pair moves focus: `"vertical"` (Up/Down, default) or
    *  `"horizontal"` (Left/Right). */
@@ -22,6 +32,10 @@ export interface RovingFocusOptions {
   activate?: boolean;
 }
 
+/** Handle on a wired container. Items are re-queried on every keystroke, so
+ *  adding or removing one needs no call here; `refresh()` exists for a bulk
+ *  re-render, which discards the element carrying the single `tabindex=0` Tab
+ *  stop. */
 export interface RovingFocusController {
   /** Focus the first item (e.g. when a menu opens). */
   focusFirst(): void;

@@ -1,16 +1,23 @@
-// disclosure.ts — Animated collapsible (show/hide) region wired to a trigger,
-// per the WAI-ARIA disclosure pattern. Headless: it wires two elements you
-// supply — no DOM is created. The trigger gets button semantics
-// (`aria-expanded`, Enter/Space when it isn't a native <button>) and is linked
-// to the region via `aria-controls`; the region toggles `aria-hidden`.
-//
-// Height animates 0 <-> auto. Modern engines interpolate the `auto` keyword
-// directly (`interpolate-size: allow-keywords`, set on the region in the base
-// stylesheet); engines without it fall back to a measured `scrollHeight` px
-// target. Both honor `prefers-reduced-motion` by skipping the tween.
+/**
+ * disclosure.ts — Animated collapsible (show/hide) region wired to a trigger,
+ * per the WAI-ARIA disclosure pattern. Headless: it wires two elements you
+ * supply — no DOM is created. The trigger gets button semantics
+ * (`aria-expanded`, Enter/Space when it isn't a native `<button>`) and is linked
+ * to the region via `aria-controls`; the region toggles `aria-hidden`.
+ *
+ * Height animates 0 <-> auto. Modern engines interpolate the `auto` keyword
+ * directly (`interpolate-size: allow-keywords`, set on the region in the base
+ * stylesheet); engines without it fall back to a measured `scrollHeight` px
+ * target. Both honor `prefers-reduced-motion` by skipping the tween.
+ *
+ * @module
+ */
 
 import { cancelTransition, runTransition } from "./transition.js";
 
+/** The initial open state, whether height changes tween, and the toggle hook.
+ *  All optional: a disclosure with no options starts collapsed, animates, and
+ *  reports nothing. */
 export interface DisclosureOptions {
   /** Initial open state. Default `false`. */
   open?: boolean;
@@ -27,11 +34,18 @@ export interface DisclosureOptions {
  *  (click / Enter / Space); `"api"` = a controller method. */
 export type DisclosureToggleSource = "user" | "api";
 
+/** Handle on a wired disclosure. Every method here reports as the `"api"`
+ *  toggle source, so an `onToggle` consumer can tell a controller call from a
+ *  trigger press. The only state driver in region-only mode (`trigger: null`). */
 export interface DisclosureController {
   open(): void;
   close(): void;
   toggle(): void;
   readonly isOpen: boolean;
+  /** Unwire the trigger. An in-flight tween is cancelled and the height
+   *  settled (`auto` when open, `0` when collapsed) so no inline px height is
+   *  left frozen; the region keeps its current state, `aria-hidden` and
+   *  `inert` included. */
   dispose(): void;
 }
 

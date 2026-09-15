@@ -1,16 +1,25 @@
-// popover.ts — An anchored floating panel: placeAnchored (pure positioner) and
-// createPopover (interactive controller), layered on the shared popup
-// lifecycle core (popup-core.ts, internal) which owns reveal/dismiss; popover
-// adds anchored placement, scroll/resize tracking, and the stretch mode.
-//
-// No native `popover`: the top layer re-roots a panel's containing block to the
-// viewport, moving the in-flow panels `/popup` exists for, and is unconditional —
-// no z-index can lower a promoted panel back under the --uip-z-* ladder.
+/**
+ * popover.ts — An anchored floating panel: placeAnchored (pure positioner) and
+ * createPopover (interactive controller), layered on the shared popup
+ * lifecycle core (popup-core.ts, internal) which owns reveal/dismiss; popover
+ * adds anchored placement, scroll/resize tracking, and the stretch mode.
+ *
+ * No native `popover`: the top layer re-roots a panel's containing block to the
+ * viewport, moving the in-flow panels `/popup` exists for, and is unconditional —
+ * no z-index can lower a promoted panel back under the `--uip-z-*` ladder.
+ *
+ * @module
+ */
 
 import { createPopupCore } from "./popup-core.js";
 import type { PopupOptions, PopupOptionsPatch } from "./popup-core.js";
 
+/** The anchor side a panel is placed against. A request, not a guarantee: with
+ *  `flip` on (the default) a side that doesn't fit becomes its opposite. */
 export type PopoverPlacement = "top" | "bottom" | "left" | "right";
+
+/** Cross-axis alignment of the panel against the anchor: leading edges flush
+ *  (`"start"`), centres aligned, or trailing edges flush (`"end"`). */
 export type PopoverAlign = "start" | "center" | "end";
 
 /** A virtual anchor: anything that can report a bounding rect. Lets a popover
@@ -51,6 +60,11 @@ export function pointAnchor(x: number, y: number): VirtualAnchor {
   };
 }
 
+/** Everything the positioner needs beyond the panel and the anchor: the side
+ *  and cross-axis alignment, the main-axis gap, the two viewport-fit
+ *  corrections (`flip`, `clamp`) and the edge `margin` they respect, and the
+ *  width modes. All optional, all pure inputs — {@link placeAnchored} reads
+ *  them per call and keeps no state. */
 export interface PlacementOptions {
   /** Side of the anchor the panel sits on. Default `"bottom"`. */
   placement?: PopoverPlacement;
@@ -92,6 +106,10 @@ export type PopoverOptionsPatch = {
   [K in keyof PopoverOptions]?: PopoverOptions[K] | undefined;
 };
 
+/** Handle on an anchored popover: the popup lifecycle plus placement. Position
+ *  is recomputed on show and, while open, on scroll and resize; a content
+ *  change is the one thing it cannot observe, so `reposition()` is the caller's
+ *  to call. */
 export interface PopoverController {
   show(): void;
   hide(): void;

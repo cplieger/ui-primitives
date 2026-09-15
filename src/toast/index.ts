@@ -1,6 +1,10 @@
-// toast/index.ts — Public toast surface: the `Toaster` factory + a default
-// module singleton for convenience, with `info` / `success` / `error` free
-// functions bound to it.
+/**
+ * toast/index.ts — Public toast surface: the `Toaster` factory + a default
+ * module singleton for convenience, with `info` / `success` / `error` free
+ * functions bound to it.
+ *
+ * @module
+ */
 
 import { ToastEngine } from "./engine.js";
 import type { ToastLevel, ToastOptions, ToastRetry } from "./engine.js";
@@ -9,6 +13,9 @@ import type { ToastHandle } from "./view.js";
 
 export type { ToastLevel, ToastOptions, ToastRetry };
 
+/** One toast stack: its own container, queue and Escape listener. Every show
+ *  variant returns a function that dismisses the toast it created, so a caller
+ *  can retract a message whose cause has gone away. */
 export interface Toaster {
   /** Show a toast; returns a function that dismisses it. */
   show(message: string, opts?: ToastOptions): () => void;
@@ -25,6 +32,9 @@ export interface Toaster {
   dispose(): void;
 }
 
+/** How one stack behaves: how many toasts show and queue, how long a
+ *  non-error toast lives, where the stack mounts, and whether an arriving
+ *  toast queues behind the visible ones or replaces them. All optional. */
 export interface ToasterOptions {
   /** Maximum simultaneously-visible toasts (`"stack"` mode). Default `3`. */
   maxVisible?: number;
