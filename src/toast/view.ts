@@ -11,8 +11,17 @@ import { topmostOpenDialog } from "../modal-host.js";
 import { cancelTransition, runTransition } from "../transition.js";
 import type { ToastCallbacks, ToastRenderData, ToastView } from "./engine.js";
 
+/** What this view hands the engine for one mounted toast. The engine stores it
+ *  and passes it back; only this module reads the fields. */
 export interface ToastHandle {
+  /** The node `mount` built and appended to the stack. Detaching it is this
+   *  module's alone — from `scheduleLeave`'s settle, from `remove`, or from
+   *  `dispose`, which removes the whole stack container and takes any node
+   *  still mounted inside it — so the engine must not remove it itself, and a
+   *  handle is spent once any of the three has run: the reference still reads,
+   *  but the node is out of the document. */
   readonly el: HTMLElement;
+  /** The progress bar, or `null` for a sticky toast (no duration to show). */
   readonly progressEl: HTMLElement | null;
   /** Handle of the pending enter `requestAnimationFrame`, or `null` once it has
    *  run (or been cancelled). Cancelled on leave/remove so a late enter frame

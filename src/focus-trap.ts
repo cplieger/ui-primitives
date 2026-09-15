@@ -1,9 +1,15 @@
-// focus-trap.ts — Keep Tab / Shift+Tab cycling within a container, per the
-// WAI-ARIA dialog pattern. Headless: no DOM is created, only focus is managed.
-//
-//   const release = trapFocus(dialogEl, { returnFocus: true });
-//   // ... interaction ...
-//   release(); // restores focus to the previously-focused element
+/**
+ * focus-trap.ts — Keep Tab / Shift+Tab cycling within a container, per the
+ * WAI-ARIA dialog pattern. Headless: no DOM is created, only focus is managed.
+ *
+ * ```ts
+ * const release = trapFocus(dialogEl, { returnFocus: true });
+ * // ... interaction ...
+ * release(); // restores focus to the previously-focused element
+ * ```
+ *
+ * @module
+ */
 
 /** The standard focusable-element selector. Elements are additionally filtered
  *  to those that are rendered (see `isVisible`) at each Tab. */
@@ -24,6 +30,10 @@ function isVisible(el: HTMLElement): boolean {
   );
 }
 
+/** The two focus hand-offs a trap owns: which element takes focus on entry,
+ *  and where focus lands when the release function runs. Both optional — the
+ *  defaults focus the first focusable descendant and restore the element that
+ *  was focused when the trap was installed. */
 export interface FocusTrapOptions {
   /** Element to focus on entry. Defaults to the first focusable descendant.
    *  A `null` value is treated the same as omitting it. */

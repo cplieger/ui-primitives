@@ -6,6 +6,10 @@
 import { topmostOpenDialog } from "./modal-host.js";
 import { cancelTransition, runTransition } from "./transition.js";
 
+/** The lifecycle half of a popup or popover: the trigger to annotate, which
+ *  gestures dismiss the panel, single-open grouping, the two opt-in focus
+ *  hand-offs, and the open/close hooks. All optional. Activation is
+ *  deliberately absent — the caller decides what opens the panel. */
 export interface PopupOptions {
   /** Trigger element to wire ARIA on (`aria-expanded`, `aria-haspopup`) and to
    *  exempt from outside-click dismissal (so a trigger click-handler can
@@ -48,6 +52,10 @@ export type PopupOptionsPatch = {
   [K in keyof PopupOptions]?: PopupOptions[K] | undefined;
 };
 
+/** Handle on a revealed-and-dismissed panel. The panel is the caller's element:
+ *  this reveals it, hides it, and wires light dismissal, but never positions it
+ *  and never removes it — motion belongs to the app's CSS, keyed off the state
+ *  classes. */
 export interface PopupController {
   show(): void;
   hide(): void;

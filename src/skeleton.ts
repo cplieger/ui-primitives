@@ -1,23 +1,32 @@
-// skeleton.ts — anti-flicker timing for a "show a skeleton, then replace it
-// with content" load. Pure timing, no DOM: the caller paints the skeleton and
-// the content; this owns WHEN.
-//
-// Two consumption styles, unified:
-//
-//   // commit-style: the content render replaces the skeleton in place
-//   const t = skeletonTiming(() => paint(out, skeleton), { minVisibleMs: 300, signal });
-//   const data = await load(signal);
-//   t.commit(() => paint(out, content(data)));
-//
-//   // teardown-style: the skeleton is its own element, removed on settle
-//   const t = skeletonTiming(() => {
-//     const node = makeSkeleton();
-//     list.append(node);
-//     return () => node.remove();
-//   });
-//   await load();
-//   t.cancel(); // removes the skeleton if it was painted
+/**
+ * skeleton.ts — anti-flicker timing for a "show a skeleton, then replace it
+ * with content" load. Pure timing, no DOM: the caller paints the skeleton and
+ * the content; this owns WHEN.
+ *
+ * Two consumption styles, unified:
+ *
+ * ```ts
+ * // commit-style: the content render replaces the skeleton in place
+ * const t = skeletonTiming(() => paint(out, skeleton), { minVisibleMs: 300, signal });
+ * const data = await load(signal);
+ * t.commit(() => paint(out, content(data)));
+ *
+ * // teardown-style: the skeleton is its own element, removed on settle
+ * const t = skeletonTiming(() => {
+ *   const node = makeSkeleton();
+ *   list.append(node);
+ *   return () => node.remove();
+ * });
+ * await load();
+ * t.cancel(); // removes the skeleton if it was painted
+ * ```
+ *
+ * @module
+ */
 
+/** The three windows that decide whether a skeleton is painted at all and how
+ *  long it stays: the delay before it appears, the floor on how long it stays
+ *  once it has, and the load's abort signal. */
 export interface SkeletonTimingOptions {
   /** Delay before the skeleton is painted (default 150ms). A load that settles
    *  within this window never paints the skeleton at all. */
@@ -34,6 +43,10 @@ export interface SkeletonTimingOptions {
   signal?: AbortSignal;
 }
 
+/** The settle handle for one load. Call exactly one of `commit` (the content
+ *  arrived) or `cancel` (the load was abandoned); whichever runs first wins,
+ *  and a later call to either is a no-op. Leaving both uncalled leaves a
+ *  painted skeleton up forever. */
 export interface SkeletonTimingController {
   /** Paint the content. Call once, after the awaited work settles. Honors
    *  show-delay (renders immediately when the skeleton was never painted) and

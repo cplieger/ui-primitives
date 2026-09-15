@@ -13,6 +13,9 @@
  */
 const SETTLE_FALLBACK_MS = 400;
 
+/** One state change plus what finalizes it. Handed to {@link runTransition},
+ *  which flushes the pre-change style before invoking `change` so the engine
+ *  has a start state to animate from. */
 export interface TransitionSpec {
   /** Writes the state to animate TO. Whatever the caller wrote BEFORE calling
    *  `runTransition` is the state it animates FROM. */

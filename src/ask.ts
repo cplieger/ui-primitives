@@ -1,6 +1,10 @@
-// ask.ts — ONE Promise-shaped question dialog, replacing window.confirm and
-// window.prompt. Two shapes (boolean / input) share one preemption domain and
-// the `.uip-ask` class family, each over its own lazily-created reused dialog.
+/**
+ * ask.ts — ONE Promise-shaped question dialog, replacing window.confirm and
+ * window.prompt. Two shapes (boolean / input) share one preemption domain and
+ * the `.uip-ask` class family, each over its own lazily-created reused dialog.
+ *
+ * @module
+ */
 
 import { el } from "@cplieger/reactive";
 
@@ -21,6 +25,10 @@ export interface AskInput {
   autocomplete?: string;
 }
 
+/** Presentation and shape of one ask: heading, button labels, destructive
+ *  treatment, and whether a value is collected. The presence of `input` decides
+ *  what the promise resolves to — `boolean` without it, `string | null` with
+ *  it — so the two are not independent choices. */
 export interface AskOptions {
   /** Optional concise heading. With a title, the dialog is labelled by it and
    *  described by the message; without one, the message is the label. */

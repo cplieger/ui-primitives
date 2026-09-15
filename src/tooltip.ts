@@ -1,28 +1,35 @@
-// tooltip.ts — One delegated tooltip controller on `document`. Replaces bare
-// `title` attributes with positioned, delay-aware, accessible tooltips.
-//
-// BY DEFAULT `delayWarm` IS `delayCold`, so every hover waits the same time —
-// matching native `title` behavior. A warm group (peers appearing faster once
-// one has shown) is opt-in through an explicit smaller `delayWarm`.
-//
-// Scroll HIDES the tooltip rather than repositioning it, unlike popover:
-// once the user scrolls, the pointer is no longer meaningfully over the
-// anchor, matching native `title`; a popover is an opened surface the user is
-// interacting with and must follow its anchor instead.
-//
-// A TRIGGER'S HIT BOX IS NOT ALWAYS THE INK THE TOOLTIP IS ABOUT, so the trigger
-// may name that ink with `<attribute>-anchor` on a descendant and the tip is
-// placed against the MARK while hover, focus and `aria-describedby` stay on the
-// trigger. Without it a row-wide trigger anchors the tip at the centre of its own
-// box, which is empty space: measured on a consumer, a 570px disclosure row whose
-// only ink is a 16px leading glyph put the tip 269px to the right of that glyph,
-// and a 546px file row whose name sits at its leading edge 243px away.
+/**
+ * tooltip.ts — One delegated tooltip controller on `document`. Replaces bare
+ * `title` attributes with positioned, delay-aware, accessible tooltips.
+ *
+ * BY DEFAULT `delayWarm` IS `delayCold`, so every hover waits the same time —
+ * matching native `title` behavior. A warm group (peers appearing faster once
+ * one has shown) is opt-in through an explicit smaller `delayWarm`.
+ *
+ * Scroll HIDES the tooltip rather than repositioning it, unlike popover:
+ * once the user scrolls, the pointer is no longer meaningfully over the
+ * anchor, matching native `title`; a popover is an opened surface the user is
+ * interacting with and must follow its anchor instead.
+ *
+ * A TRIGGER'S HIT BOX IS NOT ALWAYS THE INK THE TOOLTIP IS ABOUT, so the trigger
+ * may name that ink with `<attribute>-anchor` on a descendant and the tip is
+ * placed against the MARK while hover, focus and `aria-describedby` stay on the
+ * trigger. Without it a row-wide trigger anchors the tip at the centre of its own
+ * box, which is empty space: measured on a consumer, a 570px disclosure row whose
+ * only ink is a 16px leading glyph put the tip 269px to the right of that glyph,
+ * and a 546px file row whose name sits at its leading edge 243px away.
+ *
+ * @module
+ */
 
 import { el } from "@cplieger/reactive";
 
 import { placeAnchored, type PopoverAnchor } from "./popover.js";
 import { cancelTransition, runTransition } from "./transition.js";
 
+/** Tuning for the one delegated controller: the trigger attribute it delegates
+ *  on, and the three numbers that decide when a tip appears. The defaults
+ *  reproduce native `title` timing, with the warm group inert. */
 export interface TooltipOptions {
   /** Trigger attribute holding the tooltip text. Default `data-uip-tooltip`.
    *  The MARK attribute below is derived from it, so an app that renames one

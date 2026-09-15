@@ -128,7 +128,10 @@ Import the base once: `import "@cplieger/ui-primitives/css";`. It sets only
 structure + motion. Define `--uip-*` properties (globally in `:root` or
 scoped) to tune behavior, and style the `.uip-*` classes for your skin. Each
 primitive's own classes, state classes, and custom properties are documented
-on its reference page; the tokens below are shared across primitives.
+on its reference page; the tokens below are shared across primitives. The
+`/css` subpath is the npm form; a JSR export may only name a module, so JSR
+consumers reach the same stylesheet by its in-tarball path,
+`css/ui-primitives.css`.
 
 | Property         | Default                  | Used by                                                                |
 | ---------------- | ------------------------ | ---------------------------------------------------------------------- |

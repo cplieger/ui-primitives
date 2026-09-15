@@ -2,14 +2,27 @@
 // injected `ToastView` port, so it is fully testable headless. Owns the queue,
 // the visible set, promotion, per-toast timers, and pause/resume math.
 
+/** Severity of a toast. It selects the skin modifier class, the politeness of
+ *  the screen-reader announcement, and the default duration — `"error"` is
+ *  sticky, the other two auto-dismiss. */
 export type ToastLevel = "info" | "success" | "error";
 
+/** A retry affordance rendered inside the toast: a button the user can press to
+ *  re-attempt whatever failed. */
 export interface ToastRetry {
+  /** Button text. Default `"Retry"`. */
   readonly label?: string;
+  /** Runs on press, after the toast has been dismissed. The result is not
+   *  awaited: a throw or a rejection is logged and swallowed, so reporting the
+   *  retry's own outcome is the caller's job. */
   readonly onClick: () => void | Promise<void>;
 }
 
+/** Per-toast overrides, all optional: the level defaults to `"info"` and the
+ *  duration to that level's default, so `show(message)` alone is a complete
+ *  call. */
 export interface ToastOptions {
+  /** Severity. Default `"info"`. */
   level?: ToastLevel;
   /** Auto-dismiss after this many ms. `0` = sticky (manual dismiss only). */
   duration?: number;
@@ -55,6 +68,9 @@ export interface ToastView<H> {
   dispose(): void;
 }
 
+/** Construction options for {@link ToastEngine}: the view port it drives, plus
+ *  the capacity, duration and mode knobs a `Toaster` forwards from its own
+ *  options. `view` is the only required field. */
 export interface ToastEngineOptions<H> {
   view: ToastView<H>;
   maxVisible?: number;
@@ -86,6 +102,10 @@ interface QueuedToast {
   bindDismiss(dismiss: () => void): void;
 }
 
+/** The toast state machine, holding the queue, the visible set, per-toast
+ *  timers and the pause/resume math, and driving an injected {@link ToastView}.
+ *  Touches no DOM itself: handles of type `H` come from the view and are held
+ *  opaquely. */
 export class ToastEngine<H> {
   private readonly view: ToastView<H>;
   private readonly maxVisible: number;
