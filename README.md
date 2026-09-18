@@ -1,8 +1,6 @@
 # ui-primitives
 
-[![npm](https://img.shields.io/npm/v/@cplieger/ui-primitives)](https://www.npmjs.com/package/@cplieger/ui-primitives)
-[![JSR](https://jsr.io/badges/@cplieger/ui-primitives)](https://jsr.io/@cplieger/ui-primitives)
-[![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/ui-primitives/badges/mutation-ts.json)](https://github.com/cplieger/ui-primitives/issues?q=label%3Astryker-tracker)
+[![npm](https://img.shields.io/npm/v/@cplieger/ui-primitives)](https://www.npmjs.com/package/@cplieger/ui-primitives) [![JSR](https://jsr.io/badges/@cplieger/ui-primitives)](https://jsr.io/@cplieger/ui-primitives) [![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/ui-primitives/badges/mutation-ts.json)](https://github.com/cplieger/ui-primitives/issues?q=label%3Astryker-tracker)
 
 > Headless browser UI primitives: behavior, accessibility, DOM, and a documented CSS contract. You bring the skin.
 
