@@ -20,7 +20,7 @@
     "./announce": "./src/announce.ts"
   },
   "publish": {
-    "include": ["LICENSE", "README.md", "src/**/*.ts", "css/**/*.css"],
+    "include": ["LICENSE", "NOTICE", "README.md", "src/**/*.ts", "css/**/*.css"],
     "exclude": ["src/**/*.test.ts", "src/**/*-setup.ts"]
   }
 }
