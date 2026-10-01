@@ -264,7 +264,7 @@ describe("createTheme — custom storage adapter", () => {
     t.dispose();
   });
 
-  it("persists into a JSON blob field via a read-modify-write adapter (vibekit pattern)", () => {
+  it("persists into a JSON blob field via a read-modify-write adapter (marotte pattern)", () => {
     const KEY = "app.ui-state";
     localStorage.setItem(KEY, JSON.stringify({ sidebar: "open", theme: "dark" }));
     const jsonAdapter: ThemeStorage = {
