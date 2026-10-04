@@ -2,9 +2,7 @@
 
 `@cplieger/ui-primitives/roving-focus`
 
-WAI-ARIA roving-tabindex keyboard navigation for composite widgets: menus,
-listboxes, pickers, toolbars; any container whose items should be **one** Tab
-stop navigated with the arrow keys.
+WAI-ARIA roving-tabindex keyboard navigation for composite widgets such as menus, listboxes, pickers and toolbars. Use it for any container whose items should be one Tab stop, navigated with the arrow keys.
 
 ## Usage
 
@@ -17,8 +15,7 @@ nav.refresh(); // after a bulk re-render
 nav.dispose();
 ```
 
-This is the keyboard half of the WAI-ARIA **menu** pattern; pair it with
-[popover](popover.md) so a `role="menu"` panel keeps its interaction promise:
+This is the keyboard half of the WAI-ARIA menu pattern. Pair it with [popover](popover.md) so a `role="menu"` panel gets the keyboard behavior that role promises:
 
 ```ts
 const pop = createPopover(button, panel, { haspopup: "menu" });
@@ -31,11 +28,12 @@ button.addEventListener("click", () => {
 
 ## API
 
-- `rovingFocus(container, selector, opts?)` → `{ focusFirst(); refresh(); dispose() }`.
-- `RovingFocusOptions` = `{ orientation?: "vertical" | "horizontal"; wrap?; homeEnd?; activate? }` (defaults: vertical, wrap, Home/End on, Enter/Space activate).
+- `rovingFocus(container, selector, opts?)` returns `{ focusFirst(); refresh(); dispose() }`.
+- `RovingFocusOptions` = `{ orientation?: "vertical" | "horizontal"; wrap?; homeEnd?; activate? }`. By default navigation is vertical and wraps, Home and End work, and Enter and Space activate an item.
 
 ## Notes
 
-- Headless: it manages only `tabindex` and focus.
-- The matching items are queried **live** on every keystroke, so rows added or removed after wiring (a filtered list, a reconciled menu) navigate correctly; call `refresh()` after a bulk re-render to restore the single-Tab-stop invariant on brand-new items.
-- Focus moving into any item (pointer or keyboard) rolls the Tab stop onto it.
+- It manages only `tabindex` and focus.
+- The matching items are queried on every keystroke, so rows added or removed after wiring, such as a filtered list, navigate correctly. Call `refresh()` after a bulk re-render to give brand-new items a single Tab stop again.
+- Call `rovingFocus` once per container. Calling it again on every render stacks keydown listeners, so one arrow press moves several steps.
+- Focus moving into any item, by pointer or keyboard, moves the Tab stop onto it.

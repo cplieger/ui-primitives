@@ -2,9 +2,7 @@
 
 `@cplieger/ui-primitives/popover`
 
-An anchored floating panel with a real placement engine. It's the interactive
-superset of [tooltip](tooltip.md) and the substrate a menu / listbox / picker
-sits on; reach for it for dropdowns, filter panels, and pickers.
+An anchored floating panel with a placement engine. It is the interactive counterpart of [tooltip](tooltip.md) and the base a menu, listbox or picker sits on. Use it for dropdowns, filter panels and pickers.
 
 ## Usage
 
@@ -33,46 +31,29 @@ placeAnchored(panelEl, anchorEl, { placement: "top", align: "center", flip: true
 
 Two exports, split by responsibility:
 
-- `placeAnchored(panel, anchor, opts?)`: the **pure positioner**. It measures
-  the anchor and the panel, then writes `panel.style.left` / `top` (and
-  `position: fixed`). Idempotent: safe to call on every scroll / resize or after
-  the panel's content changes size. `anchor` is a `PopoverAnchor`, an element or
-  a virtual rect source (see _Anchor against a coordinate_ below).
-- `createPopover(anchor, panel, opts?)` → `PopoverController`: the **controller**
-  that reveals + positions the caller's panel, tracks the anchor, and dismisses
-  on outside-click / Escape. `{ show(); hide(); toggle(); reposition(); readonly isOpen; readonly el; setOptions(patch); dispose() }`.
-  `anchor` is a `PopoverAnchor` (element or virtual). The controller is built on
-  the [popup](popup.md) primitive, so it also accepts popup's `group` and
-  `isolateEscape` options.
+- `placeAnchored(panel, anchor, opts?)` is the pure positioner. It measures the anchor and the panel, then writes `panel.style.left` and `top`, and `position: fixed`. It is idempotent, so you can call it on every scroll or resize, or after the panel's content changes size. `anchor` is a `PopoverAnchor`, an element or a virtual rect source, described under "Anchor against a coordinate" below.
+- `createPopover(anchor, panel, opts?)` returns a `PopoverController`, which reveals and positions the caller's panel, tracks the anchor, and dismisses on an outside click or Escape. Its shape is `{ show(); hide(); toggle(); reposition(); readonly isOpen; readonly el; setOptions(patch); dispose() }`. `anchor` is a `PopoverAnchor`. The controller is built on the [popup](popup.md) primitive, so it also accepts popup's `group` and `isolateEscape` options.
 
-`PlacementOptions` (shared by both):
+`PlacementOptions`, shared by both:
 
-| Option                                               | Description                                                                                                                                                                                                                                                                                                                                       | Default               |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
-| `placement?: "top" \| "bottom" \| "left" \| "right"` | side of the anchor                                                                                                                                                                                                                                                                                                                                | `"bottom"`            |
-| `align?: "start" \| "center" \| "end"`               | cross-axis edge alignment                                                                                                                                                                                                                                                                                                                         | `"start"`             |
-| `offset?: number`                                    | main-axis gap in px                                                                                                                                                                                                                                                                                                                               | `4`                   |
-| `flip?: boolean`                                     | flip to the opposite side when the chosen side would overflow and the opposite has more room                                                                                                                                                                                                                                                      | `true`                |
-| `clamp?: boolean`                                    | clamp the cross-axis coordinate into the viewport                                                                                                                                                                                                                                                                                                 | `true`                |
-| `matchAnchorWidth?: boolean \| number`               | set the panel's `min-width` to the anchor width (`true`) or to `max(anchorWidth, n)` (a number); ignored when `stretch: "viewport"` is set                                                                                                                                                                                                        | `false`               |
-| `margin?: number`                                    | viewport edge margin used by flip + clamp (and, in `stretch: "viewport"` mode, the inline inset from each viewport edge) in px                                                                                                                                                                                                                    | `8`                   |
-| `stretch?: "viewport"`                               | **full-bleed / edge-pinned mode**: the panel spans the viewport's inline axis (pinned to both inline edges, respecting `margin`) instead of being content-sized; the main axis stays anchored to the trigger and still flips; top/bottom placement only; `align`, cross-axis `clamp`, and `matchAnchorWidth` don't apply (see _Full-bleed_ below) | unset (content-sized) |
+| Option                                               | Description                                                                                                        | Default               |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------- |
+| `placement?: "top" \| "bottom" \| "left" \| "right"` | side of the anchor                                                                                                 | `"bottom"`            |
+| `align?: "start" \| "center" \| "end"`               | cross-axis edge alignment                                                                                          | `"start"`             |
+| `offset?: number`                                    | main-axis gap in px                                                                                                | `4`                   |
+| `flip?: boolean`                                     | flip to the opposite side when the chosen side would overflow and the opposite has more room                       | `true`                |
+| `clamp?: boolean`                                    | clamp the cross-axis coordinate into the viewport                                                                  | `true`                |
+| `matchAnchorWidth?: boolean \| number`               | set `min-width` to the anchor width (`true`) or to `max(anchorWidth, n)`, ignored with `stretch: "viewport"`       | `false`               |
+| `margin?: number`                                    | viewport edge margin in px for flip and clamp, and the inline inset from each edge with `stretch: "viewport"`      | `8`                   |
+| `stretch?: "viewport"`                               | full-bleed mode: the panel spans the viewport's inline axis, top and bottom placement only, see "Full-bleed" below | unset (content-sized) |
 
-`PopoverOptions extends PlacementOptions` adds `{ closeOnOutside?; closeOnEscape?; initialFocus?; returnFocus?; haspopup?; onOpen?; onClose? }` (dismissal defaults `true`; `haspopup` sets the anchor's `aria-haspopup` value: `true` (default), `"menu"`, `"listbox"`, `"tree"`, `"grid"`, or `"dialog"`; ignored for a virtual/point anchor).
+`PopoverOptions extends PlacementOptions` and adds `{ closeOnOutside?; closeOnEscape?; initialFocus?; returnFocus?; haspopup?; onOpen?; onClose? }`. Both dismissal options default to `true`. `haspopup` sets the anchor's `aria-haspopup` value to `true`, the default, or to `"menu"`, `"listbox"`, `"tree"`, `"grid"` or `"dialog"`. A virtual or point anchor ignores it.
 
-`setOptions(patch)` is a **merge-patch** over the live options: keys present in
-the patch override the current value (an explicit `undefined` clears the option
-back to its default) and absent keys are unchanged. Placement patches re-place
-an open panel immediately; dismissal-flag patches re-arm the listeners; the
-anchor is constructor-bound and cannot be patched.
+`setOptions(patch)` merges a patch into the live options. A key present in the patch overrides the current value, an explicit `undefined` resets the option to its default, and an absent key is unchanged. A placement patch re-places an open panel at once, and a dismissal patch re-arms the listeners. The anchor is fixed at construction and cannot be patched.
 
 ### Anchor against a coordinate, not just an element
 
-Both `placeAnchored` and `createPopover` take a `PopoverAnchor`: a real
-`HTMLElement` or a `VirtualAnchor`, any object exposing
-`getBoundingClientRect()`. `pointAnchor(x, y)` builds a zero-size virtual
-anchor at a viewport coordinate, which is what makes a right-click context menu
-expressible:
+Both `placeAnchored` and `createPopover` take a `PopoverAnchor`. That is a real `HTMLElement` or a `VirtualAnchor`, any object with `getBoundingClientRect()`. `pointAnchor(x, y)` builds a zero-size virtual anchor at a viewport coordinate, which is how you build a right-click context menu:
 
 ```ts
 import { createPopover, pointAnchor } from "@cplieger/ui-primitives/popover";
@@ -87,19 +68,11 @@ el.addEventListener("contextmenu", (e) => {
 });
 ```
 
-With a virtual / point anchor there is no trigger element, so **no ARIA is set
-on any element** (an `HTMLElement` anchor still gets `aria-expanded` /
-`aria-haspopup`), and outside-click dismissal closes on **any** click outside
-the panel, including where the right-click happened. `pointAnchor` takes a
-fixed point; for a moving point, build a new `pointAnchor` and call
-`reposition()` / `placeAnchored()` again.
+A virtual or point anchor has no trigger element, so no ARIA is set on any element. An `HTMLElement` anchor still gets `aria-expanded` and `aria-haspopup`. An outside click then closes the panel on any click outside it, including where the right-click happened. `pointAnchor` takes a fixed point. For a moving point, build a new `pointAnchor` and call `reposition()` or `placeAnchored()` again.
 
-### Focus is opt-in; by default the caller owns it
+### Focus is opt-in, and by default the caller owns it
 
-Pass `initialFocus` (a connected element) to focus it right after the popover
-opens, and `returnFocus` to restore focus on close: `true` refocuses whatever
-was focused when the popover opened, or pass an element to focus that element
-instead. Omit both and the controller never touches focus:
+Pass `initialFocus`, a connected element, to focus it right after the popover opens. Pass `returnFocus` to restore focus on close: `true` refocuses whatever was focused when the popover opened, and an element focuses that element instead. Omit both and the controller never touches focus:
 
 ```ts
 const filter = panelEl.querySelector("input")!;
@@ -111,13 +84,7 @@ const pop = createPopover(anchorButton, panelEl, {
 
 ### Full-bleed (`stretch: "viewport"`)
 
-For a mobile full-width dropdown or action sheet, pass `stretch: "viewport"`
-(top/bottom placement). The panel spans the viewport's inline axis pinned to
-both edges (with `margin`), while the main axis stays anchored to the trigger
-and still flips. The inset is written as an **inline style**, so your skin
-never needs `!important` to express it. The controller also adds an
-`is-stretched` marker class you can target to skin the full-width variant
-(e.g. square the top corners, drop the side borders):
+For a full-width mobile dropdown or action sheet, pass `stretch: "viewport"` with top or bottom placement. The panel spans the viewport's inline axis, pinned to both edges with `margin`. The main axis stays anchored to the trigger and still flips. `align`, cross-axis `clamp` and `matchAnchorWidth` do not apply in this mode. The inset is written as an inline style, so your skin never needs `!important` to express it. The controller also adds an `is-stretched` class, so you can skin the full-width variant, for example with square top corners and no side borders:
 
 ```ts
 // Responsive: content-sized on desktop, full-bleed under 600px, flipped on
@@ -154,21 +121,14 @@ narrow.addEventListener("change", () => {
 | `.uip-popover.is-leaving`      | leave fade before `[hidden]`                                                     |         |
 | `.uip-popover.is-stretched`    | full-bleed skin hook: square edges / drop side borders on the full-width variant |         |
 
-**Enter and leave animations.** Opening plays the optional, skinnable
-`.uip-popover.is-open` enter fade. Closing swaps `is-open` → `is-leaving` and
-keeps the panel in the DOM until its transition ends (or a fallback timeout
-fires), then sets `[hidden]`, so the panel animates out instead of vanishing.
-`isOpen` flips to `false` the instant you call `hide()`; a `show()` (or
-`toggle()`) during the fade cancels the leave and re-reveals. Tune the fade
-with `--uip-popover-leave-duration` / `--uip-popover-leave-easing`;
-`prefers-reduced-motion` neutralizes it to near-zero so the lifecycle still
-completes at once.
+Opening plays the optional `.uip-popover.is-open` enter fade, which you can skin. Closing swaps `is-open` for `is-leaving` and keeps the panel in the DOM until its transition ends or a fallback timeout fires. Then it sets `[hidden]`, so the panel animates out instead of vanishing. `isOpen` turns `false` the moment you call `hide()`. A `show()` or `toggle()` during the fade cancels the leave and reveals the panel again. Tune the fade with `--uip-popover-leave-duration` and `--uip-popover-leave-easing`. Under `prefers-reduced-motion` the fade drops to near zero, so closing still completes at once.
 
 ## Notes
 
-- Flipping and clamping stay correct above the mobile on-screen keyboard (the engine reads the viewport from `window.visualViewport` when present). An open popover repositions on scroll, window resize, and `visualViewport` resize / scroll. `reposition()` is the seam for async content: load the panel's contents, then call it to re-measure and re-clamp immediately.
-- Escape is **isolated**: an open popover consumes the keystroke (`stopPropagation()`), so a popover opened inside a modal doesn't also close the modal underneath. Deeper Escape coordination (e.g. nested document-level handlers) remains the caller's concern.
-- The controller does **not** build the panel: you pass it in, so `dispose()` hides + unlistens but leaves your element in the DOM. It manages only `aria-expanded` / `aria-haspopup` on the anchor (both removed on `dispose()`) and forces no `role` on the panel; set `role="menu"` / `"listbox"` / `"dialog"` yourself to fit.
-- `--uip-z-popover` (`1100`) orders the popover below toast (`9999`) / tooltip (`10000`) in the base layer. A modal's top layer beats any base-layer `z-index`, so DOM position, not z-index, stacks a popover over it: a **disconnected** panel opened from within a modal is hosted INTO that `<dialog>` automatically, while a **caller-connected** panel stays exactly where you put it. So when a popover opens from inside a modal, connect its panel inside that dialog (a panel connected outside would paint behind the modal and be inert).
-- Like tooltip, popover positions with JS (`getBoundingClientRect` + `position: fixed`), not the native Popover API or CSS anchor positioning.
-- Pair it with [roving-focus](roving-focus.md) so a `role="menu"` panel keeps its interaction promise (the keyboard half of the WAI-ARIA menu pattern).
+- Flipping and clamping stay correct above the on-screen keyboard on mobile, because the engine reads the viewport from `window.visualViewport` when it exists. An open popover repositions on scroll, on window resize, and on `visualViewport` resize and scroll.
+- `reposition()` is the call for async content. Load the panel's contents, then call it to re-measure and re-clamp at once.
+- An open popover consumes Escape with `stopPropagation()`, so a popover opened inside a modal does not also close the modal underneath. Deeper coordination with other document-level Escape handlers is the caller's job.
+- The controller does not build the panel. You pass it in, so `dispose()` hides it and removes the listeners but leaves your element in the DOM. The controller manages only `aria-expanded` and `aria-haspopup` on the anchor, removing both on `dispose()`. It sets no `role` on the panel, so set `role="menu"`, `"listbox"` or `"dialog"` yourself.
+- `--uip-z-popover` (`1100`) orders the popover below toast (`9999`) and tooltip (`10000`) in the page. A modal sits in the top layer, above any `z-index`, so DOM position decides whether a popover shows over it. A disconnected panel opened from inside a modal is placed into that `<dialog>` automatically. A panel you connected yourself stays where you put it. So when a popover opens from inside a modal, connect its panel inside that dialog. A panel connected outside it would paint behind the modal and ignore input.
+- Like tooltip, popover positions with JavaScript, through `getBoundingClientRect` and `position: fixed`, rather than the native Popover API or CSS anchor positioning.
+- Pair it with [roving-focus](roving-focus.md) so a `role="menu"` panel gets the arrow-key navigation the WAI-ARIA menu pattern expects.

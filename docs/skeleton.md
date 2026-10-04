@@ -2,11 +2,7 @@
 
 `@cplieger/ui-primitives/skeleton`
 
-Anti-flicker timing for a "show a skeleton, then replace it with content" load.
-Pure timing, no DOM: you paint the skeleton and the content; it owns **when**.
-Two flickers are avoided: a fast load never paints the skeleton at all
-(show-delay), and a painted skeleton never instantly vanishes (opt-in
-min-visible).
+Timing for a load that shows a skeleton placeholder and then replaces it with content, so neither flickers. It is pure timing with no DOM. You paint the skeleton and the content, and it decides when. A fast load never paints the skeleton, because of a show delay. An opt-in minimum keeps a painted skeleton from vanishing the instant it appears.
 
 ## Usage
 
@@ -33,13 +29,13 @@ s.cancel(); // clears a pending skeleton, or tears down a painted one
 
 ## API
 
-- `skeletonTiming(show, opts?)` → `{ commit(render); cancel() }`.
-- `SkeletonTimingOptions` = `{ showDelayMs? (150); minVisibleMs? (0); signal? }`.
+- `skeletonTiming(show, opts?)` returns `{ commit(render); cancel() }`.
+- `SkeletonTimingOptions` = `{ showDelayMs?; minVisibleMs?; signal? }`, with defaults of 150 for `showDelayMs` and 0 for `minVisibleMs`.
 
 ## Notes
 
-- `commit(render)` paints the content: immediately when the skeleton never painted, else after min-visible has elapsed, running the `show` teardown (if any) right before the render.
-- `cancel()` abandons the load: it clears a pending skeleton, tears down a painted one, and drops a commit render still deferred by min-visible.
-- Both are idempotent; the first settle wins.
-- The `signal` only suppresses a skeleton that has not painted yet; it never retracts one, and a `commit` render always runs (guard your own render closure for stale-sensitive results).
+- `commit(render)` paints the content. It runs at once when the skeleton never painted, and otherwise after the minimum visible time has passed. Any teardown `show` returned runs right before the render.
+- `cancel()` abandons the load. It clears a pending skeleton, tears down a painted one, and drops a commit render still waiting on the minimum visible time.
+- Both are idempotent, and the first one called wins.
+- The `signal` only stops a skeleton that has not painted yet. It never removes a painted one, and a `commit` render always runs, so guard your own render closure against stale results.
 - Keep `minVisibleMs` at 0 when the skeleton shares its container with the real content and must clear the instant the load completes.

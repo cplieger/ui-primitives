@@ -2,8 +2,7 @@
 
 `@cplieger/ui-primitives/announce`
 
-Updates a shared visually-hidden ARIA live region so screen readers announce
-the message.
+Updates a shared, visually hidden ARIA live region so screen readers announce the message.
 
 ## Usage
 
@@ -16,7 +15,7 @@ announce("Connection lost", "assertive");
 
 ## API
 
-- `announce(message, urgency?)`: `polite` (default) and `assertive` use separate regions.
+- `announce(message, urgency?)` announces a message. `polite`, the default, and `assertive` use separate regions.
 
 ## CSS
 
@@ -26,5 +25,5 @@ announce("Connection lost", "assertive");
 
 ## Notes
 
-- Repeated identical messages still announce.
-- While a modal `<dialog>` is open, the region is re-homed into it at announce time (content outside the dialog subtree is inert and silent to assistive technology), then back to `document.body` on the next announce after it closes.
+- A repeated identical message is announced again, because the region is cleared and the text is set again 100ms later.
+- While a modal `<dialog>` is open, each announcement moves the region into it, because content outside the dialog is inert and silent to assistive technology. The next announcement after the dialog closes moves it back to `document.body`.

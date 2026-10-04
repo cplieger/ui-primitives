@@ -2,8 +2,7 @@
 
 `@cplieger/ui-primitives/toast`
 
-Stacked, queued, auto-dismissing notifications, with a shared default
-singleton.
+Stacked, queued, auto-dismissing notifications, with a shared default toaster.
 
 ## Usage
 
@@ -20,13 +19,7 @@ const toaster = createToaster({ maxVisible: 5, maxQueue: 50, defaultDuration: 60
 toaster.show("Custom", { level: "info", duration: 2000 });
 ```
 
-**Embedding (`container`) and latest-wins (`mode: "replace"`).** `container`
-confines the stack to a widget's own root instead of `document.body` (a host
-`transform`/`contain` becomes the fixed-position containing block, scoping the
-stack to the widget). `mode: "replace"` gives single-slot latest-wins
-semantics: a new toast instantly replaces the visible one, nothing queues; the
-right shape for transient widget feedback ("Copied") where a queue of stale
-messages would be wrong.
+Two options suit a toaster embedded in a widget. `container` keeps the stack inside the widget's own root instead of `document.body`. A host with `transform` or `contain` becomes the containing block for the fixed-position stack, which scopes the stack to the widget. `mode: "replace"` keeps one toast at a time, latest wins. A new toast replaces the visible one at once and nothing queues, which suits short feedback such as "Copied", where a queue of stale messages would be wrong.
 
 ```ts
 const widgetToast = createToaster({ container: widgetRoot, mode: "replace" });
@@ -35,13 +28,13 @@ widgetToast.info("Copied");
 
 ## API
 
-- `toast: Toaster`: the default shared toaster. `info` / `success` / `error` are the same methods as free functions.
-- `Toaster.show(message, opts?)` → returns a `() => void` dismiss function.
-- `Toaster.info(msg)` / `success(msg)` / `error(msg, retry?)` / `clear()` / `dispose()`.
-- `createToaster(opts?: ToasterOptions)`: an isolated instance. Call `dispose()` when the owning component unmounts. (The shared `toast` singleton lives for the app's lifetime and is never disposed.)
+- `toast: Toaster` is the default shared toaster. `info`, `success` and `error` are the same methods as free functions.
+- `Toaster.show(message, opts?)` returns a `() => void` dismiss function.
+- `Toaster.info(msg)`, `success(msg)`, `error(msg, retry?)`, `clear()` and `dispose()`.
+- `createToaster(opts?: ToasterOptions)` builds an isolated instance. Call `dispose()` when the owning component unmounts. The shared `toast` lives for the app's lifetime and is never disposed.
 - `ToasterOptions` = `{ maxVisible?; maxQueue?; defaultDuration?; container?: HTMLElement; mode?: "stack" | "replace" }`.
-- `ToastOptions` = `{ level?: "info" | "success" | "error"; duration?: number; retry?: ToastRetry }` (`duration: 0` = sticky).
-- `ToastRetry` = `{ label?: string; onClick: () => void | Promise<void> }` (async rejections + sync throws are caught and logged).
+- `ToastOptions` = `{ level?: "info" | "success" | "error"; duration?: number; retry?: ToastRetry }`. A `duration` of `0` makes the toast sticky.
+- `ToastRetry` = `{ label?: string; onClick: () => void | Promise<void> }`. A rejected promise or a thrown error from `onClick` is caught and logged.
 
 ## CSS
 
@@ -56,7 +49,7 @@ widgetToast.info("Copied");
 | `--uip-toast-enter-easing`                                 | toast enter easing (timing function)                           | `ease`         |
 | `--uip-toast-leave-duration`                               | toast leave transition                                         | `150ms`        |
 | `--uip-toast-leave-easing`                                 | toast leave easing                                             | `ease`         |
-| `--uip-toast-duration`                                     | progress-bar duration; **set inline per toast by the library** | `4000ms`       |
+| `--uip-toast-duration`                                     | progress-bar duration, set inline on each toast by the library | `4000ms`       |
 | `--uip-toast-easing`                                       | progress-bar easing (timing function)                          | `linear`       |
 | `--uip-toast-progress-size`                                | progress-bar thickness                                         | `2px`          |
 | `--uip-toast-progress-color`                               | progress-bar color                                             | `currentcolor` |
@@ -66,27 +59,18 @@ widgetToast.info("Copied");
 | `.uip-toast-retry`                                         | toast retry button                                             |                |
 | `.uip-toast-progress`                                      | toast countdown bar (`aria-hidden`)                            |                |
 
-State classes toggled at runtime: the `.uip-toast` lifecycle is `is-entering` →
-`is-shown` → `is-leaving`.
+The library moves each `.uip-toast` through three state classes at runtime: `is-entering`, then `is-shown`, then `is-leaving`.
 
-**Layout contract:** a toast is a flex column. The message takes the first row
-and the retry button takes a row of its own, at the inline end, separated by
-`--uip-toast-row-gap`. Style the button freely, but do not give it a margin to
-separate it from the message: the gap owns that spacing. Both rows sit above the
-countdown bar, so a skin needs no stacking rule of its own.
+A toast is a flex column. The message takes the first row, and the retry button takes a row of its own at the inline end, separated by `--uip-toast-row-gap`. Style the button freely, but do not give it a margin to separate it from the message, because the gap owns that spacing. Both rows sit above the countdown bar, so a skin needs no stacking rule of its own.
 
-**Countdown contract:** the toast progress bar animates from the
-`--uip-toast-duration` custom property, which the library writes inline on each
-timed toast element. Do not set `transition-duration`/`animation-duration`
-inline for the progress bar; override the timing by supplying the toast's
-duration in code, and style the bar's color/size via the properties above.
+The progress bar animates from the `--uip-toast-duration` custom property, which the library writes inline on each timed toast. Do not set `transition-duration` or `animation-duration` inline on the bar. Change the timing by passing the toast's duration in code, and style the bar's color and size with the properties above.
 
 ## Notes
 
-- Up to `maxVisible` (default 3) show at once; the rest queue (cap `maxQueue`, default 20, dropping the oldest).
-- `info`/`success` auto-dismiss after 4s; `error` is sticky.
-- Hover or focus pauses the countdown; it resumes only once both the hover and the focus have ended (so a focused toast never auto-dismisses under the cursor).
-- Click or press **Escape** (newest first) to dismiss; each toast is keyboard-focusable (`tabindex="0"`), and a focused toast can also be dismissed with **Enter** or **Space**.
-- Each toast is announced through the shared `announce()` live region (`error` interrupts with **assertive** urgency; `info`/`success` are **polite**), and a visually-hidden "Click to dismiss." hint keeps a focused toast self-describing.
-- Importing the module has no DOM side effect: the stack is created lazily on the first toast shown.
-- Toasts mount on `document.body`, except while a modal `<dialog>` is open: `showModal()` inerts everything outside the dialog subtree, so the default stack auto-hosts into the topmost open modal dialog. Toasts raised while a modal is open show over it, stay clickable, and are still announced; the stack returns to `document.body` when the modal closes. A toaster created with an explicit `container` is pinned to it and never auto-hosts.
+- Up to `maxVisible` toasts show at once, 3 by default. The rest queue up to `maxQueue`, 20 by default, and the oldest queued toast drops first.
+- `info` and `success` auto-dismiss after 4s. `error` stays until dismissed.
+- Hover or focus pauses the countdown. It resumes only once both the hover and the focus have ended, so a focused toast never auto-dismisses under the cursor.
+- A click dismisses a toast, and Escape dismisses the newest first. Each toast is keyboard-focusable (`tabindex="0"`), and Enter or Space dismisses a focused toast.
+- Each toast is announced through the shared `announce()` live region. `error` interrupts with assertive urgency, and `info` and `success` are polite. A visually hidden "Click to dismiss." hint keeps a focused toast self-describing.
+- Importing the module has no DOM side effect. The stack is created on the first toast shown.
+- Toasts mount on `document.body`, except while a modal `<dialog>` is open. `showModal()` makes everything outside the dialog inert, so the default stack moves into the topmost open modal dialog. Toasts raised while a modal is open show over it, stay clickable and are still announced. The stack returns to `document.body` when the modal closes. A toaster created with an explicit `container` stays in it and never moves.

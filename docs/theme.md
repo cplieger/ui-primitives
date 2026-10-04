@@ -2,8 +2,7 @@
 
 `@cplieger/ui-primitives/theme`
 
-Persisted tri-state theme (`light` / `dark` / `system`). While in `system` it
-follows the OS preference live via `matchMedia`.
+A stored theme choice of `light`, `dark` or `system`. In `system` it follows the OS preference live through `matchMedia`.
 
 ## Usage
 
@@ -25,10 +24,10 @@ theme.dispose();
 
 ## API
 
-- `createTheme(opts)` → `ThemeController` with `get()`, `set(choice)`, `resolved()`, `cycle()`, `getSystem()`, `dispose()`.
+- `createTheme(opts)` returns a `ThemeController` with `get()`, `set(choice)`, `resolved()`, `cycle()`, `getSystem()` and `dispose()`.
 - `ThemeOptions` = `{ storageKey; storage?; attribute?; onChange? }`. `attribute` defaults to `data-theme` and is set on `<html>` with the resolved value.
-- `themeInitSnippet(storageKey, attribute?)` → a self-contained IIFE **string** to inline in a blocking `<head>` script so the correct theme paints before stylesheets load (a real import can't run there).
-- `themeInitSnippetFromJSON(storageKey, field, attribute?)` → the anti-FOUC companion for the JSON-blob case: the inline IIFE reads `localStorage[storageKey]`, `JSON.parse`s it, extracts `field`, and applies the resolved theme before paint.
+- `themeInitSnippet(storageKey, attribute?)` returns a self-contained script as a string. Inline it in a blocking `<head>` script so the right theme paints before stylesheets load, a place where a real import cannot run.
+- `themeInitSnippetFromJSON(storageKey, field, attribute?)` does the same when the theme is a field of a JSON value. The inline script reads `localStorage[storageKey]`, parses it, takes `field`, and applies the resolved theme before the first paint.
 
 ```html
 <script>
@@ -38,9 +37,7 @@ theme.dispose();
 
 ### Custom `storage` adapter
 
-By default the preference is a bare `localStorage[storageKey]` string. Pass a
-`storage` adapter to persist it anywhere else, e.g. a `theme` field of a JSON
-blob you already own:
+By default the choice is a plain string in `localStorage[storageKey]`. Pass a `storage` adapter to keep it anywhere else, for example as a `theme` field of a JSON value you already own:
 
 ```ts
 const KEY = "app.ui-state";
@@ -57,15 +54,10 @@ const theme = createTheme({
 });
 ```
 
-`ThemeStorage` is `{ get(): string | null; set(value: string): void }`. Only
-persistence goes through it; tri-state resolution, following the OS while
-`system`, and the applied attribute are unchanged. A **2-state** app
-(light/dark, no "system") simply never calls `set("system")`; nothing forces
-tri-state. A throwing adapter (blocked storage, bad JSON) degrades to
-in-memory.
+`ThemeStorage` is `{ get(): string | null; set(value: string): void }`. Only storage goes through it. Resolving the choice, following the OS in `system` and setting the attribute work the same way. A two-state app with only light and dark never calls `set("system")`, and nothing forces the third state. An adapter that throws, because storage is blocked or the JSON is bad, falls back to keeping the choice in memory.
 
 ## Notes
 
-- Both snippets read `window.localStorage` directly; they run before any module loads, so they **cannot** use a custom `storage` adapter (use the plain `themeInitSnippet` for a bare key, `themeInitSnippetFromJSON` for a JSON field).
-- When storage is unavailable, the blob is missing/malformed, or the field is absent / `"system"`, the snippets fall back to the OS preference (`prefers-color-scheme`), matching `createTheme`'s runtime default, so dark-mode users don't get a flash of light.
-- The `storageKey`, `field`, and `attribute` are escaped for the inline-`<script>` context, so a value containing `</script>` (or other HTML-breaking characters) is safe.
+- Both snippets read `window.localStorage` directly. They run before any module loads, so they cannot use a custom `storage` adapter. Use `themeInitSnippet` for a plain key and `themeInitSnippetFromJSON` for a JSON field.
+- The snippets fall back to the OS preference, `prefers-color-scheme`, when storage is unavailable, the value is missing or malformed, or the field is absent or `"system"`. That matches `createTheme`'s default at runtime, so a dark-mode user does not see a flash of the light theme.
+- The `storageKey`, `field` and `attribute` are escaped for an inline `<script>`, so a value containing `</script>` or other HTML-breaking characters is safe.

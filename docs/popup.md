@@ -2,12 +2,7 @@
 
 `@cplieger/ui-primitives/popup`
 
-The reveal + light-dismiss lifecycle **without placement**: the behavior half
-of [popover](popover.md), exposed on its own. Reach for it when the panel is
-in-flow or self-positioned (an expandable pill/card, an inline tray, a bottom
-sheet) and you want the standardized dismiss behavior: outside-click, isolated
-Escape, single-open groups, trigger ARIA, opt-in focus, and the enter/leave
-state-class lifecycle.
+The open and light-dismiss behavior of [popover](popover.md), without placement. Use it for a panel that sits in the page flow or that you position yourself. Examples are an expandable card, an inline tray or a bottom sheet. It gives you outside-click dismissal, isolated Escape and single-open groups. It also sets ARIA on the trigger, offers opt-in focus, and adds open and close state classes.
 
 ## Usage
 
@@ -26,39 +21,22 @@ input.addEventListener("focus", () => {
 
 ## API
 
-- `createPopup(panel, opts?)` → `{ show(); hide(); toggle(); readonly isOpen; readonly el; setOptions(patch); dispose() }`.
+- `createPopup(panel, opts?)` returns `{ show(); hide(); toggle(); readonly isOpen; readonly el; setOptions(patch); dispose() }`.
 - `PopupOptions` = `{ trigger?: HTMLElement | null; closeOnOutside?; closeOnEscape?; isolateEscape?; group?; initialFocus?; returnFocus?; haspopup?; onOpen?; onClose? }`.
-- `closePopupGroup(group)`: close every open popup in a group.
+- `closePopupGroup(group)` closes every open popup in a group.
 
-The `trigger` gets `aria-expanded` / `aria-haspopup` and is exempt from
-outside-click dismissal (so its own click handler can toggle); the controller
-does **not** wire activation on it, the caller owns that. `group` gives
-single-open coordination: opening one popup closes any open peer with the same
-group name. `isolateEscape` (default `true`) stops the consumed Escape's
-propagation, popover-style; disable it when an app-level Escape coordinator
-must still observe the key. `setOptions` is the same merge-patch as
-[popover](popover.md)'s.
+The `trigger` gets `aria-expanded` and `aria-haspopup`. A click on the trigger does not count as an outside click, so its own click handler can toggle the panel. The controller does not wire activation on the trigger. That stays with the caller. With `group`, opening one popup closes any open popup with the same group name. `isolateEscape`, `true` by default, stops the Escape it consumed from propagating, as popover does. Turn it off when an app-level Escape handler must still see the key. `setOptions` merges a patch the same way as [popover](popover.md)'s.
 
 ## CSS
 
-| Property / class                               | Description                                                                      | Default |
-| ---------------------------------------------- | -------------------------------------------------------------------------------- | ------- |
-| `.uip-popup`                                   | panel wired by `createPopup` (no placement; only `[hidden]` is styled)           |         |
-| `.uip-popup.is-open` / `.uip-popup.is-leaving` | lifecycle state classes (all motion is the app's; the base ships none for popup) |         |
+| Property / class                               | Description                                                                | Default |
+| ---------------------------------------------- | -------------------------------------------------------------------------- | ------- |
+| `.uip-popup`                                   | panel wired by `createPopup`, with no placement and only `[hidden]` styled |         |
+| `.uip-popup.is-open` / `.uip-popup.is-leaving` | lifecycle state classes, with all motion left to the app                   |         |
 
-**Motion is entirely yours.** The library adds `uip-popup` + `is-open` on
-reveal (the resting state is committed first, so a CSS _transition_ from it
-plays; an _animation_ on `is-open` works too) and swaps `is-open` →
-`is-leaving` on conceal, setting `[hidden]` once the panel's first
-`transitionend` fires (or a 400ms ceiling when no transition runs at all — a
-leave transition skinned longer than that is truncated). The base stylesheet
-ships only the `[hidden]` display rule: no default motion, no custom properties.
+All motion is yours. On open, the library adds `uip-popup` and `is-open` after the resting state is committed. A CSS transition from that state then plays, and an animation on `is-open` works too. On close, it swaps `is-open` for `is-leaving`, then sets `[hidden]` when the panel's first `transitionend` fires. When no transition runs, a 400ms ceiling sets it instead, so a close transition skinned longer than 400ms is cut short. The base stylesheet ships only the `[hidden]` display rule, with no default motion and no custom properties.
 
-One case the reveal cannot animate out of: `hide()` in the **same task** as
-`show()`. The reveal starts a transition at zero progress, and reversing it
-targets the value it is already at, so CSS starts nothing and `[hidden]` waits
-for the ceiling. Hide from a later task (a click handler, a timer) and both
-directions animate.
+A `hide()` in the same task as `show()` cannot animate. The open transition starts at zero progress. Reversing it targets the value it is already at, so CSS starts nothing and `[hidden]` waits for the ceiling. Hide from a later task, such as a click handler or a timer, and both directions animate.
 
 ```css
 .my-card {
@@ -76,4 +54,4 @@ directions animate.
 
 ## Notes
 
-- A disconnected panel is hosted on `show()`: into the trigger's nearest open `<dialog>` ancestor, else the topmost open dialog, else `<body>`. A caller-connected panel (the usual in-flow case) stays exactly where you put it.
+- On `show()`, a disconnected panel is placed into the trigger's nearest open `<dialog>` ancestor, else the topmost open dialog, else `<body>`. A panel you connected yourself, the usual in-flow case, stays where you put it.

@@ -2,8 +2,7 @@
 
 `@cplieger/ui-primitives/ask`
 
-The Promise-shaped question dialog: the styled, non-blocking replacement for
-**both** `window.confirm` and `window.prompt`.
+The Promise-shaped question dialog. It is the styled, non-blocking replacement for both `window.confirm` and `window.prompt`.
 
 ## Usage
 
@@ -31,11 +30,9 @@ const pw = await ask("Enter your password to continue:", {
 
 ## API
 
-- `ask(message, opts?)` → `Promise<boolean>`; with `input` set →
-  `Promise<string | null>` (the overloads narrow the return type from the
-  options shape).
+- `ask(message, opts?)` returns `Promise<boolean>`. With `input` set it returns `Promise<string | null>`, and the overloads narrow the return type from the options shape.
 - `AskOptions` = `{ title?; confirmLabel?; cancelLabel?; variant?: "normal" | "destructive"; input?: AskInput | true }`.
-- `AskInput` = `{ type?: "text" | "password"; initialValue?; placeholder?; maxLength?; autocomplete? }` (`input: true` = a default text input).
+- `AskInput` = `{ type?: "text" | "password"; initialValue?; placeholder?; maxLength?; autocomplete? }`. `input: true` gives a default text input.
 
 ## CSS
 
@@ -47,13 +44,11 @@ const pw = await ask("Enter your password to continue:", {
 | `.uip-ask.is-leaving`                                      | fade-out state class                                           |         |
 | `.uip-ask-ok.is-destructive`                               | destructive emphasis on the OK button                          |         |
 
-The fade and backdrop dim ride the shared `--uip-dialog-leave-duration` /
-`--uip-dialog-leave-easing` / `--uip-backdrop` tokens (see the README's CSS
-contract and [dialog](dialog.md)).
+The fade and the backdrop dim use the shared `--uip-dialog-leave-duration`, `--uip-dialog-leave-easing` and `--uip-backdrop` tokens. See the README's CSS contract and [dialog](dialog.md).
 
 ## Notes
 
-- Renders a native `<dialog class="uip-ask">`, labelled by its title (`aria-labelledby`) and described by its message body (`aria-describedby`), or labelled by the message when there is no title. `showModal()` provides the focus trap and focus restoration.
-- `variant: "destructive"` upgrades it to `role="alertdialog"` and adds `is-destructive` to the OK button for skinning; on a boolean ask it also focuses **Cancel** (so a keyboard user can't confirm by accident), while an input ask always focuses its input.
-- With `input` set, the dialog gains the `.uip-ask--input` modifier, the message becomes the input's `<label>`, and **OK** or **Enter** resolve the input's value **as-is**: an empty submission resolves `""`, distinct from the `null` of a cancellation (trim/empty-to-null mapping is the caller's policy). The input is focused on open with any `initialValue` selected, like `window.prompt`.
-- Cancellation is uniform: Cancel, Escape, a backdrop click, or preemption by a newer `ask()` resolve `false` (boolean) / `null` (input). Preemption spans both shapes: one question at a time, whatever its kind.
+- `ask()` renders a native `<dialog class="uip-ask">`. Its title labels it (`aria-labelledby`) and its message body describes it (`aria-describedby`). With no title, the message labels it. `showModal()` provides the focus trap and focus restoration.
+- `variant: "destructive"` sets `role="alertdialog"` and adds `is-destructive` to the OK button for skinning. On a boolean ask it also focuses Cancel, so a keyboard user cannot confirm by accident. An input ask always focuses its input.
+- With `input` set, the dialog gains the `.uip-ask--input` modifier and the message becomes the input's `<label>`. OK or Enter resolve the input's value as it is. An empty submission resolves `""`, which is distinct from the `null` of a cancellation, and trimming or mapping empty to `null` is the caller's choice. The input is focused on open with any `initialValue` selected, like `window.prompt`.
+- Cancellation works the same way everywhere. Cancel, Escape, a backdrop click, or a newer `ask()` resolve `false` for a boolean ask and `null` for an input ask. A newer `ask()` replaces an open one of either shape, so one question shows at a time.
