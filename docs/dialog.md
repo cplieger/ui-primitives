@@ -2,9 +2,7 @@
 
 `@cplieger/ui-primitives/dialog`
 
-Behavior helpers for native `<dialog>` elements: the platform gives focus
-containment, the top layer, and Escape for free; these add backdrop dismissal
-and a fade-out close lifecycle.
+Behavior helpers for native `<dialog>` elements. The platform gives focus containment, the top layer and Escape. These helpers add backdrop dismissal, a dismiss guard and a fade-out close.
 
 ## Usage
 
@@ -22,10 +20,10 @@ closeDialog(myDialog, () => console.log("closed"));
 
 ## API
 
-- `createDialog(dialog, opts?)` → `{ open(); close(); readonly el; dispose() }`. Adds the `uip-dialog` class for the base skin.
+- `createDialog(dialog, opts?)` returns `{ open(); close(); readonly el; dispose() }` and adds the `uip-dialog` class for the base stylesheet.
 - `DialogOptions` = `{ closeOnBackdrop?; closeOnEscape?; canDismiss?: () => boolean; onClose? }`.
-- `openDialog(dialog)`: `showModal()` with a graceful fallback.
-- `closeDialog(dialog, onClosed?)`: fade out via `is-leaving`, then close.
+- `openDialog(dialog)` calls `showModal()`, with a fallback for engines that lack it.
+- `closeDialog(dialog, onClosed?)` fades the dialog out with `is-leaving`, then closes it.
 
 ## CSS
 
@@ -36,13 +34,12 @@ closeDialog(myDialog, () => console.log("closed"));
 | `.uip-dialog`                 | a `<dialog>` wrapped by `createDialog` |         |
 | `.uip-dialog.is-leaving`      | fade-out state class                   |         |
 
-The backdrop dim is the shared `--uip-backdrop` token (see the README's CSS
-contract).
+The backdrop dim is the shared `--uip-backdrop` token, described in the README's CSS contract.
 
 ## Notes
 
-- The backdrop-click guard only closes when a press **starts and ends** on the dialog element itself, so a drag-select that escapes the dialog does not dismiss it.
-- **Conditional dismissal (`canDismiss`).** The guard is consulted on every USER dismissal attempt (backdrop click or Escape); returning `false` refuses it while keeping the wiring armed, so later attempts re-consult it. Programmatic `close()` always closes. Put any "why not" feedback inside the guard:
+- A backdrop click closes the dialog only when the press starts and ends on the dialog element itself, so a drag-select that leaves the dialog does not dismiss it.
+- `canDismiss` is asked on every user dismissal, a backdrop click or Escape. When it returns `false`, the dialog stays open and the wiring stays armed, so the next attempt asks again. A programmatic `close()` always closes. Put any "why not" feedback inside the guard:
 
 ```ts
 const settings = createDialog(dlg, {
@@ -56,4 +53,5 @@ const settings = createDialog(dlg, {
 });
 ```
 
-- Use dialog to add behavior to a `<dialog>` element already in your markup; use [modal](modal.md) to build the `<dialog>` from a content element instead.
+- `openDialog` cancels a fade-out still in progress, so you can reopen a dialog during its close animation.
+- Use dialog to add behavior to a `<dialog>` element already in your markup. Use [modal](modal.md) to build the `<dialog>` from a content element instead.

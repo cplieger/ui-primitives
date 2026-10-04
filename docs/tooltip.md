@@ -2,8 +2,7 @@
 
 `@cplieger/ui-primitives/tooltip`
 
-Delegated, attribute-driven tooltips: one controller handles every trigger on
-the page through a `data-uip-tooltip` attribute.
+Delegated, attribute-driven tooltips. One controller handles every trigger on the page through a `data-uip-tooltip` attribute.
 
 ## Usage
 
@@ -18,8 +17,7 @@ initTooltips(); // idempotent; installs one delegated controller
 <button data-uip-tooltip="Line one&#10;Line two">Multi</button>
 ```
 
-A trigger whose hit box is bigger than the ink it paints names that ink, and the
-tooltip is placed against the mark instead of the trigger's own centre:
+A trigger whose hit box is bigger than the ink it paints can name that ink. The tooltip is then placed against the mark instead of the trigger's own centre:
 
 ```html
 <!-- a row-wide control whose only ink is a leading glyph -->
@@ -31,8 +29,8 @@ tooltip is placed against the mark instead of the trigger's own centre:
 
 ## API
 
-- `initTooltips(opts?)`: install once. `TooltipOptions` = `{ attribute?; delayCold?; delayWarm?; cooldown? }` (defaults `data-uip-tooltip`, 500ms, `delayCold`, 500ms).
-- `<attribute>-anchor` on a descendant of a trigger: the ink the tooltip points at. Derived from `attribute`, so renaming the trigger attribute renames this one.
+- `initTooltips(opts?)` installs the controller once. `TooltipOptions` = `{ attribute?; delayCold?; delayWarm?; cooldown? }`, with defaults `data-uip-tooltip`, 500ms, the value of `delayCold`, and 500ms.
+- `<attribute>-anchor` on a descendant of a trigger marks the ink the tooltip points at. Its name follows `attribute`, so renaming the trigger attribute renames this one.
 
 ## CSS
 
@@ -46,9 +44,10 @@ tooltip is placed against the mark instead of the trigger's own centre:
 
 ## Notes
 
-- One delegated controller handles every trigger. Every hover waits `delayCold` (500ms, the hover time a native `title` waits out), because `delayWarm` defaults to `delayCold`. Set `delayWarm` lower to opt into a warm group, where a peer shows faster while the group stays warm (`cooldown`) — quick to scan, but on a dense toolbar it reads as tooltips appearing with no hover time at all.
-- The trigger text is appended to the anchor's `aria-describedby` (any token the app already set is preserved); `\n` in the value splits into `<br>`-separated lines.
-- Escape, scroll, and window blur hide it; on scroll a tooltip vanishes like a native `title`, where [popover](popover.md), an opened surface, tracks and repositions instead.
-- Positioned `fixed` above the anchor (flips below when there is no room), clamped to the viewport.
-- A marked anchor moves the POSITION only: hover, focus and `aria-describedby` stay on the trigger. The mark's box is intersected with the trigger's, so ink the trigger clips — an ellipsised file name — cannot pull the tooltip off the control, and a mark that renders nothing falls back to the trigger.
+- Every hover waits `delayCold`, 500ms, the time a native `title` waits, because `delayWarm` defaults to `delayCold`.
+- Set `delayWarm` lower to opt into a warm group. While the group stays warm, for `cooldown`, the next tooltip shows faster. That makes a row quick to scan, but on a dense toolbar it reads as tooltips appearing with no hover time at all.
+- The trigger text is added to the anchor's `aria-describedby`, and any token the app already set stays. A `\n` in the value splits it into lines separated by `<br>`.
+- Escape, scroll and window blur hide the tooltip. On scroll it vanishes like a native `title`, while [popover](popover.md), an opened surface, tracks and repositions instead.
+- The tooltip is positioned `fixed` above the anchor, flips below when there is no room, and is clamped to the viewport.
+- A marked anchor moves the position only. Hover, focus and `aria-describedby` stay on the trigger. The mark's box is intersected with the trigger's, so ink the trigger clips, such as an ellipsised file name, cannot pull the tooltip off the control. A mark that renders nothing falls back to the trigger.
 - When the anchor sits inside an open modal `<dialog>`, the tooltip is appended into that dialog so it stacks over the modal.

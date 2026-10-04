@@ -2,9 +2,7 @@
 
 `@cplieger/ui-primitives/disclosure`
 
-An animated collapsible (show/hide) region wired to a trigger, per the WAI-ARIA
-disclosure pattern. Headless; it wires two elements you supply and creates no
-DOM.
+An animated show-and-hide region wired to a trigger, per the WAI-ARIA disclosure pattern. It wires two elements you supply and creates no DOM.
 
 ## Usage
 
@@ -25,17 +23,12 @@ d.isOpen; // boolean
 
 ## API
 
-- `createDisclosure(trigger, region, opts?)` → `{ open(); close(); toggle(); readonly isOpen; dispose() }`. `trigger` is an `HTMLElement` **or `null`** (region-only mode, below).
-- `DisclosureOptions` = `{ open?; animate?; onToggle?: (open: boolean, source: "user" | "api") => void }` (defaults: closed, animated). `source` distinguishes a trigger toggle (`"user"`) from a controller call (`"api"`); that is the seam an auto-collapse state machine needs to latch "the user took over".
+- `createDisclosure(trigger, region, opts?)` returns `{ open(); close(); toggle(); readonly isOpen; dispose() }`. `trigger` is an `HTMLElement` or `null`, which selects region-only mode below.
+- `DisclosureOptions` = `{ open?; animate?; onToggle?: (open: boolean, source: "user" | "api") => void }`. By default the region starts closed and animates. `source` is `"user"` for a trigger toggle and `"api"` for a controller call, which lets an auto-collapse state machine record that the user took over.
 
 ### Region-only mode (`trigger: null`)
 
-No trigger is wired (no `aria-expanded`, no click/keyboard handling) and the
-open state is driven entirely through the controller. Use it when the visible
-control is something a disclosure trigger would mis-describe: a checkbox
-enable-toggle whose `checked` already conveys the state, or an app state
-machine that owns its own header UI. The region still gets the height
-animation and `aria-hidden` + `inert`:
+No trigger is wired, so there is no `aria-expanded` and no click or keyboard handling, and only the controller changes the open state. Use it when a disclosure trigger would mis-describe the visible control. One case is a checkbox enable-toggle whose `checked` already conveys the state. Another is an app state machine that owns its own header. The region still gets the height animation and `aria-hidden` plus `inert`:
 
 ```ts
 const body = createDisclosure(null, sectionBody, { open: checkbox.checked });
@@ -53,9 +46,11 @@ checkbox.addEventListener("change", () => {
 | `--uip-disclosure-easing`   | disclosure height easing                                  | `ease`  |
 | `.uip-disclosure-region`    | disclosure collapsible region (`aria-hidden` when closed) |         |
 
+Padding, borders or margins that would still paint at height 0 belong in a rule keyed on `[aria-hidden="true"]`, or on an inner wrapper.
+
 ## Notes
 
-- The trigger gets button semantics (`aria-expanded` reflecting the state, plus `role="button"` + `tabindex="0"` + Enter/Space handling when it isn't already a native `<button>`) and is linked to the region via `aria-controls`.
-- The region is marked `aria-hidden` **and** `inert` when collapsed, so collapsed content leaves the tab order and the accessibility tree entirely.
-- Height animates `0 ↔ auto` (with a measured-height fallback on engines that can't interpolate the `auto` keyword), honoring `prefers-reduced-motion`.
-- A region the page isn't rendering (`content-visibility: hidden`, a `display: none` ancestor, a closed `<details>`, not in a document) skips the tween and takes its target height directly — no transition can run there. A **skipped** `content-visibility: auto` region deliberately still animates, since it becomes relevant again on the next scroll.
+- The trigger gets `aria-expanded`, which reflects the state, and `aria-controls`, which links it to the region. A trigger that is not a native `<button>` also gets `role="button"`, `tabindex="0"` and Enter and Space handling.
+- A collapsed region is marked `aria-hidden` and `inert`, so its content leaves the tab order and the accessibility tree.
+- The height animates between `0` and `auto`. On engines that cannot interpolate `auto`, it animates to the measured height instead. Both honor `prefers-reduced-motion`.
+- A region the page is not rendering takes its target height at once, because no transition can run there. That covers `content-visibility: hidden`, a `display: none` ancestor, a closed `<details>` and a region outside the document. A skipped `content-visibility: auto` region still animates, because the next scroll can bring it back into view.

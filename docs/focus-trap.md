@@ -2,8 +2,7 @@
 
 `@cplieger/ui-primitives/focus-trap`
 
-Tab/Shift+Tab focus containment for a container, with focus restoration on
-release, per the WAI-ARIA dialog pattern.
+Tab and Shift+Tab focus containment for a container, with focus restored on release, per the WAI-ARIA dialog pattern.
 
 ## Usage
 
@@ -17,11 +16,11 @@ release(); // restores focus to the previously-focused element
 
 ## API
 
-- `trapFocus(container, opts?)` → a release function.
+- `trapFocus(container, opts?)` returns a release function.
 - `FocusTrapOptions` = `{ initialFocus?: HTMLElement | null; returnFocus?: boolean | HTMLElement }`.
 
 ## Notes
 
-- Tab / Shift+Tab cycle within the container (wrapping at the edges).
-- On entry, `initialFocus` (or the first visible focusable element) is focused.
+- Tab and Shift+Tab cycle within the container and wrap at the edges.
+- On entry, `initialFocus` is focused, or the first visible focusable element when it is unset.
 - `release()` restores focus to the element focused before the trap, to an explicit `returnFocus` element, or leaves focus alone when `returnFocus` is `false`.
