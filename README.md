@@ -106,7 +106,7 @@ Under `prefers-reduced-motion: reduce`, the base stylesheet cuts animations to 0
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions and how to run the checks locally.
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Disclaimer
 
