@@ -29,10 +29,10 @@ The `trigger` gets `aria-expanded` and `aria-haspopup`. A click on the trigger d
 
 ## CSS
 
-| Property / class                               | Description                                                                | Default |
-| ---------------------------------------------- | -------------------------------------------------------------------------- | ------- |
-| `.uip-popup`                                   | panel wired by `createPopup`, with no placement and only `[hidden]` styled |         |
-| `.uip-popup.is-open` / `.uip-popup.is-leaving` | lifecycle state classes, with all motion left to the app                   |         |
+| Property / class | Description | Default |
+| --- | --- | --- |
+| `.uip-popup` | panel wired by `createPopup`, with no placement and only `[hidden]` styled | |
+| `.uip-popup.is-open` / `.uip-popup.is-leaving` | lifecycle state classes, with all motion left to the app | |
 
 All motion is yours. On open, the library adds `uip-popup` and `is-open` after the resting state is committed. A CSS transition from that state then plays, and an animation on `is-open` works too. On close, it swaps `is-open` for `is-leaving`, then sets `[hidden]` when the panel's first `transitionend` fires. When no transition runs, a 400ms ceiling sets it instead, so a close transition skinned longer than 400ms is cut short. The base stylesheet ships only the `[hidden]` display rule, with no default motion and no custom properties.
 

@@ -34,13 +34,13 @@ A trigger whose hit box is bigger than the ink it paints can name that ink. The 
 
 ## CSS
 
-| Property / class              | Description                  | Default |
-| ----------------------------- | ---------------------------- | ------- |
-| `--uip-z-tooltip`             | tooltip z-index              | `10000` |
-| `--uip-tooltip-fade-duration` | tooltip fade                 | `100ms` |
-| `--uip-tooltip-fade-easing`   | tooltip fade easing          | `ease`  |
-| `.uip-tooltip`                | a tooltip (`role="tooltip"`) |         |
-| `.uip-tooltip.is-leaving`     | fade-out state class         |         |
+| Property / class | Description | Default |
+| --- | --- | --- |
+| `--uip-z-tooltip` | tooltip z-index | `10000` |
+| `--uip-tooltip-fade-duration` | tooltip fade | `100ms` |
+| `--uip-tooltip-fade-easing` | tooltip fade easing | `ease` |
+| `.uip-tooltip` | a tooltip (`role="tooltip"`) | |
+| `.uip-tooltip.is-leaving` | fade-out state class | |
 
 ## Notes
 

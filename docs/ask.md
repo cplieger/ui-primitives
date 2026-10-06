@@ -36,13 +36,13 @@ const pw = await ask("Enter your password to continue:", {
 
 ## CSS
 
-| Property / class                                           | Description                                                    | Default |
-| ---------------------------------------------------------- | -------------------------------------------------------------- | ------- |
-| `.uip-ask`, `.uip-ask--input`                              | the ask `<dialog>` (input-shape modifier)                      |         |
-| `.uip-ask-title` / `-msg` / `-actions` / `-ok` / `-cancel` | ask parts (`-msg` is the input's `<label>` in the input shape) |         |
-| `.uip-ask-form` / `-input`                                 | input-shape parts                                              |         |
-| `.uip-ask.is-leaving`                                      | fade-out state class                                           |         |
-| `.uip-ask-ok.is-destructive`                               | destructive emphasis on the OK button                          |         |
+| Property / class | Description | Default |
+| --- | --- | --- |
+| `.uip-ask`, `.uip-ask--input` | the ask `<dialog>` (input-shape modifier) | |
+| `.uip-ask-title` / `-msg` / `-actions` / `-ok` / `-cancel` | ask parts (`-msg` is the input's `<label>` in the input shape) | |
+| `.uip-ask-form` / `-input` | input-shape parts | |
+| `.uip-ask.is-leaving` | fade-out state class | |
+| `.uip-ask-ok.is-destructive` | destructive emphasis on the OK button | |
 
 The fade and the backdrop dim use the shared `--uip-dialog-leave-duration`, `--uip-dialog-leave-easing` and `--uip-backdrop` tokens. See the README's CSS contract and [dialog](dialog.md).
 
