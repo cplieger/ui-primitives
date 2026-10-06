@@ -34,14 +34,14 @@ What `modal` adds on top of the platform `<dialog>`:
 
 ## CSS
 
-| Property / class                  | Description                                                                         | Default               |
-| --------------------------------- | ----------------------------------------------------------------------------------- | --------------------- |
-| `--uip-modal-backdrop`            | modal `::backdrop` dim                                                              | `var(--uip-backdrop)` |
-| `--uip-modal-leave-duration`      | modal + `::backdrop` leave fade                                                     | `150ms`               |
-| `--uip-modal-leave-easing`        | modal + `::backdrop` leave-fade easing                                              | `ease`                |
-| `.uip-modal`, `.uip-modal--alert` | the modal `<dialog>` in the top layer with its `::backdrop`, and the alert modifier |                       |
-| `.uip-modal-dialog`               | modal content (skin hook inside the `<dialog>`)                                     |                       |
-| `.uip-modal.is-leaving`           | fade-out state class (the modal also fades its `::backdrop`)                        |                       |
+| Property / class | Description | Default |
+| --- | --- | --- |
+| `--uip-modal-backdrop` | modal `::backdrop` dim | `var(--uip-backdrop)` |
+| `--uip-modal-leave-duration` | modal + `::backdrop` leave fade | `150ms` |
+| `--uip-modal-leave-easing` | modal + `::backdrop` leave-fade easing | `ease` |
+| `.uip-modal`, `.uip-modal--alert` | the modal `<dialog>` in the top layer with its `::backdrop`, and the alert modifier | |
+| `.uip-modal-dialog` | modal content (skin hook inside the `<dialog>`) | |
+| `.uip-modal.is-leaving` | fade-out state class (the modal also fades its `::backdrop`) | |
 
 ## Notes
 

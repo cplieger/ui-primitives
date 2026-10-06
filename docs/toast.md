@@ -38,26 +38,26 @@ widgetToast.info("Copied");
 
 ## CSS
 
-| Property / class                                           | Description                                                    | Default        |
-| ---------------------------------------------------------- | -------------------------------------------------------------- | -------------- |
-| `--uip-z-toast`                                            | toast stack z-index                                            | `9999`         |
-| `--uip-toast-offset`                                       | toast stack inset from the viewport edge                       | `1rem`         |
-| `--uip-toast-gap`                                          | gap between stacked toasts                                     | `0.5rem`       |
-| `--uip-toast-row-gap`                                      | gap between a toast's message and its action row               | `0.5rem`       |
-| `--uip-toast-max-width`                                    | toast stack max inline size                                    | `24rem`        |
-| `--uip-toast-enter-duration`                               | toast enter transition                                         | `250ms`        |
-| `--uip-toast-enter-easing`                                 | toast enter easing (timing function)                           | `ease`         |
-| `--uip-toast-leave-duration`                               | toast leave transition                                         | `150ms`        |
-| `--uip-toast-leave-easing`                                 | toast leave easing                                             | `ease`         |
-| `--uip-toast-duration`                                     | progress-bar duration, set inline on each toast by the library | `4000ms`       |
-| `--uip-toast-easing`                                       | progress-bar easing (timing function)                          | `linear`       |
-| `--uip-toast-progress-size`                                | progress-bar thickness                                         | `2px`          |
-| `--uip-toast-progress-color`                               | progress-bar color                                             | `currentcolor` |
-| `.uip-toast-stack`                                         | toast container (visual only, not a live region)               |                |
-| `.uip-toast`, `.uip-toast--info` / `--success` / `--error` | a toast (level modifier)                                       |                |
-| `.uip-toast-msg`                                           | toast message text                                             |                |
-| `.uip-toast-retry`                                         | toast retry button                                             |                |
-| `.uip-toast-progress`                                      | toast countdown bar (`aria-hidden`)                            |                |
+| Property / class | Description | Default |
+| --- | --- | --- |
+| `--uip-z-toast` | toast stack z-index | `9999` |
+| `--uip-toast-offset` | toast stack inset from the viewport edge | `1rem` |
+| `--uip-toast-gap` | gap between stacked toasts | `0.5rem` |
+| `--uip-toast-row-gap` | gap between a toast's message and its action row | `0.5rem` |
+| `--uip-toast-max-width` | toast stack max inline size | `24rem` |
+| `--uip-toast-enter-duration` | toast enter transition | `250ms` |
+| `--uip-toast-enter-easing` | toast enter easing (timing function) | `ease` |
+| `--uip-toast-leave-duration` | toast leave transition | `150ms` |
+| `--uip-toast-leave-easing` | toast leave easing | `ease` |
+| `--uip-toast-duration` | progress-bar duration, set inline on each toast by the library | `4000ms` |
+| `--uip-toast-easing` | progress-bar easing (timing function) | `linear` |
+| `--uip-toast-progress-size` | progress-bar thickness | `2px` |
+| `--uip-toast-progress-color` | progress-bar color | `currentcolor` |
+| `.uip-toast-stack` | toast container (visual only, not a live region) | |
+| `.uip-toast`, `.uip-toast--info` / `--success` / `--error` | a toast (level modifier) | |
+| `.uip-toast-msg` | toast message text | |
+| `.uip-toast-retry` | toast retry button | |
+| `.uip-toast-progress` | toast countdown bar (`aria-hidden`) | |
 
 The library moves each `.uip-toast` through three state classes at runtime: `is-entering`, then `is-shown`, then `is-leaving`.
 

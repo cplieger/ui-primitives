@@ -27,12 +27,12 @@ closeDialog(myDialog, () => console.log("closed"));
 
 ## CSS
 
-| Property / class              | Description                            | Default |
-| ----------------------------- | -------------------------------------- | ------- |
-| `--uip-dialog-leave-duration` | dialog / ask / backdrop fade           | `150ms` |
-| `--uip-dialog-leave-easing`   | dialog / ask / backdrop fade easing    | `ease`  |
-| `.uip-dialog`                 | a `<dialog>` wrapped by `createDialog` |         |
-| `.uip-dialog.is-leaving`      | fade-out state class                   |         |
+| Property / class | Description | Default |
+| --- | --- | --- |
+| `--uip-dialog-leave-duration` | dialog / ask / backdrop fade | `150ms` |
+| `--uip-dialog-leave-easing` | dialog / ask / backdrop fade easing | `ease` |
+| `.uip-dialog` | a `<dialog>` wrapped by `createDialog` | |
+| `.uip-dialog.is-leaving` | fade-out state class | |
 
 The backdrop dim is the shared `--uip-backdrop` token, described in the README's CSS contract.
 

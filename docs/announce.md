@@ -19,9 +19,9 @@ announce("Connection lost", "assertive");
 
 ## CSS
 
-| Property / class       | Description                         | Default |
-| ---------------------- | ----------------------------------- | ------- |
-| `.uip-visually-hidden` | the announce live regions (sr-only) |         |
+| Property / class | Description | Default |
+| --- | --- | --- |
+| `.uip-visually-hidden` | the announce live regions (sr-only) | |
 
 ## Notes
 

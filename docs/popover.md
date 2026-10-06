@@ -36,16 +36,16 @@ Two exports, split by responsibility:
 
 `PlacementOptions`, shared by both:
 
-| Option                                               | Description                                                                                                        | Default               |
-| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | --------------------- |
-| `placement?: "top" \| "bottom" \| "left" \| "right"` | side of the anchor                                                                                                 | `"bottom"`            |
-| `align?: "start" \| "center" \| "end"`               | cross-axis edge alignment                                                                                          | `"start"`             |
-| `offset?: number`                                    | main-axis gap in px                                                                                                | `4`                   |
-| `flip?: boolean`                                     | flip to the opposite side when the chosen side would overflow and the opposite has more room                       | `true`                |
-| `clamp?: boolean`                                    | clamp the cross-axis coordinate into the viewport                                                                  | `true`                |
-| `matchAnchorWidth?: boolean \| number`               | set `min-width` to the anchor width (`true`) or to `max(anchorWidth, n)`, ignored with `stretch: "viewport"`       | `false`               |
-| `margin?: number`                                    | viewport edge margin in px for flip and clamp, and the inline inset from each edge with `stretch: "viewport"`      | `8`                   |
-| `stretch?: "viewport"`                               | full-bleed mode: the panel spans the viewport's inline axis, top and bottom placement only, see "Full-bleed" below | unset (content-sized) |
+| Option | Description | Default |
+| --- | --- | --- |
+| `placement?: "top" \| "bottom" \| "left" \| "right"` | side of the anchor | `"bottom"` |
+| `align?: "start" \| "center" \| "end"` | cross-axis edge alignment | `"start"` |
+| `offset?: number` | main-axis gap in px | `4` |
+| `flip?: boolean` | flip to the opposite side when the chosen side would overflow and the opposite has more room | `true` |
+| `clamp?: boolean` | clamp the cross-axis coordinate into the viewport | `true` |
+| `matchAnchorWidth?: boolean \| number` | set `min-width` to the anchor width (`true`) or to `max(anchorWidth, n)`, ignored with `stretch: "viewport"` | `false` |
+| `margin?: number` | viewport edge margin in px for flip and clamp, and the inline inset from each edge with `stretch: "viewport"` | `8` |
+| `stretch?: "viewport"` | full-bleed mode: the panel spans the viewport's inline axis, top and bottom placement only, see "Full-bleed" below | unset (content-sized) |
 
 `PopoverOptions extends PlacementOptions` and adds `{ closeOnOutside?; closeOnEscape?; initialFocus?; returnFocus?; haspopup?; onOpen?; onClose? }`. Both dismissal options default to `true`. `haspopup` sets the anchor's `aria-haspopup` value to `true`, the default, or to `"menu"`, `"listbox"`, `"tree"`, `"grid"` or `"dialog"`. A virtual or point anchor ignores it.
 
@@ -109,17 +109,17 @@ narrow.addEventListener("change", () => {
 
 ## CSS
 
-| Property / class               | Description                                                                      | Default |
-| ------------------------------ | -------------------------------------------------------------------------------- | ------- |
-| `--uip-z-popover`              | popover z-index (base layer: below toast / tooltip)                              | `1100`  |
-| `--uip-popover-enter-duration` | popover enter-fade animation                                                     | `100ms` |
-| `--uip-popover-enter-easing`   | popover enter-fade easing                                                        | `ease`  |
-| `--uip-popover-leave-duration` | popover leave-fade transition                                                    | `100ms` |
-| `--uip-popover-leave-easing`   | popover leave-fade easing                                                        | `ease`  |
-| `.uip-popover`                 | anchored floating panel (`position: fixed`, JS-positioned)                       |         |
-| `.uip-popover.is-open`         | optional enter fade                                                              |         |
-| `.uip-popover.is-leaving`      | leave fade before `[hidden]`                                                     |         |
-| `.uip-popover.is-stretched`    | full-bleed skin hook: square edges / drop side borders on the full-width variant |         |
+| Property / class | Description | Default |
+| --- | --- | --- |
+| `--uip-z-popover` | popover z-index (base layer: below toast / tooltip) | `1100` |
+| `--uip-popover-enter-duration` | popover enter-fade animation | `100ms` |
+| `--uip-popover-enter-easing` | popover enter-fade easing | `ease` |
+| `--uip-popover-leave-duration` | popover leave-fade transition | `100ms` |
+| `--uip-popover-leave-easing` | popover leave-fade easing | `ease` |
+| `.uip-popover` | anchored floating panel (`position: fixed`, JS-positioned) | |
+| `.uip-popover.is-open` | optional enter fade | |
+| `.uip-popover.is-leaving` | leave fade before `[hidden]` | |
+| `.uip-popover.is-stretched` | full-bleed skin hook: square edges / drop side borders on the full-width variant | |
 
 Opening plays the optional `.uip-popover.is-open` enter fade, which you can skin. Closing swaps `is-open` for `is-leaving` and keeps the panel in the DOM until its transition ends or a fallback timeout fires. Then it sets `[hidden]`, so the panel animates out instead of vanishing. `isOpen` turns `false` the moment you call `hide()`. A `show()` or `toggle()` during the fade cancels the leave and reveals the panel again. Tune the fade with `--uip-popover-leave-duration` and `--uip-popover-leave-easing`. Under `prefers-reduced-motion` the fade drops to near zero, so closing still completes at once.
 

@@ -40,11 +40,11 @@ checkbox.addEventListener("change", () => {
 
 ## CSS
 
-| Property / class            | Description                                               | Default |
-| --------------------------- | --------------------------------------------------------- | ------- |
-| `--uip-disclosure-duration` | disclosure height transition                              | `200ms` |
-| `--uip-disclosure-easing`   | disclosure height easing                                  | `ease`  |
-| `.uip-disclosure-region`    | disclosure collapsible region (`aria-hidden` when closed) |         |
+| Property / class | Description | Default |
+| --- | --- | --- |
+| `--uip-disclosure-duration` | disclosure height transition | `200ms` |
+| `--uip-disclosure-easing` | disclosure height easing | `ease` |
+| `.uip-disclosure-region` | disclosure collapsible region (`aria-hidden` when closed) | |
 
 Padding, borders or margins that would still paint at height 0 belong in a rule keyed on `[aria-hidden="true"]`, or on an inner wrapper.
 
