@@ -41,7 +41,6 @@ function defaultDurationFor(level: ToastLevel, fallback: number): number {
 
 /** Immutable data the view needs to render one toast. */
 export interface ToastRenderData {
-  readonly id: number;
   readonly message: string;
   readonly level: ToastLevel;
   readonly duration: number;
@@ -122,14 +121,6 @@ export class ToastEngine<H> {
     this.maxVisible = this.replace ? 1 : Math.max(1, opts.maxVisible ?? DEFAULT_MAX_VISIBLE);
     this.maxQueue = Math.max(0, opts.maxQueue ?? DEFAULT_MAX_QUEUE);
     this.defaultDuration = opts.defaultDuration ?? DEFAULT_DURATION_MS;
-  }
-
-  get visibleCount(): number {
-    return this.visible.length;
-  }
-
-  get queuedCount(): number {
-    return this.queue.length;
   }
 
   /** Show a toast (or queue it if the visible set is full). Returns a dismiss fn. */
@@ -219,7 +210,6 @@ export class ToastEngine<H> {
     retry: ToastRetry | undefined,
   ): void {
     const data: ToastRenderData = {
-      id,
       message,
       level,
       duration,
