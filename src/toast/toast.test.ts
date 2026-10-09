@@ -107,7 +107,7 @@ describe("toast", () => {
     expect(document.body.childElementCount).toBe(0);
 
     view.mount(
-      { id: 1, message: "hi", level: "info", duration: 0 },
+      { message: "hi", level: "info", duration: 0 },
       { dismiss: vi.fn(), pause: vi.fn(), resume: vi.fn() },
     );
     expect(stack()).not.toBeNull();
@@ -670,10 +670,7 @@ describe("toast: the engine port the view drives", () => {
   it("pauses the engine once for two overlapping pause sources, and resumes once", () => {
     const view = createToastView();
     const ctx = { dismiss: vi.fn(), pause: vi.fn(), resume: vi.fn() };
-    const handle = view.mount(
-      { id: 1, message: "hover and focus", level: "info", duration: 4000 },
-      ctx,
-    );
+    const handle = view.mount({ message: "hover and focus", level: "info", duration: 4000 }, ctx);
     const node = handle.el;
 
     // Two DOM sources over one engine timer: ref-counted, resume fires once.
