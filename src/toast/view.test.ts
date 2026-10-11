@@ -79,7 +79,7 @@ describe("toast view: a leave that starts before the enter frame has run", () =>
     const host = document.createElement("div");
     document.body.appendChild(host);
     const view = createToastView(host);
-    const data: ToastRenderData = { id: 1, message: "bye", level: "info", duration: 4000 };
+    const data: ToastRenderData = { message: "bye", level: "info", duration: 4000 };
     const ctx: ToastCallbacks = { dismiss: noop, pause: noop, resume: noop };
     const handle = view.mount(data, ctx);
     const node = handle.el;
