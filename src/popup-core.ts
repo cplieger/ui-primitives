@@ -199,9 +199,6 @@ export function createPopupCore(
 
   const addListeners = (): void => {
     installTimer = null;
-    if (!open) {
-      return;
-    }
     listening = true;
     if (current.closeOnOutside ?? true) {
       document.addEventListener("click", onDocClick);
@@ -213,6 +210,9 @@ export function createPopupCore(
   };
 
   const removeListeners = (): void => {
+    // The one cancellation point, and the whole reason a deferred install can
+    // never arm a closed popup: `open` goes false only in hide(), which calls
+    // this on the next line, and setOptions() calls it before it re-arms.
     if (installTimer !== null) {
       clearTimeout(installTimer);
       installTimer = null;
@@ -228,9 +228,6 @@ export function createPopupCore(
 
   // Deferred so the click that opened the popup doesn't immediately self-close.
   const armListenersDeferred = (): void => {
-    if (installTimer !== null) {
-      clearTimeout(installTimer);
-    }
     installTimer = setTimeout(addListeners, 0);
   };
 
