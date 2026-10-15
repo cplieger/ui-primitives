@@ -53,5 +53,6 @@ const settings = createDialog(dlg, {
 });
 ```
 
+- Only a `cancel` event fired at the dialog itself counts as Escape. One that bubbles up from inside, such as a file input whose picker was dismissed, leaves the dialog open. The same holds for [modal](modal.md) and [ask](ask.md).
 - `openDialog` cancels a fade-out still in progress, so you can reopen a dialog during its close animation.
 - Use dialog to add behavior to a `<dialog>` element already in your markup. Use [modal](modal.md) to build the `<dialog>` from a content element instead.

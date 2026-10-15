@@ -199,6 +199,18 @@ describe("ask (input shape)", () => {
     await expect(p2).resolves.toBeNull();
   });
 
+  it("does not settle on a cancel event bubbling from a descendant", async () => {
+    const p = ask("Name?", { input: true });
+    const d = inputDlg();
+    const input = d.querySelector<HTMLInputElement>(".uip-ask-input")!;
+    const cancel = new Event("cancel", { bubbles: true, cancelable: true });
+    input.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(false);
+    input.value = "kept";
+    d.querySelector("form")!.dispatchEvent(new Event("submit", { cancelable: true }));
+    await expect(p).resolves.toBe("kept");
+  });
+
   it("applies type / initialValue / placeholder / maxLength / autocomplete, and resets them", async () => {
     void ask("Password?", {
       input: {

@@ -148,6 +148,12 @@ export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): D
   const cleanupBackdrop = closeOnBackdrop ? wireBackdropDismiss(dialog, dismiss) : null;
 
   const onCancel = (e: Event): void => {
+    // A nested `<input type=file>` fires a bubbling `cancel` when its picker
+    // is dismissed (https://developer.mozilla.org/en-US/docs/Web/API/HTMLInputElement/cancel_event);
+    // only the dialog's own `cancel` is an Escape.
+    if (e.target !== dialog) {
+      return;
+    }
     // The platform fires `cancel` on Escape then closes instantly. Intercept
     // it so the fade-out lifecycle runs (or so Escape is ignored entirely, or
     // refused by the guard).

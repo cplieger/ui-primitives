@@ -97,6 +97,24 @@ describe("createDialog", () => {
     ctrl.dispose();
   });
 
+  it("stays open when a nested file input's picker-dismiss cancel bubbles up", () => {
+    const d = makeDialog();
+    const file = document.createElement("input");
+    file.type = "file";
+    d.appendChild(file);
+    const onClose = vi.fn();
+    const ctrl = createDialog(d, { onClose });
+    ctrl.open();
+    const cancel = new Event("cancel", { bubbles: true, cancelable: true });
+    file.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(false);
+    expect(d.classList.contains("is-leaving")).toBe(false);
+    vi.advanceTimersByTime(400);
+    expect(d.open).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    ctrl.dispose();
+  });
+
   it("ignores backdrop clicks when closeOnBackdrop is false", () => {
     const d = makeDialog();
     const ctrl = createDialog(d, { closeOnBackdrop: false });

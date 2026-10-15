@@ -166,6 +166,23 @@ describe("Escape (native cancel event)", () => {
     expect(m.el.open).toBe(false);
   });
 
+  it("stays open when a nested file input's picker-dismiss cancel bubbles up", () => {
+    const { content } = makeContent();
+    const file = document.createElement("input");
+    file.type = "file";
+    content.appendChild(file);
+    const onClose = vi.fn();
+    const m = createModal(content, { onClose });
+    m.open();
+    const cancel = new Event("cancel", { bubbles: true, cancelable: true });
+    file.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(false);
+    expect(m.el.classList.contains("is-leaving")).toBe(false);
+    vi.advanceTimersByTime(400);
+    expect(m.isOpen).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("does not close on cancel when closeOnEscape is false (still preventDefaults)", () => {
     const m = createModal(makeContent().content, { closeOnEscape: false });
     m.open();
