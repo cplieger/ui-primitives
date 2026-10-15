@@ -515,11 +515,12 @@ describe("show-time guards and placement", () => {
     pointerOver(a);
     vi.advanceTimersByTime(500);
     const t = tip()!;
-    const box = t.getBoundingClientRect();
+    // offsetWidth/Height, as placeAnchored measures: a fractional text width
+    // makes the bounding box differ from the integer layout box it placed by.
     expect(t.style.position).toBe("fixed");
-    expect(box.height).toBeGreaterThan(0);
-    expect(parseFloat(t.style.top) + box.height).toBe(194);
-    expect(parseFloat(t.style.left) + box.width / 2).toBe(120);
+    expect(t.offsetHeight).toBeGreaterThan(0);
+    expect(parseFloat(t.style.top) + t.offsetHeight).toBe(194);
+    expect(parseFloat(t.style.left) + t.offsetWidth / 2).toBe(120);
   });
 
   it("renders a single-line tooltip with no <br>", () => {

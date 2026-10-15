@@ -199,6 +199,10 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
 
   const cleanupBackdrop = closeOnBackdrop ? wireBackdropDismiss(dialog, dismiss) : null;
   const onCancel = (e: Event): void => {
+    // A descendant's bubbling `cancel` is not an Escape (see createDialog).
+    if (e.target !== dialog) {
+      return;
+    }
     // The platform fires `cancel` on Escape then closes instantly. Intercept it
     // so the fade-out lifecycle runs (or so Escape is ignored entirely, or
     // refused by the guard).

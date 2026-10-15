@@ -272,6 +272,10 @@ export function ask(message: string, opts?: AskOptions): Promise<boolean | strin
     r.dialog.addEventListener(
       "cancel",
       (e) => {
+        // A descendant's bubbling `cancel` is not an Escape (see createDialog).
+        if (e.target !== r.dialog) {
+          return;
+        }
         e.preventDefault();
         settle(cancelValue);
       },
