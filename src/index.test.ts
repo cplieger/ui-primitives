@@ -5,8 +5,11 @@ import * as api from "./index.js";
 describe("public surface", () => {
   it("exports every primitive", () => {
     expect(typeof api.viewTransition).toBe("function");
+    expect(typeof api.runTransition).toBe("function");
+    expect(typeof api.cancelTransition).toBe("function");
     expect(typeof api.trapFocus).toBe("function");
     expect(typeof api.announce).toBe("function");
+    expect(typeof api.mountLiveRegions).toBe("function");
     expect(typeof api.createTheme).toBe("function");
     expect(typeof api.themeInitSnippet).toBe("function");
     expect(typeof api.themeInitSnippetFromJSON).toBe("function");

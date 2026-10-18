@@ -12,6 +12,7 @@
 import { el } from "@cplieger/reactive";
 
 import { closeDialog, openDialog, wireBackdropDismiss } from "./dialog.js";
+import { endOpen } from "./modal-host.js";
 import { cancelTransition } from "./transition.js";
 
 /** Everything {@link createModal} needs beyond the content: the dismissal
@@ -52,7 +53,9 @@ export interface ModalOptions {
  *  lifetime of the thing it belongs to and disposing with it. */
 export interface ModalController {
   /** Show as a platform modal — focus containment, top layer and background
-   *  inerting come from `showModal()` — and take the scroll lock. */
+   *  inerting come from `showModal()` — and take the scroll lock. Throws as
+   *  `openDialog` does, with the lock released: after `dispose()`, or while
+   *  the caller shows `el` as a popover. */
   open(): void;
   /** Close through the fade-out lifecycle. Programmatic, so `canDismiss` does
    *  not apply. */
@@ -231,7 +234,12 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
         applyScrollLock();
         locked = true;
       }
-      openDialog(dialog);
+      try {
+        openDialog(dialog);
+      } catch (error) {
+        releaseLock();
+        throw error;
+      }
       const initial = opts?.initialFocus;
       if (initial?.isConnected) {
         initial.focus();
@@ -241,19 +249,12 @@ export function createModal(content: HTMLElement, opts?: ModalOptions): ModalCon
     dispose(): void {
       cleanupBackdrop?.();
       dialog.removeEventListener("cancel", onCancel);
-      // Cancel any in-flight leave so its pending settle never runs, release
-      // the lock, close the native dialog (so `open` clears), then remove it.
+      // Cancel any in-flight leave so its pending settle never runs.
       cancelTransition(dialog);
       dialog.classList.remove("is-leaving");
       releaseLock();
-      if (dialog.open) {
-        try {
-          dialog.close();
-        } catch {
-          // close() absent or not implemented — degrade to the attribute.
-          dialog.open = false;
-        }
-      }
+      dialog.close();
+      endOpen(dialog);
       content.classList.remove("uip-modal-dialog");
       dialog.remove();
     },

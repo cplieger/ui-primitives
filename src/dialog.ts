@@ -7,6 +7,7 @@
  * @module
  */
 
+import { endOpen, trackOpen } from "./modal-host.js";
 import { cancelTransition, runTransition } from "./transition.js";
 
 /** Which user gestures dismiss a wrapped `<dialog>`, an optional veto over
@@ -28,10 +29,15 @@ export interface DialogOptions {
 }
 
 /** Handle on a wrapped `<dialog>`. The element is the caller's throughout: this
- *  controller adds wiring and classes, and never creates or removes a node. */
+ *  controller adds wiring, classes and, on open, the dialog's live-region pair,
+ *  and creates or removes no other node. The pair stays the dialog's last two
+ *  children while it is open, and leaves when its last owner releases: render
+ *  content into a child element, never by replacing the dialog's children, or
+ *  announcements go silent. */
 export interface DialogController {
   /** Open as a platform modal, cancelling a leave fade still in flight so a
-   *  reopen mid-fade is safe. A no-op while already open. */
+   *  reopen mid-fade is safe. A no-op while already open. Throws as
+   *  `openDialog` does. */
   open(): void;
   /** Close through the fade-out lifecycle. Programmatic, so `canDismiss` does
    *  not apply. */
@@ -41,13 +47,20 @@ export interface DialogController {
    *  controller nor clears this reference: it keeps reading back a detached
    *  node, listeners and all, until `dispose()` runs. */
   readonly el: HTMLDialogElement;
-  /** Remove the dismissal wiring and the `uip-dialog` class. Does not close an
-   *  open dialog. */
+  /** Close the dialog at once if it is open (no fade, no `onClose`), remove
+   *  the dismissal wiring and the `uip-dialog` class, and end its open,
+   *  releasing its hold on the dialog's live-region pair. */
   dispose(): void;
 }
 
-/** Open a native <dialog> as a modal. An older engine may lack `showModal()`;
- *  fall back to the `open` property so behavior degrades. */
+/** Open a native <dialog> as a modal, first mounting its polite and assertive
+ *  live regions so `announce` reaches assistive tech while the rest of the
+ *  page is inert, and rank it above every dialog opened before it:
+ *  announcements, toasts and popups go to the last one opened. The open ends,
+ *  releasing its hold on the regions, at the next `close` event delivered
+ *  while the dialog is closed. A no-op on an open dialog beyond cancelling its
+ *  leave fade. Rethrows `showModal()`'s `InvalidStateError` for a
+ *  disconnected dialog or one showing as a popover, holding nothing. */
 export function openDialog(dialog: HTMLDialogElement): void {
   // A reopen inside the leave fade cancels it outright: the pending settle
   // belongs to a close this call is replacing, so drop it rather than leaving
@@ -57,23 +70,13 @@ export function openDialog(dialog: HTMLDialogElement): void {
   if (dialog.open) {
     return;
   }
+  trackOpen(dialog);
   try {
     dialog.showModal();
-    return;
-  } catch {
-    // showModal() absent or not implemented — degrade gracefully.
+  } catch (error) {
+    endOpen(dialog);
+    throw error;
   }
-  dialog.open = true;
-}
-
-function closeNative(dialog: HTMLDialogElement): void {
-  try {
-    dialog.close();
-    return;
-  } catch {
-    // close() absent or not implemented — degrade to the attribute.
-  }
-  dialog.open = false;
 }
 
 /** Close a native <dialog> after a fade-out: add `is-leaving`, wait for
@@ -91,7 +94,7 @@ export function closeDialog(dialog: HTMLDialogElement, onClosed?: () => void): v
     },
     settled: () => {
       dialog.classList.remove("is-leaving");
-      closeNative(dialog);
+      dialog.close();
       onClosed?.();
     },
   });
@@ -174,7 +177,10 @@ export function createDialog(dialog: HTMLDialogElement, opts?: DialogOptions): D
     dispose: () => {
       cleanupBackdrop?.();
       dialog.removeEventListener("cancel", onCancel);
-      dialog.classList.remove("uip-dialog");
+      cancelTransition(dialog);
+      dialog.classList.remove("uip-dialog", "is-leaving");
+      dialog.close();
+      endOpen(dialog);
     },
   };
 }

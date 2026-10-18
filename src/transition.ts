@@ -1,28 +1,31 @@
-// transition.ts — the ONE way this library changes an element's state and lets
-// the change animate. A CSS transition needs its start state flushed to the
-// engine before the change, or the browser coalesces both writes into one
-// frame and nothing animates; `runTransition` does that flush so callers never
-// have to.
+/**
+ * transition.ts — Run one CSS transition on an element and finalize it once it
+ * ends. A transition needs its start state flushed before the change, or the
+ * browser coalesces both writes into one frame and nothing animates;
+ * `runTransition` does that flush. Every primitive's leave lifecycle uses it.
+ * @module
+ */
 
 /**
  * Ceiling (ms) on how long a settle waits for `transitionend` before assuming
  * no transition ran at all. Not an estimate of any duration: every duration in
  * this library is the app's, set through a `--uip-*` custom property, so the
- * library cannot know the real one. One value for every primitive — a leave
- * transition skinned longer than this is truncated.
+ * library cannot know the real one. A transition skinned longer than this is
+ * truncated.
  */
 const SETTLE_FALLBACK_MS = 400;
 
 /** One state change plus what finalizes it. Handed to {@link runTransition},
  *  which flushes the pre-change style before invoking `change` so the engine
  *  has a start state to animate from. */
-interface TransitionSpec {
+export interface TransitionSpec {
   /** Writes the state to animate TO. Whatever the caller wrote BEFORE calling
    *  `runTransition` is the state it animates FROM. */
   change: () => void;
-  /** Runs exactly once when the transition on the element ends — or after the
-   *  fallback ceiling if none ever starts. Omit it when there is nothing to
-   *  finalize; then nothing is armed and nothing needs cancelling. */
+  /** Runs exactly once when the transition on the element ends, or after the
+   *  settle fallback ceiling (`SETTLE_FALLBACK_MS`) if none ever starts. Omit
+   *  it when there is nothing to finalize; then nothing is armed and nothing
+   *  needs cancelling. */
   settled?: () => void;
 }
 

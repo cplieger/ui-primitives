@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 
-import { _resetForTest as resetAnnounce } from "../announce.js";
+import { mountLiveRegions, _resetForTest as resetAnnounce } from "../announce.js";
 
 import { toast, info, error, createToaster, _resetForTest } from "./index.js";
 import { createToastView } from "./view.js";
@@ -61,14 +61,14 @@ describe("toast", () => {
   it("announces an info message through the polite live region (not via the node)", () => {
     vi.useFakeTimers();
     try {
+      mountLiveRegions(document.body);
       info("Saved");
-      // Text lands after announce()'s short delay.
       const region = liveRegion("polite");
       expect(region).not.toBeNull();
       expect(region!.getAttribute("role")).toBe("status");
       vi.advanceTimersByTime(100);
       expect(region!.textContent).toBe("Saved");
-      expect(liveRegion("assertive")).toBeNull();
+      expect(liveRegion("assertive")?.textContent).toBe("");
     } finally {
       vi.useRealTimers();
     }
@@ -77,10 +77,11 @@ describe("toast", () => {
   it("announces a success message politely", () => {
     vi.useFakeTimers();
     try {
+      mountLiveRegions(document.body);
       toast.success("Profile updated");
       vi.advanceTimersByTime(100);
       expect(liveRegion("polite")?.textContent).toBe("Profile updated");
-      expect(liveRegion("assertive")).toBeNull();
+      expect(liveRegion("assertive")?.textContent).toBe("");
     } finally {
       vi.useRealTimers();
     }
@@ -89,6 +90,7 @@ describe("toast", () => {
   it("announces an error assertively through a role=alert live region", () => {
     vi.useFakeTimers();
     try {
+      mountLiveRegions(document.body);
       error("boom");
       const region = liveRegion("assertive");
       expect(region).not.toBeNull();

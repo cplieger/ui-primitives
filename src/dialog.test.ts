@@ -137,11 +137,39 @@ describe("createDialog", () => {
     expect(d.classList.contains("is-leaving")).toBe(false);
   });
 
+  it("dispose closes an open dialog at once, without onClose", () => {
+    const d = makeDialog();
+    const onClose = vi.fn();
+    const ctrl = createDialog(d, { onClose });
+    ctrl.open();
+    ctrl.dispose();
+
+    expect(d.open).toBe(false);
+    vi.runAllTimers();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("dispose during the leave fade closes at once and drops the pending settle", () => {
+    const d = makeDialog();
+    const onClose = vi.fn();
+    const ctrl = createDialog(d, { onClose });
+    ctrl.open();
+    ctrl.close();
+    expect(d.classList.contains("is-leaving")).toBe(true);
+    ctrl.dispose();
+
+    expect(d.open).toBe(false);
+    expect(d.classList.contains("is-leaving")).toBe(false);
+    vi.runAllTimers();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("dispose stops intercepting Escape, leaving the platform close to run", () => {
     const d = makeDialog();
     const ctrl = createDialog(d);
     ctrl.open();
     ctrl.dispose();
+    d.showModal();
     const cancel = new Event("cancel", { cancelable: true });
     d.dispatchEvent(cancel);
     expect(cancel.defaultPrevented).toBe(false);
@@ -220,28 +248,6 @@ describe("openDialog / closeDialog: platform calls and degradation", () => {
     closeDialog(d);
     await vi.advanceTimersByTimeAsync(400);
     await delivered;
-    expect(d.open).toBe(false);
-  });
-
-  it("openDialog falls back to the open property when showModal() is unavailable", () => {
-    const d = makeDialog();
-    vi.spyOn(d, "showModal").mockImplementation(() => {
-      throw new Error("showModal is not implemented");
-    });
-
-    openDialog(d);
-    expect(d.open).toBe(true);
-  });
-
-  it("closeDialog falls back to the open property when close() is unavailable", () => {
-    const d = makeDialog();
-    openDialog(d);
-    vi.spyOn(d, "close").mockImplementation(() => {
-      throw new Error("close is not implemented");
-    });
-
-    closeDialog(d);
-    vi.advanceTimersByTime(400);
     expect(d.open).toBe(false);
   });
 });

@@ -21,7 +21,7 @@ modal.dispose(); // close + remove the <dialog> from the DOM
 
 ## API
 
-- `createModal(content, opts?)` returns `{ open(); close(); readonly el; readonly isOpen; dispose() }`. It wraps `content`, which gets the `.uip-modal-dialog` class, in a native `<dialog class="uip-modal">` appended to `<body>`. `el` is that `HTMLDialogElement`, and `dispose()` closes and removes it.
+- `createModal(content, opts?)` returns `{ open(); close(); readonly el; readonly isOpen; dispose() }`. It wraps `content`, which gets the `.uip-modal-dialog` class, in a native `<dialog class="uip-modal">` appended to `<body>`. `el` is that `HTMLDialogElement`, and `dispose()` closes and removes it. `open()` throws an `InvalidStateError` after `dispose()` or while `el` shows as a popover, and releases the scroll lock it took.
 - `ModalOptions` = `{ closeOnBackdrop?; closeOnEscape?; canDismiss?: () => boolean; role?: "dialog" | "alertdialog"; labelledBy?; describedBy?; initialFocus?; scrollLock?; onClose? }`. `canDismiss` guards user dismissals, a backdrop click or Escape, exactly like dialog's. See [dialog](dialog.md).
 
 What `modal` adds on top of the platform `<dialog>`:
@@ -46,7 +46,7 @@ What `modal` adds on top of the platform `<dialog>`:
 ## Notes
 
 - The modal lives in the browser's top layer, so it renders above every `z-index` in the page and needs no z-index property of its own.
-- The default toast stack and the announce regions move into the open modal. See [toast](toast.md) and [announce](announce.md). A popover or tooltip opened from a control inside the modal is rendered into the `<dialog>`, so it stacks over the modal. See [popover](popover.md) and [tooltip](tooltip.md).
+- The default toast stack moves into the open modal, and the modal carries its own announce regions, so toasts and announcements stay usable while the rest of the page is inert. See [toast](toast.md) and [announce](announce.md). A popover or tooltip opened from a control inside the modal is rendered into the `<dialog>`, so it stacks over the modal. See [popover](popover.md) and [tooltip](tooltip.md).
 
 ### Choosing between modal and dialog
 
