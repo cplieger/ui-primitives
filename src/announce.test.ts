@@ -1,9 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-import { announce, _resetForTest } from "./announce.js";
+import { announce, mountLiveRegions, _resetForTest } from "./announce.js";
 
 beforeEach(() => {
   vi.useFakeTimers();
+  mountLiveRegions(document.body);
 });
 
 afterEach(() => {
@@ -16,109 +17,73 @@ function regions(): HTMLElement[] {
   return [...document.querySelectorAll<HTMLElement>(".uip-visually-hidden")];
 }
 
+function region(politeness: "polite" | "assertive"): HTMLElement {
+  const found = document.querySelector<HTMLElement>(
+    `.uip-visually-hidden[aria-live="${politeness}"]`,
+  );
+  expect(found).not.toBeNull();
+  return found!;
+}
+
 describe("announce", () => {
-  it("creates a single polite live region and sets its text after the delay", () => {
+  it("sets the polite region's text after the delay, clearing it first", () => {
+    region("polite").textContent = "old";
     announce("hello");
-    const all = regions();
-    expect(all).toHaveLength(1);
-    const region = all[0]!;
-    expect(region.getAttribute("aria-live")).toBe("polite");
-    expect(region.getAttribute("aria-atomic")).toBe("true");
-    expect(region.textContent).toBe(""); // cleared synchronously
-    vi.advanceTimersByTime(100);
-    expect(region.textContent).toBe("hello");
+    expect(region("polite").textContent).toBe("");
+    vi.advanceTimersByTime(99);
+    expect(region("polite").textContent).toBe("");
+    vi.advanceTimersByTime(1);
+    expect(region("polite").textContent).toBe("hello");
+    expect(region("polite").getAttribute("aria-atomic")).toBe("true");
+    expect(region("polite").getAttribute("role")).toBe("status");
   });
 
   it("reuses the same region across polite announcements", () => {
+    const polite = region("polite");
     announce("one");
     vi.advanceTimersByTime(100);
     announce("two");
     vi.advanceTimersByTime(100);
-    const all = regions();
-    expect(all).toHaveLength(1);
-    expect(all[0]!.textContent).toBe("two");
+    expect(regions()).toHaveLength(2);
+    expect(region("polite")).toBe(polite);
+    expect(polite.textContent).toBe("two");
   });
 
-  it("uses a separate assertive region with role=alert", () => {
+  it("uses the separate assertive region with role=alert", () => {
     announce("polite msg", "polite");
     announce("assertive msg", "assertive");
     vi.advanceTimersByTime(100);
-    const polite = document.querySelector('[aria-live="polite"].uip-visually-hidden');
-    const assertive = document.querySelector('[aria-live="assertive"].uip-visually-hidden');
-    expect(polite?.textContent).toBe("polite msg");
-    expect(assertive?.textContent).toBe("assertive msg");
-    expect(assertive?.getAttribute("role")).toBe("alert");
-    expect(regions()).toHaveLength(2);
+    expect(region("polite").textContent).toBe("polite msg");
+    expect(region("assertive").textContent).toBe("assertive msg");
+    expect(region("assertive").getAttribute("role")).toBe("alert");
   });
 
   it("re-announces an identical message by clearing then re-setting after the delay", () => {
     announce("same");
     vi.advanceTimersByTime(100);
-    expect(regions()[0]!.textContent).toBe("same");
+    expect(region("polite").textContent).toBe("same");
     announce("same");
-    expect(regions()[0]!.textContent).toBe(""); // cleared so the change is observable
+    expect(region("polite").textContent).toBe("");
     vi.advanceTimersByTime(100);
-    expect(regions()[0]!.textContent).toBe("same");
+    expect(region("polite").textContent).toBe("same");
   });
 
   it("cancels a pending announce so a rapid second message wins (first never lands)", () => {
     announce("first");
     vi.advanceTimersByTime(50);
-    announce("second"); // cancels first's pending timer
-    // +50ms from the second call = +100ms from the first: it must NOT land here.
-    vi.advanceTimersByTime(50);
-    expect(regions()[0]!.textContent).toBe("");
-    vi.advanceTimersByTime(50); // now +100ms from the second call
-    expect(regions()[0]!.textContent).toBe("second");
-  });
-});
-
-describe("announce: modal <dialog> re-homing", () => {
-  it("homes the region into an open modal (inert-safe) and back after it closes", () => {
-    const dlg = document.createElement("dialog");
-    document.body.appendChild(dlg);
-    dlg.showModal();
-
-    // showModal() inerts everything outside the dialog subtree, so the region
-    // must live INSIDE it or it is silent to AT.
-    announce("saved inside modal");
-    const region = regions()[0]!;
-    expect(region.parentElement).toBe(dlg);
-    vi.advanceTimersByTime(100);
-    expect(region.textContent).toBe("saved inside modal");
-
-    dlg.close();
-    dlg.remove();
-
-    // Next announce re-resolves the host: back on document.body, re-attached.
-    announce("back outside");
-    expect(region.parentElement).toBe(document.body);
-    vi.advanceTimersByTime(100);
-    expect(region.textContent).toBe("back outside");
-  });
-});
-
-describe("announce: hosting is left alone when it is already correct", () => {
-  it("does not move app DOM when the region is already hosted where it belongs", () => {
-    announce("first");
-    vi.advanceTimersByTime(100);
-
-    const appNode = document.createElement("div");
-    document.body.appendChild(appNode);
-
     announce("second");
-    vi.advanceTimersByTime(100);
-    expect(document.body.lastElementChild).toBe(appNode);
-    expect(regions()[0]!.textContent).toBe("second");
+    vi.advanceTimersByTime(50);
+    expect(region("polite").textContent).toBe("");
+    vi.advanceTimersByTime(50);
+    expect(region("polite").textContent).toBe("second");
   });
 
-  it("_resetForTest removes the live regions", () => {
-    announce("stale");
-    vi.advanceTimersByTime(100);
-    expect(regions()).toHaveLength(1);
-
-    _resetForTest();
-    expect(regions()).toHaveLength(0);
+  it("keeps the two politeness levels independent: an assertive message never cancels a polite one", () => {
+    announce("polite msg");
+    vi.advanceTimersByTime(50);
+    announce("assertive msg", "assertive");
+    vi.advanceTimersByTime(50);
+    expect(region("polite").textContent).toBe("polite msg");
   });
 });
 
@@ -128,20 +93,22 @@ describe("announce — _resetForTest really resets", () => {
     expect(vi.getTimerCount()).toBe(1);
 
     _resetForTest();
-    // The region has just been removed; a leftover timer fires into a detached node.
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("discards the registry too, so a later announce builds a fresh region", () => {
-    announce("stale");
-    const first = regions()[0]!;
+  it("removes the root regions and forgets the root, so announce writes nothing until a new mount", () => {
+    const first = region("polite");
     _resetForTest();
     expect(regions()).toHaveLength(0);
 
-    announce("fresh");
-    const second = regions()[0]!;
-    // If the region cache outlives the reset, the discarded node is reused.
+    announce("dropped");
+    expect(regions()).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    mountLiveRegions(document.body);
+    const second = region("polite");
     expect(second).not.toBe(first);
+    announce("fresh");
     vi.advanceTimersByTime(100);
     expect(second.textContent).toBe("fresh");
   });

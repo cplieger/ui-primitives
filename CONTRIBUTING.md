@@ -19,6 +19,8 @@ Animate a state change with `runTransition` from `src/transition.ts`, never with
 
 While a modal `<dialog>` is open, chrome that must stay usable lives inside it. `showModal()` makes everything outside the dialog's subtree inert, whatever its `z-index`.
 
-The toast stack, announce regions and tooltips already move into an open modal. A popup panel moves in only when it is not yet in the page, and a panel the caller connected stays where the caller put it.
+The toast stack and tooltips already move into an open modal. A popup panel moves in only when it is not yet in the page, and a panel the caller connected stays where the caller put it.
+
+Announce regions never move. Each dialog the library opens mounts its own pair before `showModal()`, and `announce` writes to the topmost one.
 
 Relative imports end in `.js`, as in `./focus-trap.js`, although the files are `.ts`. Consumers compile this source with their own settings, and under `node16` or `nodenext` resolution an extensionless relative import does not resolve.

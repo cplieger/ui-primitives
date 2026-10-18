@@ -48,7 +48,7 @@ The fade and the backdrop dim use the shared `--uip-dialog-leave-duration`, `--u
 
 ## Notes
 
-- `ask()` renders a native `<dialog class="uip-ask">`. Its title labels it (`aria-labelledby`) and its message body describes it (`aria-describedby`). With no title, the message labels it. `showModal()` provides the focus trap and focus restoration.
+- `ask()` renders a native `<dialog class="uip-ask">`. Its title labels it (`aria-labelledby`) and its message body describes it (`aria-describedby`). With no title, the message labels it. `showModal()` provides the focus trap and focus restoration. Each ask dialog carries its own announce regions, so `announce` reaches assistive technology while it is open.
 - `variant: "destructive"` sets `role="alertdialog"` and adds `is-destructive` to the OK button for skinning. On a boolean ask it also focuses Cancel, so a keyboard user cannot confirm by accident. An input ask always focuses its input.
 - With `input` set, the dialog gains the `.uip-ask--input` modifier and the message becomes the input's `<label>`. OK or Enter resolve the input's value as it is. An empty submission resolves `""`, which is distinct from the `null` of a cancellation, and trimming or mapping empty to `null` is the caller's choice. The input is focused on open with any `initialValue` selected, like `window.prompt`.
 - Cancellation works the same way everywhere. Cancel, Escape, a backdrop click, or a newer `ask()` resolve `false` for a boolean ask and `null` for an input ask. A newer `ask()` replaces an open one of either shape, so one question shows at a time.

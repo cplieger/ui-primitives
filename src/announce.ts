@@ -1,76 +1,98 @@
 /**
- * announce.ts — Screen-reader announcements via shared visually-hidden ARIA
- * live regions, one per politeness level, created lazily and reused. The
- * message clears then sets after a delay: the empty->text mutation is what
- * forces AT to re-announce identical text, and a microtask gap is too fast
- * for AT to register as two distinct mutations.
- *
+ * announce.ts — Screen-reader announcements through pre-mounted live regions:
+ * a polite and an assertive one per surface, the root's from `mountLiveRegions`
+ * and each modal `<dialog>`'s from the dialog primitives. A region inserted or
+ * moved in the mutation that fills it is not reliably announced, so `announce`
+ * never creates or moves one.
  * @module
  */
 
-import { el } from "@cplieger/reactive";
-
+import { acquireRegions, regionsOf } from "./live-regions.js";
+import type { Politeness } from "./live-regions.js";
 import { topmostOpenDialog } from "./modal-host.js";
 
-type Politeness = "polite" | "assertive";
-
-/** Gap (ms) between clearing the region and setting the new text. Long enough
- *  for assistive tech to observe two distinct mutations; short enough to feel
- *  immediate. */
+/** Gap (ms) between clearing the region and setting the new text: the
+ *  empty-then-text change is what makes assistive tech re-announce identical
+ *  text, and a microtask gap is too short for it to see two mutations. */
 const ANNOUNCE_DELAY_MS = 100;
 
-interface Region {
-  readonly el: HTMLElement;
-  timer: ReturnType<typeof setTimeout> | null;
+interface RootMount {
+  readonly host: HTMLElement;
+  readonly release: () => void;
 }
 
-const regions = new Map<Politeness, Region>();
+/** Root mounts still held, oldest first; the newest one's host is the root. */
+const roots: RootMount[] = [];
 
-function ensureRegion(politeness: Politeness): Region {
-  let region = regions.get(politeness);
-  if (region === undefined) {
-    const node = el("div", {
-      className: "uip-visually-hidden",
-      role: politeness === "assertive" ? "alert" : "status",
-      "aria-live": politeness,
-      "aria-atomic": "true",
-    });
-    region = { el: node, timer: null };
-    regions.set(politeness, region);
-  }
-  // showModal() inerts everything outside the dialog subtree, so a body-hosted
-  // region is silent to AT while a modal is open; re-home into the topmost
-  // open modal (or back to body) on every announce.
-  const host: HTMLElement = topmostOpenDialog() ?? document.body;
-  if (region.el.parentElement !== host) {
-    host.appendChild(region.el);
-  }
-  return region;
-}
+const pending = new Map<Politeness, ReturnType<typeof setTimeout>>();
 
-/** Announce `message` to screen readers. `politeness` defaults to `"polite"`;
- *  `"assertive"` interrupts (uses a separate region + `role="alert"`). */
-export function announce(message: string, politeness: Politeness = "polite"): void {
-  const region = ensureRegion(politeness);
-  // Cancel a pending set so a rapid second announce wins outright.
-  if (region.timer !== null) {
-    clearTimeout(region.timer);
-    region.timer = null;
-  }
-  region.el.textContent = "";
-  region.timer = setTimeout(() => {
-    region.el.textContent = message;
-    region.timer = null;
-  }, ANNOUNCE_DELAY_MS);
-}
-
-/** Test-only: remove the live regions and reset internal state. */
-export function _resetForTest(): void {
-  for (const region of regions.values()) {
-    if (region.timer !== null) {
-      clearTimeout(region.timer);
+/** Mount the page's root polite and assertive live regions as `host`'s last
+ *  children and make `host` the root. Call it once at boot, before the first
+ *  render, so the regions exist before anything is announced. A pair still
+ *  inside `host` is kept rather than replaced. Returns this mount's release,
+ *  which is idempotent: the root falls back to the newest mount still held,
+ *  and the pair leaves `host` when its last owner releases (a dialog open on
+ *  `host` is an owner too). */
+export function mountLiveRegions(host: HTMLElement): () => void {
+  const mount: RootMount = { host, release: acquireRegions(host) };
+  roots.push(mount);
+  return () => {
+    const at = roots.indexOf(mount);
+    if (at === -1) {
+      return;
     }
-    region.el.remove();
+    roots.splice(at, 1);
+    mount.release();
+  };
+}
+
+/** The region an announcement reaches now: `showModal()` inerts everything
+ *  outside the topmost modal, so its pair wins over the root's. */
+function currentRegion(politeness: Politeness): HTMLElement | null {
+  const dialog = topmostOpenDialog();
+  const root = roots.at(-1);
+  const pair =
+    (dialog === null ? undefined : regionsOf(dialog)) ??
+    (root === undefined ? undefined : regionsOf(root.host));
+  return pair?.[politeness] ?? null;
+}
+
+function deliver(message: string, politeness: Politeness): void {
+  const region = currentRegion(politeness);
+  if (region === null) {
+    return;
   }
-  regions.clear();
+  region.textContent = "";
+  pending.set(
+    politeness,
+    setTimeout(() => {
+      // A dialog opened or closed during the gap: the cleared region is no
+      // longer the one assistive tech hears, so start over on the live one.
+      if (currentRegion(politeness) !== region) {
+        deliver(message, politeness);
+        return;
+      }
+      region.textContent = message;
+    }, ANNOUNCE_DELAY_MS),
+  );
+}
+
+/** Announce `message` to screen readers through the topmost open modal
+ *  dialog's live region, else the root's from {@link mountLiveRegions}.
+ *  Writes nothing when neither is mounted. `"assertive"` interrupts, through
+ *  its own `role="alert"` region; a second announcement at the same
+ *  politeness before the first lands replaces it. */
+export function announce(message: string, politeness: Politeness = "polite"): void {
+  clearTimeout(pending.get(politeness));
+  deliver(message, politeness);
+}
+
+/** Test-only: cancel pending announcements and release every root mount. */
+export function _resetForTest(): void {
+  for (const timer of pending.values()) {
+    clearTimeout(timer);
+  }
+  for (const mount of roots.splice(0)) {
+    mount.release();
+  }
 }

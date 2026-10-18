@@ -2,7 +2,7 @@
   "name": "@cplieger/ui-primitives",
   "version": "1.0.0",
   "type": "module",
-  "description": "Headless browser UI primitives (toast, tooltip, popover, popup, dialog, modal, ask, disclosure, focus-trap, roving-focus, theme, view-transition, announce, skeleton) with behavior + accessibility + a documented CSS class/custom-property contract. Consuming apps supply only skin CSS. Built on @cplieger/reactive.",
+  "description": "Headless browser UI primitives (toast, tooltip, popover, popup, dialog, modal, ask, disclosure, focus-trap, roving-focus, theme, view-transition, transition, announce, skeleton) with behavior + accessibility + a documented CSS class/custom-property contract. Consuming apps supply only skin CSS. Built on @cplieger/reactive.",
   "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts",
@@ -19,6 +19,7 @@
     "./skeleton": "./src/skeleton.ts",
     "./theme": "./src/theme.ts",
     "./view-transition": "./src/view-transition.ts",
+    "./transition": "./src/transition.ts",
     "./announce": "./src/announce.ts",
     "./css": "./css/ui-primitives.css"
   },

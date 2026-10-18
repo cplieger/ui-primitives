@@ -297,10 +297,10 @@
   display: none;
 }
 
-/* ===== Announce (screen-reader live regions) ============================= */
+/* ===== Visually hidden (live regions, collapsed labels) ================= */
 
 /* Standard visually-hidden ("sr-only"): removed from the visual layout but
- * available to assistive technology. */
+ * kept in the accessibility tree, which `display: none` would remove it from. */
 .uip-visually-hidden {
   position: absolute;
   overflow: hidden;
