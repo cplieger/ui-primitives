@@ -20,9 +20,10 @@ closeDialog(myDialog, () => console.log("closed"));
 
 ## API
 
-- `createDialog(dialog, opts?)` returns `{ open(); close(); readonly el; dispose() }` and adds the `uip-dialog` class for the base stylesheet.
+- `createDialog(dialog, opts?)` returns `{ open(); close(); readonly el; dispose() }` and adds the `uip-dialog` class for the base stylesheet. `dispose()` closes an open dialog at once, with no fade and no `onClose`, and removes the wiring and the class. It ends the open, releasing its hold on the dialog's announce regions, which leave when their last owner releases them.
 - `DialogOptions` = `{ closeOnBackdrop?; closeOnEscape?; canDismiss?: () => boolean; onClose? }`.
-- `openDialog(dialog)` calls `showModal()`, with a fallback for engines that lack it.
+- `openDialog(dialog)` mounts the dialog's two announce regions, then calls `showModal()`. The dialog it opened last ranks on top, so announcements, toasts and popups go to it. A dialog that is not in the document or is showing as a popover makes `showModal()` throw an `InvalidStateError`. `openDialog` and `controller.open()` rethrow it and keep nothing from the failed open.
+- The two regions stay the dialog's last children while it is open. They leave when their last owner releases them: the dialog's `close` event, from `close()`, Escape or `closeDialog`, or `dispose()`. A dialog closed by clearing `open` fires no `close` event, so it keeps its regions until its next open or `dispose()`. Render your content into a child element of the dialog. Replacing the dialog's children removes the regions, and announcements made while it is open are lost.
 - `closeDialog(dialog, onClosed?)` fades the dialog out with `is-leaving`, then closes it.
 
 ## CSS
@@ -53,5 +54,6 @@ const settings = createDialog(dlg, {
 });
 ```
 
+- Only a `cancel` event fired at the dialog itself counts as Escape. One that bubbles up from inside, such as a file input whose picker was dismissed, leaves the dialog open. The same holds for [modal](modal.md) and [ask](ask.md).
 - `openDialog` cancels a fade-out still in progress, so you can reopen a dialog during its close animation.
 - Use dialog to add behavior to a `<dialog>` element already in your markup. Use [modal](modal.md) to build the `<dialog>` from a content element instead.

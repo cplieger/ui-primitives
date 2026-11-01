@@ -72,12 +72,13 @@ describe("createModal — structure", () => {
     expect(content.classList.contains("uip-modal-dialog")).toBe(false);
   });
 
-  it("dispose() during the fade cancels the pending close, so onClose never fires", () => {
+  it("dispose() during the fade cancels the pending close and its leaving state, so onClose never fires", () => {
     const onClose = vi.fn();
     const m = createModal(makeContent().content, { onClose });
     m.open();
     m.close(); // starts the leave
     m.dispose(); // tears down instead: the pending finalizer must no-op
+    expect(m.el.classList.contains("is-leaving")).toBe(false);
     vi.advanceTimersByTime(400);
     expect(onClose).not.toHaveBeenCalled();
   });
@@ -164,6 +165,23 @@ describe("Escape (native cancel event)", () => {
     expect(m.el.classList.contains("is-leaving")).toBe(true);
     vi.advanceTimersByTime(400);
     expect(m.el.open).toBe(false);
+  });
+
+  it("stays open when a nested file input's picker-dismiss cancel bubbles up", () => {
+    const { content } = makeContent();
+    const file = document.createElement("input");
+    file.type = "file";
+    content.appendChild(file);
+    const onClose = vi.fn();
+    const m = createModal(content, { onClose });
+    m.open();
+    const cancel = new Event("cancel", { bubbles: true, cancelable: true });
+    file.dispatchEvent(cancel);
+    expect(cancel.defaultPrevented).toBe(false);
+    expect(m.el.classList.contains("is-leaving")).toBe(false);
+    vi.advanceTimersByTime(400);
+    expect(m.isOpen).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("does not close on cancel when closeOnEscape is false (still preventDefaults)", () => {
@@ -392,17 +410,13 @@ describe("createModal — dispose hands the element back to the platform", () =>
     expect(evt.defaultPrevented).toBe(false);
   });
 
-  it("degrades to the open attribute when close() is not implemented", () => {
+  it("releases the modal's live regions at once", () => {
     const m = createModal(makeContent().content);
     m.open();
-    vi.spyOn(m.el, "close").mockImplementation(() => {
-      throw new Error("close is not implemented");
-    });
-
+    expect(m.el.querySelectorAll("[aria-live]")).toHaveLength(2);
     m.dispose();
 
-    // Must not report itself open just because the engine lacks close().
-    expect(m.el.open).toBe(false);
+    expect(m.el.querySelectorAll("[aria-live]")).toHaveLength(0);
   });
 
   it("leaves the return value of an already-closed dialog alone", () => {

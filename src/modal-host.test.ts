@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 
+import { openDialog as openTracked } from "./dialog.js";
 import { topmostOpenDialog } from "./modal-host.js";
 
 // `matches` is stubbed per dialog to declare which ones the platform would
@@ -57,5 +58,59 @@ describe("topmostOpenDialog", () => {
     openDialog("throws");
     const last = openDialog(false);
     expect(topmostOpenDialog()).toBe(last);
+  });
+
+  it("ranks dialogs opened through openDialog by open order", () => {
+    const first = document.createElement("dialog");
+    const second = document.createElement("dialog");
+    document.body.append(first, second);
+    openTracked(second);
+    openTracked(first);
+    expect(topmostOpenDialog()).toBe(first);
+
+    first.close();
+    expect(topmostOpenDialog()).toBe(second);
+  });
+
+  it("ranks a tracked dialog above one opened outside openDialog", () => {
+    const tracked = document.createElement("dialog");
+    document.body.appendChild(tracked);
+    openTracked(tracked);
+    openDialog(true);
+    expect(topmostOpenDialog()).toBe(tracked);
+  });
+
+  it("skips a tracked dialog once it leaves the document", () => {
+    const tracked = document.createElement("dialog");
+    document.body.appendChild(tracked);
+    openTracked(tracked);
+    const untracked = openDialog(true);
+    tracked.remove();
+    expect(topmostOpenDialog()).toBe(untracked);
+  });
+
+  it("forgets a dialog once it closes, so a later direct showModal() ranks below", async () => {
+    const tracked = document.createElement("dialog");
+    const reused = document.createElement("dialog");
+    document.body.append(tracked, reused);
+    openTracked(tracked);
+    openTracked(reused);
+    const closed = new Promise((resolve) => {
+      reused.addEventListener("close", resolve, { once: true });
+    });
+    reused.close();
+    await closed;
+    reused.showModal();
+    expect(topmostOpenDialog()).toBe(tracked);
+  });
+
+  it("keeps an already-open dialog's rank when it is opened again", () => {
+    const lower = document.createElement("dialog");
+    const upper = document.createElement("dialog");
+    document.body.append(lower, upper);
+    openTracked(lower);
+    openTracked(upper);
+    openTracked(lower);
+    expect(topmostOpenDialog()).toBe(upper);
   });
 });

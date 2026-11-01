@@ -1,7 +1,7 @@
 // view.ts — DOM implementation of the toast `ToastView` port. Enter/leave
 // lifecycle via `is-entering` → `is-shown` → `is-leaving` state classes.
 // Screen-reader announcement is delegated to `announce()`, so neither the
-// stack nor a toast node is a live region — no live region ever nests inside
+// stack nor a toast node is a live region and no live region nests inside
 // another.
 
 import { el } from "@cplieger/reactive";
@@ -91,12 +91,7 @@ export function createToastView(host?: HTMLElement): ToastView<ToastHandle> {
     mount(data: ToastRenderData, ctx: ToastCallbacks): ToastHandle {
       const stack = ensureContainer();
 
-      // Announce the message to screen readers through the shared live region
-      // (announce()), NOT through the toast node. The node stays a plain,
-      // non-live element, so no live region nests inside another and there is
-      // no double-announce. announce()'s region pre-exists its text and
-      // clears-then-sets, so even the first toast announces reliably. Errors
-      // interrupt (assertive); info / success are polite.
+      // The node itself stays non-live, so the message is announced once.
       announce(data.message, data.level === "error" ? "assertive" : "polite");
 
       const node = el("div", {

@@ -512,6 +512,31 @@ describe("popup: nothing is left armed", () => {
     pop.dispose();
   });
 
+  it("a popup hidden before its deferred install fires leaves Escape to the page", () => {
+    const { panel } = fixture();
+    const pop = createPopup(panel);
+    const pageKeys: string[] = [];
+    const page = new AbortController();
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        pageKeys.push(e.key);
+      },
+      { signal: page.signal },
+    );
+
+    pop.show();
+    pop.hide();
+    armListeners();
+    pressEscape(document);
+    page.abort();
+    pop.dispose();
+
+    // An install that outlived the close would hold the document keydown and
+    // isolate Escape from the page, and from any modal around the popup.
+    expect(pageKeys).toEqual(["Escape"]);
+  });
+
   it("setOptions on a closed popup arms nothing", () => {
     const { panel } = fixture();
     const pop = createPopup(panel);

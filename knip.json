@@ -1,4 +1,3 @@
 {
-  "ignoreDependencies": ["html-validate"],
   "rules": { "cycles": "error" }
 }

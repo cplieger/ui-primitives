@@ -17,6 +17,7 @@
     "./skeleton": "./src/skeleton.ts",
     "./theme": "./src/theme.ts",
     "./view-transition": "./src/view-transition.ts",
+    "./transition": "./src/transition.ts",
     "./announce": "./src/announce.ts"
   },
   "publish": {

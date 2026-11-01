@@ -3,13 +3,16 @@
 
 export { viewTransition } from "./view-transition.js";
 
+export { runTransition, cancelTransition } from "./transition.js";
+export type { TransitionSpec } from "./transition.js";
+
 export { trapFocus } from "./focus-trap.js";
 export type { FocusTrapOptions } from "./focus-trap.js";
 
 export { rovingFocus } from "./roving-focus.js";
 export type { RovingFocusController, RovingFocusOptions } from "./roving-focus.js";
 
-export { announce } from "./announce.js";
+export { announce, mountLiveRegions } from "./announce.js";
 
 export { skeletonTiming } from "./skeleton.js";
 export type { SkeletonTimingController, SkeletonTimingOptions } from "./skeleton.js";
