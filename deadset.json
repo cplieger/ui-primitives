@@ -1,0 +1,17 @@
+{
+  "ts": {
+    "lifecycle_contracts": [
+      {
+        "bases": [{ "global": "HTMLElement" }],
+        "members": [
+          "connectedCallback",
+          "disconnectedCallback",
+          "adoptedCallback",
+          "connectedMoveCallback",
+          "attributeChangedCallback",
+          "observedAttributes:static"
+        ]
+      }
+    ]
+  }
+}

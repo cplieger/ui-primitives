@@ -61,7 +61,6 @@ export interface DialogEngine {
   flush(): void;
   consult<R>(fn: () => R): R | typeof SUPERSEDED;
   /** The closeDialog callbacks still held, for tests. */
-  // deadset:ignore DS1301 -- the dialog and modal tests read it to prove every closeDialog callback is delivered and none is kept
   readonly outboxSize: number;
 }
 
