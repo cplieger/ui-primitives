@@ -12,7 +12,7 @@ import { type SUPERSEDED, createDriver } from "./owner.js";
 import { watchSettle } from "./transition.js";
 
 /** A dialog's committed state. */
-export interface DialogState {
+interface DialogState {
   readonly phase: "closed" | "open" | "leaving";
   /** Counts leaves; the settle token. */
   readonly leave: number;
@@ -47,7 +47,6 @@ export interface DialogFacet {
 }
 
 export interface DialogEngine {
-  readonly dialog: HTMLDialogElement;
   readonly state: DialogState;
   /** The phase with every browser change so far folded in. It commits nothing; a
    *  change it reads is realized at the next microtask. */
@@ -62,6 +61,7 @@ export interface DialogEngine {
   flush(): void;
   consult<R>(fn: () => R): R | typeof SUPERSEDED;
   /** The closeDialog callbacks still held, for tests. */
+  // deadset:ignore DS1301 -- the dialog and modal tests read it to prove every closeDialog callback is delivered and none is kept
   readonly outboxSize: number;
 }
 
@@ -443,7 +443,6 @@ function createEngine(dialog: HTMLDialogElement): DialogEngine {
   };
 
   return {
-    dialog,
     get state(): DialogState {
       return driver.state;
     },

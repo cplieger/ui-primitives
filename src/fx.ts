@@ -8,8 +8,7 @@ export type StyleProp =
   "height" | "position" | "left" | "right" | "top" | "minWidth" | "width" | "overflow";
 
 /** `showModal`'s outcome, read from the element after the call. */
-export type ShowResult =
-  { readonly open: true } | { readonly open: false; readonly error: unknown };
+type ShowResult = { readonly open: true } | { readonly open: false; readonly error: unknown };
 
 type Reflected = "hidden" | "inert" | "id" | "tabIndex";
 
@@ -48,7 +47,7 @@ export interface Fx {
 }
 
 /** What a pass gives its `Fx`. */
-export interface Pass {
+interface Pass {
   /** After an external call: throw to restart when the pass went stale. */
   check(): void;
   /** Before a measurement's reads. */

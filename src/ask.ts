@@ -83,7 +83,6 @@ interface View {
 
 interface Question {
   readonly id: number;
-  readonly shape: Shape;
   readonly view: View;
   readonly cancelValue: boolean | null;
   readonly resolve: (value: Answer) => void;
@@ -92,7 +91,6 @@ interface Question {
 
 interface Slot {
   readonly refs: AskRefs | AskInputRefs;
-  readonly input: AskInputRefs | null;
   readonly engine: DialogEngine;
   readonly facet: DialogFacet;
   /** The last question shown on this dialog. */
@@ -308,7 +306,7 @@ function createSlot(shape: Shape): Slot {
       }
     },
   };
-  const slot: Slot = { refs, input, engine: dialogEngine(refs.dialog), facet, question: null };
+  const slot: Slot = { refs, engine: dialogEngine(refs.dialog), facet, question: null };
   slot.engine.attach(facet);
   return slot;
 }
@@ -378,7 +376,6 @@ export function ask(message: string, opts?: AskOptions): Promise<boolean | strin
     const other = slots[shape === "input" ? "boolean" : "input"];
     const q: Question = {
       id: ++questionSeq,
-      shape,
       view,
       cancelValue: view.input === null ? false : null,
       resolve,

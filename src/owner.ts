@@ -23,7 +23,7 @@ const STALE: Error = Object.freeze(new Error("ui-primitives: stale pass"));
 const RESTART_LIMIT = 50;
 
 /** How a driver realizes its state. */
-export interface DriverSpec<S> {
+interface DriverSpec<S> {
   readonly initial: S;
   /** Move the DOM toward `s`; read the DOM only to diff it and to see a platform
    *  call's outcome, and write only what differs. */
@@ -43,6 +43,7 @@ export interface DriverSpec<S> {
 /** One desired state, its revision and its realization loop. */
 export interface Driver<S> {
   readonly state: S;
+  // deadset:ignore DS1301 -- the driver tests read it to tell a released driver from a live one after a pass
   readonly released: boolean;
   /** Store `next` and move the revision without starting a drive. */
   set(next: S): void;
@@ -268,7 +269,7 @@ export interface Binding {
   readonly dispose: () => void;
 }
 
-export interface BindingParts<T> {
+interface BindingParts<T> {
   readonly controller: T;
   /** Realize the initial state. Runs after the root is made, outside it and untracked. */
   readonly start: () => void;
