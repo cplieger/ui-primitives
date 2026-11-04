@@ -1,5 +1,8 @@
 # ui-primitives
 
+> Moved into [`@cplieger/ui`](https://github.com/cplieger/ui): each widget is now its own subpath, such as `@cplieger/ui/dialog`, as the [migration guide](https://github.com/cplieger/ui/blob/main/docs/migrating.md) shows.
+> **Archived 2026-11-04. This repository is read-only. The published package stays available.**
+
 [![npm](https://img.shields.io/npm/v/@cplieger/ui-primitives)](https://www.npmjs.com/package/@cplieger/ui-primitives) [![JSR](https://jsr.io/badges/@cplieger/ui-primitives)](https://jsr.io/@cplieger/ui-primitives) [![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/ui-primitives/badges/mutation-ts.json)](https://github.com/cplieger/ui-primitives/issues?q=label%3Astryker-tracker)
 
 ui-primitives adds accessible toasts, tooltips, popovers, dialogs and focus handling to a TypeScript web app without a component framework. Your own CSS decides how they look.
