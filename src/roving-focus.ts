@@ -15,6 +15,10 @@
  * @module
  */
 
+import { untracked } from "@cplieger/reactive";
+
+import { createDriver, ownedBinding } from "./owner.js";
+
 /** Keyboard behavior of a roving-tabindex container: which arrow pair moves
  *  focus, whether the ends wrap, whether Home/End jump, and whether
  *  Enter/Space activate the focused item. The defaults are the WAI-ARIA
@@ -43,7 +47,8 @@ export interface RovingFocusController {
    *  (focused, or the previous Tab stop if still present) keeps `tabindex=0`,
    *  everything else gets `-1`. */
   refresh(): void;
-  /** Remove the listeners. Tabindex attributes are left as-is. */
+  /** Remove the listeners. Tabindex attributes are left as-is, and
+   *  `focusFirst()` and `refresh()` do nothing from then on. */
   dispose(): void;
 }
 
@@ -55,94 +60,139 @@ export function rovingFocus(
   selector: string,
   opts?: RovingFocusOptions,
 ): RovingFocusController {
-  const isVertical = (opts?.orientation ?? "vertical") !== "horizontal";
-  const wrap = opts?.wrap ?? true;
-  const homeEnd = opts?.homeEnd ?? true;
-  const activate = opts?.activate ?? true;
-  const prevKey = isVertical ? "ArrowUp" : "ArrowLeft";
-  const nextKey = isVertical ? "ArrowDown" : "ArrowRight";
+  const o = untracked(() => ({
+    vertical: (opts?.orientation ?? "vertical") !== "horizontal",
+    wrap: opts?.wrap ?? true,
+    homeEnd: opts?.homeEnd ?? true,
+    activate: opts?.activate ?? true,
+  }));
+  const prevKey = o.vertical ? "ArrowUp" : "ArrowLeft";
+  const nextKey = o.vertical ? "ArrowDown" : "ArrowRight";
 
-  const items = (): HTMLElement[] => [...container.querySelectorAll<HTMLElement>(selector)];
+  interface State {
+    /** The committed tab stop. */
+    readonly stop: HTMLElement | null;
+    /** Moves at every refresh(), whose job is to re-apply even an unchanged stop. */
+    readonly sync: number;
+  }
 
-  const applyTabindex = (list: HTMLElement[], active: HTMLElement | null): void => {
-    const target = active !== null && list.includes(active) ? active : (list[0] ?? null);
-    for (const item of list) {
-      item.setAttribute("tabindex", item === target ? "0" : "-1");
-    }
-  };
+  return ownedBinding((binding) => {
+    const items = (): HTMLElement[] => [...container.querySelectorAll<HTMLElement>(selector)];
+    let listening = false;
 
-  const onKeyDown = (e: KeyboardEvent): void => {
-    const list = items();
-    if (list.length === 0) {
-      return;
-    }
-    const active = document.activeElement;
-    const current = active instanceof HTMLElement ? list.indexOf(active) : -1;
-
-    let next: number;
-    switch (e.key) {
-      case nextKey:
-        next = current < list.length - 1 ? current + 1 : wrap ? 0 : list.length - 1;
-        break;
-      case prevKey:
-        next = current > 0 ? current - 1 : wrap ? list.length - 1 : 0;
-        break;
-      case "Home":
-        if (!homeEnd) {
+    const onKeyDown = (e: KeyboardEvent): void => {
+      driver.act((fx) => {
+        const list = items();
+        if (list.length === 0) {
           return;
         }
-        next = 0;
-        break;
-      case "End":
-        if (!homeEnd) {
-          return;
+        const active = document.activeElement;
+        const current = active instanceof HTMLElement ? list.indexOf(active) : -1;
+        let next: number;
+        switch (e.key) {
+          case nextKey:
+            next = current < list.length - 1 ? current + 1 : o.wrap ? 0 : list.length - 1;
+            break;
+          case prevKey:
+            next = current > 0 ? current - 1 : o.wrap ? list.length - 1 : 0;
+            break;
+          case "Home":
+            if (!o.homeEnd) {
+              return;
+            }
+            next = 0;
+            break;
+          case "End":
+            if (!o.homeEnd) {
+              return;
+            }
+            next = list.length - 1;
+            break;
+          case "Enter":
+          case " ":
+          case "Spacebar": {
+            const item = list[current];
+            if (o.activate && item !== undefined) {
+              // Suppress the native Enter/Space activation and fire exactly one click.
+              e.preventDefault();
+              fx.click(item);
+            }
+            return;
+          }
+          default:
+            return;
         }
-        next = list.length - 1;
-        break;
-      case "Enter":
-      case " ":
-      case "Spacebar":
-        if (activate && current !== -1) {
-          // Suppress the native Enter/Space activation and fire exactly one click.
-          e.preventDefault();
-          list[current]?.click();
+        e.preventDefault();
+        const target = list[next];
+        if (target !== undefined) {
+          fx.focus(target);
         }
+      });
+    };
+    const onFocusIn = (e: FocusEvent): void => {
+      const target = e.target;
+      if (binding.ended || !(target instanceof HTMLElement) || !target.matches(selector)) {
         return;
-      default:
-        return;
-    }
-    e.preventDefault();
-    list[next]?.focus();
-  };
+      }
+      driver.commit(
+        driver.state.stop === target ? driver.state : { ...driver.state, stop: target },
+      );
+    };
+    const listen = (on: boolean): void => {
+      if (listening !== on) {
+        listening = on;
+        const method = on ? "addEventListener" : "removeEventListener";
+        container[method]("keydown", onKeyDown as EventListener);
+        container[method]("focusin", onFocusIn as EventListener);
+      }
+    };
 
-  const onFocusIn = (e: FocusEvent): void => {
-    const target = e.target;
-    if (!(target instanceof HTMLElement) || !target.matches(selector)) {
-      return;
-    }
-    applyTabindex(items(), target);
-  };
+    const driver = createDriver<State>({
+      initial: { stop: null, sync: 0 },
+      realize(fx, d) {
+        listen(true);
+        const list = items();
+        const target = d.stop !== null && list.includes(d.stop) ? d.stop : (list[0] ?? null);
+        for (const item of list) {
+          fx.setAttr(item, "tabindex", item === target ? "0" : "-1");
+        }
+      },
+      terminal() {
+        listen(false);
+      },
+    });
 
-  container.addEventListener("keydown", onKeyDown);
-  container.addEventListener("focusin", onFocusIn);
-  applyTabindex(items(), null);
-
-  return {
-    focusFirst(): void {
-      items()[0]?.focus();
-    },
-    refresh(): void {
-      const list = items();
-      const active = document.activeElement;
-      const current =
-        active instanceof HTMLElement && list.includes(active)
-          ? active
-          : (list.find((i) => i.getAttribute("tabindex") === "0") ?? null);
-      applyTabindex(list, current);
-    },
-    dispose(): void {
-      container.removeEventListener("keydown", onKeyDown);
-      container.removeEventListener("focusin", onFocusIn);
-    },
-  };
+    return {
+      controller: {
+        focusFirst(): void {
+          driver.act((fx) => {
+            const first = items()[0];
+            if (first !== undefined) {
+              fx.focus(first);
+            }
+          });
+        },
+        refresh(): void {
+          if (binding.ended) {
+            return;
+          }
+          // Re-deriving the stop from the DOM is this method's contract.
+          const list = items();
+          const active = document.activeElement;
+          const stop =
+            active instanceof HTMLElement && list.includes(active)
+              ? active
+              : (list.find((i) => i.getAttribute("tabindex") === "0") ?? null);
+          driver.commit({ stop, sync: driver.state.sync + 1 });
+        },
+        dispose: binding.dispose,
+      },
+      start: () => {
+        driver.flush();
+      },
+      release: () => {
+        driver.release();
+      },
+    };
+  });
 }

@@ -6,9 +6,10 @@
  * @module
  */
 
-import { el } from "@cplieger/reactive";
+import { el, untracked } from "@cplieger/reactive";
 
-import { closeDialog, openDialog, wireBackdropDismiss } from "./dialog.js";
+import { listenBackdrop } from "./dialog.js";
+import { dialogEngine, type DialogEngine, type DialogFacet } from "./dialog-engine.js";
 
 /** Input configuration for an input-collecting ask. */
 export interface AskInput {
@@ -61,15 +62,256 @@ interface AskInputRefs extends AskRefs {
 
 const INPUT_ID = "uip-ask-input";
 
-let booleanRefs: AskRefs | null = null;
-let inputRefs: AskInputRefs | null = null;
+type Shape = "boolean" | "input";
+type Answer = boolean | string | null;
 
-/** The one pending ask across BOTH shapes (single preemption domain). */
-interface Pending {
-  preempt(): void;
-  dialog: HTMLDialogElement;
+/** Everything one ask shows, read once from the caller's options. */
+interface View {
+  readonly message: string;
+  readonly title: string;
+  readonly confirmLabel: string;
+  readonly cancelLabel: string;
+  readonly destructive: boolean;
+  readonly input: {
+    readonly type: "text" | "password";
+    readonly initialValue: string;
+    readonly placeholder: string | undefined;
+    readonly maxLength: number | undefined;
+    readonly autocomplete: string;
+  } | null;
 }
-let pending: Pending | null = null;
+
+interface Question {
+  readonly id: number;
+  readonly shape: Shape;
+  readonly view: View;
+  readonly cancelValue: boolean | null;
+  readonly resolve: (value: Answer) => void;
+  readonly reject: (error: unknown) => void;
+}
+
+interface Slot {
+  readonly refs: AskRefs | AskInputRefs;
+  readonly input: AskInputRefs | null;
+  readonly engine: DialogEngine;
+  readonly facet: DialogFacet;
+  /** The last question shown on this dialog. */
+  question: Question | null;
+}
+
+let questionSeq = 0;
+/** The one live question across both shapes; only it is unsettled. */
+let current: Question | null = null;
+const slots: Record<Shape, Slot | null> = { boolean: null, input: null };
+
+/** Replace the live question, settling the outgoing one exactly once. */
+function replaceCurrent(
+  next: Question | null,
+  outcome?: { readonly value: Answer } | { readonly error: unknown },
+): void {
+  const previous = current;
+  current = next;
+  if (previous === null) {
+    return;
+  }
+  if (outcome !== undefined && "error" in outcome) {
+    previous.reject(outcome.error);
+  } else {
+    previous.resolve(outcome === undefined ? previous.cancelValue : outcome.value);
+  }
+}
+
+function snapshot(message: string, opts: AskOptions | undefined): View {
+  const inputOpt = opts?.input;
+  const input = inputOpt === undefined ? null : inputOpt === true ? {} : inputOpt;
+  return {
+    message,
+    title: opts?.title ?? "",
+    confirmLabel: opts?.confirmLabel ?? (input !== null ? "OK" : "Confirm"),
+    cancelLabel: opts?.cancelLabel ?? "Cancel",
+    destructive: (opts?.variant ?? "normal") === "destructive",
+    input:
+      input === null
+        ? null
+        : {
+            type: input.type ?? "text",
+            initialValue: input.initialValue ?? "",
+            placeholder: input.placeholder,
+            maxLength: input.maxLength,
+            autocomplete: input.autocomplete ?? "off",
+          },
+  };
+}
+
+function writeView(refs: AskRefs, input: AskInputRefs | null, view: View): void {
+  if (view.title !== "") {
+    // With a title, the dialog's accessible NAME is the concise title and its
+    // DESCRIPTION is the message body (alertdialog wants a short name + body).
+    refs.title.textContent = view.title;
+    refs.title.hidden = false;
+    refs.dialog.setAttribute("aria-labelledby", refs.title.id);
+    refs.dialog.setAttribute("aria-describedby", refs.message.id);
+  } else {
+    refs.title.textContent = "";
+    refs.title.hidden = true;
+    refs.dialog.setAttribute("aria-labelledby", refs.message.id);
+    refs.dialog.removeAttribute("aria-describedby");
+  }
+  refs.message.textContent = view.message;
+  refs.ok.textContent = view.confirmLabel;
+  refs.cancel.textContent = view.cancelLabel;
+  if (view.destructive) {
+    refs.dialog.setAttribute("role", "alertdialog");
+    refs.ok.classList.add("is-destructive");
+  } else {
+    refs.dialog.removeAttribute("role");
+    refs.ok.classList.remove("is-destructive");
+  }
+  if (input !== null && view.input !== null) {
+    input.input.type = view.input.type;
+    input.input.value = view.input.initialValue;
+    // The attribute, not the IDL property: the property's `AutoFill` union
+    // does not cover every legal token list the autocomplete grammar allows.
+    input.input.setAttribute("autocomplete", view.input.autocomplete);
+    if (view.input.placeholder !== undefined) {
+      input.input.placeholder = view.input.placeholder;
+    } else {
+      input.input.removeAttribute("placeholder");
+    }
+    if (view.input.maxLength !== undefined) {
+      input.input.maxLength = view.input.maxLength;
+    } else {
+      input.input.removeAttribute("maxlength");
+    }
+  }
+}
+
+/** Settle the live question `id` with `value` and fade its dialog. */
+function answer(slot: Slot, id: number, value: Answer): void {
+  if (current?.id !== id) {
+    return;
+  }
+  replaceCurrent(null, { value });
+  slot.engine.close();
+  slot.engine.flush();
+}
+
+function createSlot(shape: Shape): Slot {
+  const input = shape === "input" ? buildInput() : null;
+  const refs: AskRefs = input ?? buildBoolean();
+  let appliedId = 0;
+  let armedFor = 0;
+  let focusedId = 0;
+  let selectedId = 0;
+  let listeners: AbortController | null = null;
+  const disarm = (): void => {
+    listeners?.abort();
+    listeners = null;
+    armedFor = 0;
+  };
+  const arm = (q: Question): void => {
+    disarm();
+    const controller = new AbortController();
+    const { signal } = controller;
+    listeners = controller;
+    armedFor = q.id;
+    if (input !== null) {
+      input.form.addEventListener(
+        "submit",
+        (e) => {
+          e.preventDefault();
+          answer(slot, q.id, input.input.value);
+        },
+        { signal },
+      );
+    } else {
+      refs.ok.addEventListener(
+        "click",
+        () => {
+          answer(slot, q.id, true);
+        },
+        { signal },
+      );
+    }
+    refs.cancel.addEventListener(
+      "click",
+      () => {
+        answer(slot, q.id, q.cancelValue);
+      },
+      { signal },
+    );
+    refs.dialog.addEventListener(
+      "cancel",
+      (e) => {
+        // A descendant's bubbling `cancel` is not an Escape (see createDialog).
+        if (e.target !== refs.dialog) {
+          return;
+        }
+        e.preventDefault();
+        answer(slot, q.id, q.cancelValue);
+      },
+      { signal },
+    );
+    const removeBackdrop = listenBackdrop(refs.dialog, () => {
+      answer(slot, q.id, q.cancelValue);
+    });
+    signal.addEventListener("abort", removeBackdrop);
+  };
+
+  const facet: DialogFacet = {
+    prepare(fx, d) {
+      const q = slot.question;
+      if (!refs.dialog.isConnected) {
+        // Mounted again when the page cleared the body.
+        fx.append(document.body, refs.dialog);
+      }
+      if (q !== null && appliedId !== d.subject && q.id === d.subject) {
+        appliedId = q.id;
+        writeView(refs, input, q.view);
+      }
+      if (q !== null && q === current) {
+        if (armedFor !== q.id) {
+          arm(q);
+        }
+      } else {
+        disarm();
+      }
+    },
+    follow(fx, d) {
+      const q = slot.question;
+      if (d.phase !== "open" || q === null || q !== current) {
+        return;
+      }
+      // Native showModal() traps Tab and restores focus; only the initial
+      // placement is ours: the input, or Cancel for a destructive question.
+      if (focusedId !== q.id) {
+        focusedId = q.id;
+        fx.focus(input?.input ?? (q.view.destructive ? refs.cancel : refs.ok));
+      }
+      if (input !== null && selectedId !== q.id) {
+        selectedId = q.id;
+        fx.select(input.input);
+      }
+    },
+    notify(_fx, d) {
+      // A close the browser made, or a question never shown, cancels it.
+      if (d.phase === "closed" && slot.question !== null && slot.question === current) {
+        replaceCurrent(null);
+      }
+    },
+    cleanup() {
+      disarm();
+    },
+    refused(subject, error) {
+      if (current?.id === subject) {
+        replaceCurrent(null, error === undefined ? undefined : { error });
+      }
+    },
+  };
+  const slot: Slot = { refs, input, engine: dialogEngine(refs.dialog), facet, question: null };
+  slot.engine.attach(facet);
+  return slot;
+}
 
 /** The shared action row (Cancel, OK). */
 function buildActions(): { ok: HTMLButtonElement; cancel: HTMLButtonElement; row: HTMLElement } {
@@ -89,7 +331,6 @@ function buildBoolean(): AskRefs {
   const message = el("p", { className: "uip-ask-msg", id: "uip-ask-msg" });
   const { ok, cancel, row } = buildActions();
   const dialog = el("dialog", { className: "uip-ask" }, title, message, row) as HTMLDialogElement;
-  document.body.appendChild(dialog);
   return { dialog, title, message, ok, cancel };
 }
 
@@ -112,7 +353,6 @@ function buildInput(): AskInputRefs {
     title,
     form,
   ) as HTMLDialogElement;
-  document.body.appendChild(dialog);
   return { dialog, title, message, input, form, ok, cancel };
 }
 
@@ -129,178 +369,40 @@ export function ask(
   opts: AskOptions & { input: AskInput | true },
 ): Promise<string | null>;
 export function ask(message: string, opts?: AskOptions): Promise<boolean | string | null> {
-  const inputOpt = opts?.input;
-  const input: AskInput | null = inputOpt === undefined ? null : inputOpt === true ? {} : inputOpt;
-  const destructive = (opts?.variant ?? "normal") === "destructive";
-
-  const ir = input !== null ? (inputRefs ??= buildInput()) : null;
-  const r: AskRefs = ir ?? (booleanRefs ??= buildBoolean());
-  const cancelValue = input !== null ? null : false;
-
-  // Same shape: the reused dialog stays open. Other shape: fade it closed.
-  if (pending !== null) {
-    const prev = pending;
-    pending = null;
-    prev.preempt();
-    if (prev.dialog !== r.dialog) {
-      closeDialog(prev.dialog);
-    }
-  }
-
-  const titleText = opts?.title;
-  if (titleText !== undefined && titleText !== "") {
-    // With a title, the dialog's accessible NAME is the concise title and its
-    // DESCRIPTION is the message body (alertdialog wants a short name + body).
-    r.title.textContent = titleText;
-    r.title.hidden = false;
-    r.dialog.setAttribute("aria-labelledby", r.title.id);
-    r.dialog.setAttribute("aria-describedby", r.message.id);
-  } else {
-    r.title.textContent = "";
-    r.title.hidden = true;
-    r.dialog.setAttribute("aria-labelledby", r.message.id);
-    r.dialog.removeAttribute("aria-describedby");
-  }
-  r.message.textContent = message;
-  r.ok.textContent = opts?.confirmLabel ?? (input !== null ? "OK" : "Confirm");
-  r.cancel.textContent = opts?.cancelLabel ?? "Cancel";
-
-  if (destructive) {
-    r.dialog.setAttribute("role", "alertdialog");
-    r.ok.classList.add("is-destructive");
-  } else {
-    r.dialog.removeAttribute("role");
-    r.ok.classList.remove("is-destructive");
-  }
-
-  if (ir !== null && input !== null) {
-    ir.input.type = input.type ?? "text";
-    ir.input.value = input.initialValue ?? "";
-    // Set the attribute rather than the IDL property: the property's
-    // `AutoFill` union doesn't cover every legal value (autocomplete grammar
-    // allows token lists like "section-blue shipping street-address"), so
-    // assigning our free-form option would need a lying cast. The attribute
-    // reflects into the property identically.
-    ir.input.setAttribute("autocomplete", input.autocomplete ?? "off");
-    if (input.placeholder !== undefined) {
-      ir.input.placeholder = input.placeholder;
-    } else {
-      ir.input.removeAttribute("placeholder");
-    }
-    if (input.maxLength !== undefined) {
-      ir.input.maxLength = input.maxLength;
-    } else {
-      ir.input.removeAttribute("maxlength");
-    }
-  }
-
-  return new Promise<boolean | string | null>((resolve) => {
-    const controller = new AbortController();
-    const { signal } = controller;
-    let settled = false;
-
-    openDialog(r.dialog);
-    // Native <dialog>.showModal() already traps Tab and restores focus to the
-    // opener on close; only the initial placement is ours. Input ask: the
-    // input, with any pre-filled value selected. Boolean ask: OK — or Cancel
-    // when destructive, so a keyboard user can't confirm by accident.
-    if (ir !== null) {
-      ir.input.focus();
-      ir.input.select();
-    } else {
-      (destructive ? r.cancel : r.ok).focus();
-    }
-
-    const teardown = (): void => {
-      controller.abort();
-      cleanupBackdrop();
+  // Every option is read here, once, before any shared state: an ask() from a
+  // getter runs to its own commit and is then preempted by this one.
+  const view = untracked(() => snapshot(message, opts));
+  const shape: Shape = view.input === null ? "boolean" : "input";
+  return new Promise<Answer>((resolve, reject) => {
+    const mine = (slots[shape] ??= createSlot(shape));
+    const other = slots[shape === "input" ? "boolean" : "input"];
+    const q: Question = {
+      id: ++questionSeq,
+      shape,
+      view,
+      cancelValue: view.input === null ? false : null,
+      resolve,
+      reject,
     };
-
-    // Preemption: resolve the cancel value without animating closed — a
-    // same-shape successor reuses the still-open dialog (the cross-shape
-    // close is the preempting call's job, above).
-    const preempt = (): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      teardown();
-      resolve(cancelValue);
-    };
-
-    const self: Pending = { preempt, dialog: r.dialog };
-    pending = self;
-
-    const settle = (value: boolean | string | null): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (pending === self) {
-        pending = null;
-      }
-      teardown();
-      closeDialog(r.dialog);
-      resolve(value);
-    };
-
-    if (ir !== null) {
-      ir.form.addEventListener(
-        "submit",
-        (e) => {
-          e.preventDefault();
-          settle(ir.input.value);
-        },
-        { signal },
-      );
-    } else {
-      r.ok.addEventListener(
-        "click",
-        () => {
-          settle(true);
-        },
-        { signal },
-      );
-    }
-    r.cancel.addEventListener(
-      "click",
-      () => {
-        settle(cancelValue);
-      },
-      { signal },
-    );
-    r.dialog.addEventListener(
-      "cancel",
-      (e) => {
-        // A descendant's bubbling `cancel` is not an Escape (see createDialog).
-        if (e.target !== r.dialog) {
-          return;
-        }
-        e.preventDefault();
-        settle(cancelValue);
-      },
-      { signal },
-    );
-
-    const cleanupBackdrop = wireBackdropDismiss(r.dialog, () => {
-      settle(cancelValue);
-    });
+    replaceCurrent(q);
+    mine.question = q;
+    mine.engine.open(q.id);
+    other?.engine.close();
+    other?.engine.flush();
+    mine.engine.flush();
   });
 }
 
-/** Test-only: remove both shared dialogs and reset internal state. */
+/** Test-only: settle the live question, remove both shared dialogs and reset internal state. */
 export function _resetForTest(): void {
-  if (pending !== null) {
-    const prev = pending;
-    pending = null;
-    prev.preempt();
-  }
-  if (booleanRefs !== null) {
-    booleanRefs.dialog.remove();
-    booleanRefs = null;
-  }
-  if (inputRefs !== null) {
-    inputRefs.dialog.remove();
-    inputRefs = null;
+  replaceCurrent(null);
+  for (const shape of ["boolean", "input"] as const) {
+    const slot = slots[shape];
+    if (slot !== null) {
+      slot.engine.retire(slot.facet);
+      slot.engine.flush();
+      slot.refs.dialog.remove();
+      slots[shape] = null;
+    }
   }
 }

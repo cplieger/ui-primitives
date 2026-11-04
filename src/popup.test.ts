@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
+import { createRoot } from "@cplieger/reactive";
+
 import { createPopup, closePopupGroup } from "./popup.js";
+import { classHas, reactingElement } from "./test-helpers/reacting.js";
 
 // Fake timers drive the install (setTimeout 0) and leave-fallback (setTimeout 400) timers.
 
@@ -482,17 +485,19 @@ describe("popup: the group registry outlives its members", () => {
     b.dispose();
   });
 
-  it("dispose takes the popup out of its group in both directions", () => {
+  it("a disposed member stays closed while the rest coordinate", () => {
     const a = createPopup(fixture().panel, { group: "g" });
     const b = createPopup(fixture().panel, { group: "g" });
+    a.show();
 
     a.dispose();
     a.show();
     b.show();
-
-    expect(a.isOpen).toBe(true);
+    expect(a.isOpen).toBe(false);
     expect(b.isOpen).toBe(true);
-    a.dispose();
+
+    closePopupGroup("g");
+    expect(b.isOpen).toBe(false);
     b.dispose();
   });
 });
@@ -588,32 +593,278 @@ describe("popup: a panel handed to a new owner mid-fade", () => {
   });
 });
 
-describe("popup: dispose disarms even what a callback re-armed", () => {
-  it("a popup reopened by its own onClose is still disarmed by the dispose that closed it", () => {
+describe("popup: dispose() of an open popup", () => {
+  it("hides it at once with no fade and no onClose, and leaves no dismissal wiring", () => {
     const { panel } = fixture();
-    let reopen = false;
-    let closes = 0;
-    let pop: ReturnType<typeof createPopup> | null = null;
-    pop = createPopup(panel, {
-      onClose: (): void => {
-        closes++;
-        if (reopen) {
-          pop?.show();
-        }
-      },
-    });
-
+    const onClose = vi.fn();
+    const pop = createPopup(panel, { onClose });
     pop.show();
     armListeners();
-    reopen = true;
     pop.dispose();
-    reopen = false;
-    armListeners();
-    expect(closes).toBe(1);
 
+    expect(onClose).not.toHaveBeenCalled();
+    expect(panel.hidden).toBe(true);
+    expect(panel.classList.contains("is-open")).toBe(false);
+    expect(panel.classList.contains("is-leaving")).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+    clickOn(document.body);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("createPopup: ends with the reactive owner it was made under", () => {
+  it("disposing the root hides and unwires it, and dispose() after that is a no-op", () => {
+    const { panel, trigger } = fixture();
+    const [disposeRoot, p] = createRoot(
+      (dispose) => [dispose, createPopup(panel, { trigger })] as const,
+    );
+    p.show();
+    armListeners();
+
+    disposeRoot();
+    expect(p.isOpen).toBe(false);
+    expect(trigger.hasAttribute("aria-expanded")).toBe(false);
+
+    trigger.setAttribute("aria-expanded", "true");
+    p.dispose();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  });
+});
+
+describe("createPopup: disposed with its owner while open", () => {
+  it("is hidden at once, unwired, and runs no onClose", () => {
+    const { panel } = fixture();
+    const onClose = vi.fn();
+    const [disposeRoot, p] = createRoot(
+      (dispose) => [dispose, createPopup(panel, { onClose })] as const,
+    );
+    p.show();
+    armListeners();
+
+    disposeRoot();
+    expect(p.isOpen).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(panel.hidden).toBe(true);
+    const add = vi.spyOn(document, "addEventListener");
+    try {
+      armListeners();
+      expect(add).not.toHaveBeenCalled();
+    } finally {
+      add.mockRestore();
+    }
+    clickOn(document.body);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("show, toggle and setOptions after dispose() do nothing", () => {
+    const { panel, trigger } = fixture();
+    const p = createPopup(panel, { trigger });
+    p.dispose();
+
+    p.show();
+    p.toggle();
+    p.setOptions({ group: "after-dispose" });
+    closePopupGroup("after-dispose");
+    expect(p.isOpen).toBe(false);
+    expect(panel.hidden).toBe(true);
+    expect(trigger.hasAttribute("aria-expanded")).toBe(false);
+  });
+});
+
+describe("createPopup: an onClose that throws", () => {
+  it("hide() completes the close, then throws it", () => {
+    const { panel, trigger } = fixture();
+    const boom = new Error("close failed");
+    const p = createPopup(panel, {
+      trigger,
+      onClose: () => {
+        throw boom;
+      },
+    });
+    p.show();
+    armListeners();
+
+    expect(() => {
+      p.hide();
+    }).toThrow(boom);
+    expect(p.isOpen).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(panel.classList.contains("is-leaving")).toBe(true);
+    p.dispose();
+  });
+
+  it("a peer's throwing onClose leaves the show that closed it, and closePopupGroup throws after hiding", () => {
+    const one = new Error("one");
+    const two = new Error("two");
+    const a = createPopup(fixture().panel, {
+      group: "throwing-close",
+      onClose: () => {
+        throw one;
+      },
+    });
+    const b = createPopup(fixture().panel, {
+      group: "throwing-close",
+      onClose: () => {
+        throw two;
+      },
+    });
+    a.show();
+    let thrown: unknown = null;
+    try {
+      b.show();
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBe(one);
+    expect(a.isOpen).toBe(false);
+    expect(b.isOpen).toBe(true);
+    expect(() => {
+      closePopupGroup("throwing-close");
+    }).toThrow(two);
+    expect(b.isOpen).toBe(false);
+    a.dispose();
+    b.dispose();
+  });
+});
+
+describe("createPopup: disposed by the group peer its show() closes", () => {
+  it("returns closed, unrevealed, with no trigger ARIA and no onOpen", () => {
+    const incumbent = fixture();
+    const newcomer = fixture();
+    const box: { newcomer?: ReturnType<typeof createPopup> } = {};
+    const first = createPopup(incumbent.panel, {
+      group: "disposing-peer",
+      onClose: () => box.newcomer?.dispose(),
+    });
+    first.show();
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    box.newcomer = createPopup(newcomer.panel, {
+      group: "disposing-peer",
+      trigger: newcomer.trigger,
+      onOpen,
+      onClose,
+    });
+
+    box.newcomer.show();
+    armListeners();
     clickOn(document.body);
 
-    // Wiring installed after teardown began still belongs to a disposed controller.
-    expect(closes).toBe(1);
+    expect(box.newcomer.isOpen).toBe(false);
+    expect(newcomer.trigger.hasAttribute("aria-expanded")).toBe(false);
+    expect(newcomer.trigger.hasAttribute("aria-haspopup")).toBe(false);
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(newcomer.panel.hidden).toBe(true);
+    first.dispose();
+  });
+});
+
+describe("popup: re-shown from the class write of its own hide", () => {
+  it("is open and visible after the settle", () => {
+    const panel = reactingElement();
+    panel.hidden = true;
+    document.body.append(panel);
+    const popup = createPopup(panel);
+    popup.show();
+    panel.onAttr = (name, value) => {
+      if (name === "class" && classHas(value, "is-leaving")) {
+        panel.onAttr = null;
+        popup.show();
+      }
+    };
+    popup.hide();
+    finishLeave();
+
+    expect(popup.isOpen).toBe(true);
+    expect(panel.hidden).toBe(false);
+    expect(panel.classList.contains("is-open")).toBe(true);
+    expect(panel.classList.contains("is-leaving")).toBe(false);
+  });
+});
+
+describe("popup: re-shown from the class write that ends its leave", () => {
+  it("its next leave still leaves alone a panel another controller revealed", () => {
+    const panel = reactingElement();
+    panel.hidden = true;
+    document.body.append(panel);
+    const first = createPopup(panel);
+    first.show();
+    first.hide();
+    panel.onAttr = (name, value) => {
+      if (name === "class" && !classHas(value, "is-leaving")) {
+        panel.onAttr = null;
+        first.show();
+      }
+    };
+    finishLeave();
+    expect(first.isOpen).toBe(true);
+
+    first.hide();
+    const second = createPopup(panel);
+    second.show();
+    finishLeave();
+
+    expect(panel.hidden).toBe(false);
+    expect(second.isOpen).toBe(true);
+    second.dispose();
+    first.dispose();
+  });
+});
+
+describe("popup: the trigger's ARIA is written whole", () => {
+  it("a hide from the trigger's aria-expanded write still leaves aria-haspopup on it", () => {
+    const trigger = reactingElement();
+    const panel = document.createElement("div");
+    panel.hidden = true;
+    document.body.append(trigger, panel);
+    const popup = createPopup(panel, { trigger });
+    trigger.onAttr = (name, value) => {
+      if (name === "aria-expanded" && value === "true") {
+        trigger.onAttr = null;
+        popup.hide();
+      }
+    };
+    popup.show();
+
+    expect(popup.isOpen).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("true");
+  });
+
+  it("a haspopup change while closed applies at once", () => {
+    const { panel, trigger } = fixture();
+    const popup = createPopup(panel, { trigger });
+    popup.show();
+    popup.hide();
+    popup.setOptions({ haspopup: "menu" });
+
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  });
+});
+
+describe("popup: initialFocus moves focus once per show", () => {
+  it("a restart from the initial focus does not take focus back from where the page moved it", () => {
+    const { panel, trigger } = fixture();
+    const inner = document.createElement("button");
+    panel.append(inner);
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    trigger.focus();
+    const popup = createPopup(panel, { initialFocus: inner });
+    inner.addEventListener(
+      "focus",
+      () => {
+        outside.focus();
+        popup.setOptions({ closeOnEscape: false });
+      },
+      { once: true },
+    );
+    popup.show();
+
+    expect(popup.isOpen).toBe(true);
+    expect(document.activeElement).toBe(outside);
+    popup.dispose();
   });
 });

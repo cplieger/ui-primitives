@@ -72,5 +72,5 @@ The progress bar animates from the `--uip-toast-duration` custom property, which
 - Hover or focus pauses the countdown. It resumes only once both the hover and the focus have ended, so a focused toast never auto-dismisses under the cursor.
 - A click dismisses a toast, and Escape dismisses the newest first. Each toast is keyboard-focusable (`tabindex="0"`), and Enter or Space dismisses a focused toast.
 - Each toast is announced through `announce()`, so call `mountLiveRegions(document.body)` at boot or toasts raised outside a dialog are not announced. `error` interrupts with assertive urgency, and `info` and `success` are polite. A visually hidden "Click to dismiss." hint keeps a focused toast self-describing.
-- Importing the module has no DOM side effect. The stack is created on the first toast shown.
+- Importing `./toast` starts the dialog `open` observer, so it needs a DOM. The stack is created on the first toast shown.
 - Toasts mount on `document.body`, except while a modal `<dialog>` is open. `showModal()` makes everything outside the dialog inert, so the default stack moves into the topmost open modal dialog. Toasts raised while a modal is open show over it, stay clickable and are still announced. The stack returns to `document.body` when the modal closes. A toaster created with an explicit `container` stays in it and never moves.

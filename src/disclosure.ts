@@ -13,7 +13,11 @@
  * @module
  */
 
-import { cancelTransition, runTransition } from "./transition.js";
+import { untracked } from "@cplieger/reactive";
+
+import type { Fx } from "./fx.js";
+import { createDriver, ownedBinding } from "./owner.js";
+import { watchSettle } from "./transition.js";
 
 /** The initial open state, whether height changes tween, and the toggle hook.
  *  All optional: a disclosure with no options starts collapsed, animates, and
@@ -38,6 +42,8 @@ export type DisclosureToggleSource = "user" | "api";
  *  toggle source, so an `onToggle` consumer can tell a controller call from a
  *  trigger press. The only state driver in region-only mode (`trigger: null`). */
 export interface DisclosureController {
+  /** Expand the region. Does nothing once `dispose()` has begun, as do
+   *  `close()` and `toggle()`. */
   open(): void;
   close(): void;
   toggle(): void;
@@ -90,115 +96,196 @@ export function createDisclosure(
   region: HTMLElement,
   opts?: DisclosureOptions,
 ): DisclosureController {
-  const animateDefault = opts?.animate ?? true;
-  const onToggle = opts?.onToggle;
+  const o = untracked(() => ({
+    animate: opts?.animate ?? true,
+    onToggle: opts?.onToggle,
+    open: opts?.open ?? false,
+  }));
 
-  region.classList.add("uip-disclosure-region");
-  if (region.id === "") {
-    region.id = `uip-disclosure-${(++idSeq).toString()}`;
-  }
-  trigger?.setAttribute("aria-controls", region.id);
-
-  const isNativeButton = trigger instanceof HTMLButtonElement;
-  if (trigger !== null && !isNativeButton) {
-    if (!trigger.hasAttribute("role")) {
-      trigger.setAttribute("role", "button");
-    }
-    if (!trigger.hasAttribute("tabindex")) {
-      trigger.setAttribute("tabindex", "0");
-    }
+  interface State {
+    readonly open: boolean;
+    readonly source: DisclosureToggleSource;
+    /** The id of the open tween whose settle has fired. */
+    readonly settled: number;
   }
 
-  let open = opts?.open ?? false;
+  return ownedBinding((binding) => {
+    const regionId = region.id === "" ? `uip-disclosure-${(++idSeq).toString()}` : region.id;
+    const isNativeButton = trigger instanceof HTMLButtonElement;
+    let listening = false;
+    let reported = o.open;
+    let tweenSeq = 0;
+    // The height is a sequence: `shown` is the state it was last driven
+    // toward, and `tween.step` advances after each write, so a restart resumes
+    // the step that did not finish.
+    const height: {
+      shown: boolean;
+      tween: {
+        readonly id: number;
+        readonly toOpen: boolean;
+        step: "from" | "to" | "armed";
+      } | null;
+      watch: (() => void) | null;
+    } = { shown: o.open, tween: null, watch: null };
 
-  const reflectAria = (): void => {
-    trigger?.setAttribute("aria-expanded", open ? "true" : "false");
-    region.setAttribute("aria-hidden", open ? "false" : "true");
-    // height:0 clips paint but keeps descendants keyboard-focusable, and
-    // aria-hidden on focusable content is invalid; `inert` removes both.
-    region.inert = !open;
-  };
-
-  const applyHeight = (targetOpen: boolean, animate: boolean): void => {
-    if (!animate || prefersReducedMotion() || !isRendered(region)) {
-      // Cancel any in-flight tween: a mid-animation flip to this untweened branch
-      // (reduced motion, or a region no longer rendered) must not settle onto it.
-      cancelTransition(region);
-      region.style.height = targetOpen ? "" : "0px";
-      return;
-    }
-    if (targetOpen) {
-      // Committed by runTransition first, so scrollHeight reads a settled height:0 box.
-      region.style.height = "0px";
-      runTransition(region, {
-        change: () => {
-          region.style.height = supportsInterpolateSize() ? "auto" : `${region.scrollHeight}px`;
-        },
-        settled: () => {
-          region.style.height = "";
-        },
-      });
-    } else {
-      // auto isn't an animatable start on the fallback path, so measure first.
-      region.style.height = `${region.scrollHeight}px`;
-      runTransition(region, {
-        change: () => {
-          region.style.height = "0px";
-        },
-      });
-    }
-  };
-
-  const set = (next: boolean, animate: boolean, source: DisclosureToggleSource): void => {
-    if (next === open) {
-      return;
-    }
-    open = next;
-    reflectAria();
-    applyHeight(next, animate);
-    onToggle?.(next, source);
-  };
-
-  reflectAria();
-  applyHeight(open, false);
-
-  const onClick = (): void => {
-    set(!open, animateDefault, "user");
-  };
-  const onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
-      // Space would scroll the page; Enter/Space both activate a button.
-      e.preventDefault();
-      set(!open, animateDefault, "user");
-    }
-  };
-  trigger?.addEventListener("click", onClick);
-  if (trigger !== null && !isNativeButton) {
-    trigger.addEventListener("keydown", onKeyDown);
-  }
-
-  return {
-    get isOpen(): boolean {
-      return open;
-    },
-    open(): void {
-      set(true, animateDefault, "api");
-    },
-    close(): void {
-      set(false, animateDefault, "api");
-    },
-    toggle(): void {
-      set(!open, animateDefault, "api");
-    },
-    dispose(): void {
-      cancelTransition(region);
-      // Settle the height so a dispose mid-animation doesn't freeze an inline
-      // px height: open clears to auto, collapsed pins to 0.
-      region.style.height = open ? "" : "0px";
-      trigger?.removeEventListener("click", onClick);
-      if (trigger !== null && !isNativeButton) {
-        trigger.removeEventListener("keydown", onKeyDown);
+    const toggleTo = (next: boolean, source: DisclosureToggleSource): void => {
+      if (binding.ended) {
+        return;
       }
-    },
-  };
+      driver.commit(
+        driver.state.open === next ? driver.state : { ...driver.state, open: next, source },
+      );
+    };
+    const onClick = (): void => {
+      toggleTo(!driver.state.open, "user");
+    };
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+        // Space would scroll the page; Enter/Space both activate a button.
+        e.preventDefault();
+        toggleTo(!driver.state.open, "user");
+      }
+    };
+    const listen = (on: boolean): void => {
+      if (trigger === null || listening === on) {
+        return;
+      }
+      listening = on;
+      const method = on ? "addEventListener" : "removeEventListener";
+      trigger[method]("click", onClick);
+      if (!isNativeButton) {
+        trigger[method]("keydown", onKeyDown as EventListener);
+      }
+    };
+    const cancelWatch = (): void => {
+      height.watch?.();
+      height.watch = null;
+    };
+    const settle = (id: number): void => {
+      driver.commit({ ...driver.state, settled: id });
+    };
+
+    const driver = createDriver<State>({
+      initial: { open: o.open, source: "api", settled: 0 },
+      realize(fx, d) {
+        listen(true);
+        fx.addClass(region, "uip-disclosure-region");
+        if (region.id === "") {
+          fx.setProp(region, "id", regionId);
+        }
+        if (trigger !== null) {
+          fx.setAttr(trigger, "aria-controls", region.id);
+          if (!isNativeButton) {
+            if (!trigger.hasAttribute("role")) {
+              fx.setAttr(trigger, "role", "button");
+            }
+            if (!trigger.hasAttribute("tabindex")) {
+              fx.setAttr(trigger, "tabindex", "0");
+            }
+          }
+        }
+        reflect(fx, d.open);
+        if (height.shown !== d.open) {
+          cancelWatch();
+          height.shown = d.open;
+          const animated = o.animate && !prefersReducedMotion() && isRendered(region);
+          height.tween = animated ? { id: ++tweenSeq, toOpen: d.open, step: "from" } : null;
+        }
+        const tween = height.tween;
+        if (tween?.step === "from") {
+          // auto is not an animatable start on the fallback path, so measure first.
+          fx.setStyle(
+            region,
+            "height",
+            tween.toOpen ? "0px" : `${region.scrollHeight.toString()}px`,
+          );
+          tween.step = "to";
+        }
+        if (tween?.step === "to") {
+          // The start height is committed before the target, or both land in one frame.
+          region.getBoundingClientRect();
+          fx.setStyle(
+            region,
+            "height",
+            tween.toOpen
+              ? supportsInterpolateSize()
+                ? "auto"
+                : `${region.scrollHeight.toString()}px`
+              : "0px",
+          );
+          if (tween.toOpen) {
+            tween.step = "armed";
+          } else {
+            height.tween = null;
+          }
+        }
+        if (height.tween?.step === "armed") {
+          const armed = height.tween;
+          if (d.settled === armed.id) {
+            cancelWatch();
+            height.tween = null;
+          } else {
+            height.watch ??= watchSettle(region, () => {
+              settle(armed.id);
+            });
+          }
+        }
+        if (height.tween === null) {
+          fx.setStyle(region, "height", d.open ? "" : "0px");
+        }
+      },
+      notify(fx, d) {
+        if (reported !== d.open) {
+          reported = d.open;
+          const onToggle = o.onToggle;
+          if (onToggle !== undefined) {
+            fx.call(() => {
+              onToggle(d.open, d.source);
+            });
+          }
+        }
+      },
+      terminal(fx, d) {
+        listen(false);
+        cancelWatch();
+        height.tween = null;
+        reflect(fx, d.open);
+        fx.setStyle(region, "height", d.open ? "" : "0px");
+      },
+    });
+
+    const reflect = (fx: Fx, open: boolean): void => {
+      if (trigger !== null) {
+        fx.setAttr(trigger, "aria-expanded", open ? "true" : "false");
+      }
+      fx.setAttr(region, "aria-hidden", open ? "false" : "true");
+      // height:0 clips paint but keeps descendants keyboard-focusable, and
+      // aria-hidden on focusable content is invalid; `inert` removes both.
+      fx.setProp(region, "inert", !open);
+    };
+
+    return {
+      controller: {
+        get isOpen(): boolean {
+          return driver.state.open;
+        },
+        open(): void {
+          toggleTo(true, "api");
+        },
+        close(): void {
+          toggleTo(false, "api");
+        },
+        toggle(): void {
+          toggleTo(!driver.state.open, "api");
+        },
+        dispose: binding.dispose,
+      },
+      start: () => {
+        driver.flush();
+      },
+      release: () => {
+        driver.release();
+      },
+    };
+  });
 }

@@ -17,6 +17,8 @@ release(); // restores focus to the previously-focused element
 ## API
 
 - `trapFocus(container, opts?)` returns a release function.
+- A trap made under a `@cplieger/reactive` owner, such as `createRoot`, a `bindList` row or an effect created under one, ends with that owner as `release()` would, and a later `release()` does nothing. Setup and `release()` run untracked, never under that owner. When the owner ends a trap, the handlers its teardown reaches run inside reactive's disposal, where creating an effect throws.
+- A `release()` from code the trap is calling, such as a focus handler its initial focus reaches, ends the trap at once, and its teardown completes as soon as your code returns.
 - `FocusTrapOptions` = `{ initialFocus?: HTMLElement | null; returnFocus?: boolean | HTMLElement }`.
 
 ## Notes

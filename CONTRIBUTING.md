@@ -15,12 +15,12 @@ When the change adds, renames or removes a shared `--uip-*` token, also update t
 
 Build every DOM node with `el` from `@cplieger/reactive`, never with `innerHTML` or another HTML string. Caller text such as a toast message then stays text, and a page that enforces Trusted Types does not throw.
 
-Animate a state change with `runTransition` from `src/transition.ts`, never with a hand-written style flush. A missing or misplaced flush lets the browser merge the start and end states into one frame, so nothing animates.
+Animate a public transition with `runTransition` from `src/transition.ts`, never with a hand-written style flush. A missing or misplaced flush lets the browser merge the start and end states into one frame, so nothing animates. A controller's own fade, such as the dialog's or a popup's leave, is the exception: it flushes once and arms its own `watchSettle`, so a `cancelTransition` on the element cannot strand the controller mid-fade.
 
 While a modal `<dialog>` is open, chrome that must stay usable lives inside it. `showModal()` makes everything outside the dialog's subtree inert, whatever its `z-index`.
 
 The toast stack and tooltips already move into an open modal. A popup panel moves in only when it is not yet in the page, and a panel the caller connected stays where the caller put it.
 
-Announce regions never move. Each dialog the library opens mounts its own pair before `showModal()`, and `announce` writes to the topmost one.
+Announce regions never move. Each dialog the library drives gets its own pair when the library first reaches it, and `announce` writes to the pair of every open modal and to the root's, so the browser's inertness decides which one is read. Before a modal's close, reopening or removal uncovers a region, `whenUncovered` in `src/modal-host.ts` has `announce` empty every region it wrote. Toast and popup hosting rank the open dialogs instead, in the same module.
 
 Relative imports end in `.js`, as in `./focus-trap.js`, although the files are `.ts`. Consumers compile this source with their own settings, and under `node16` or `nodenext` resolution an extensionless relative import does not resolve.

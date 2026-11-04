@@ -33,6 +33,8 @@ const pw = await ask("Enter your password to continue:", {
 - `ask(message, opts?)` returns `Promise<boolean>`. With `input` set it returns `Promise<string | null>`, and the overloads narrow the return type from the options shape.
 - `AskOptions` = `{ title?; confirmLabel?; cancelLabel?; variant?: "normal" | "destructive"; input?: AskInput | true }`.
 - `AskInput` = `{ type?: "text" | "password"; initialValue?; placeholder?; maxLength?; autocomplete? }`. `input: true` gives a default text input.
+- `ask()` reads its options once, at the call, so an `ask()` started from an option getter runs first and the outer call preempts it. An `ask()` started from code the outer call reaches, such as a focus listener, is the later call and preempts the outer one. A dialog your page removed from the document is mounted again.
+- A close the browser makes, an Escape it does not let the page cancel or `requestClose()`, resolves the pending question with its cancel value as soon as the close is applied: when the call that ran your code returns, if the close happened inside one, otherwise at the next microtask after the browser's change.
 
 ## CSS
 

@@ -11,8 +11,17 @@
  * @module
  */
 
-import { createPopupCore } from "./popup-core.js";
-import type { PopupOptions, PopupOptionsPatch } from "./popup-core.js";
+import { untracked } from "@cplieger/reactive";
+
+import { directFx, type Fx } from "./fx.js";
+import {
+  POPUP_KEYS,
+  createPopupCore,
+  normalizePopupKey,
+  readOptions,
+  type PopupConfig,
+} from "./popup-core.js";
+import type { PopupOptions } from "./popup-core.js";
 
 /** The anchor side a panel is placed against. A request, not a guarantee: with
  *  `flip` on (the default) a side that doesn't fit becomes its opposite. */
@@ -130,6 +139,28 @@ export interface PopoverController {
   dispose(): void;
 }
 
+/** The six members of an anchor's rect, read once each. */
+interface Rect {
+  readonly top: number;
+  readonly left: number;
+  readonly right: number;
+  readonly bottom: number;
+  readonly width: number;
+  readonly height: number;
+}
+
+/** Read each member once: a VirtualAnchor's rect may compute them in getters. */
+function snapshotRect(r: DOMRect): Rect {
+  return {
+    top: r.top,
+    left: r.left,
+    right: r.right,
+    bottom: r.bottom,
+    width: r.width,
+    height: r.height,
+  };
+}
+
 interface ViewportBox {
   readonly left: number;
   readonly top: number;
@@ -165,7 +196,7 @@ function alignCoord(align: PopoverAlign, start: number, size: number, panelSize:
  *  side has more room. */
 function resolvePlacement(
   placement: PopoverPlacement,
-  rect: DOMRect,
+  rect: Rect,
   panelW: number,
   panelH: number,
   offset: number,
@@ -199,7 +230,7 @@ function resolvePlacement(
 function computeCoords(
   placement: PopoverPlacement,
   align: PopoverAlign,
-  rect: DOMRect,
+  rect: Rect,
   panelW: number,
   panelH: number,
   offset: number,
@@ -230,119 +261,161 @@ function clampCoord(
   return Math.max(lo, Math.min(coord, hi));
 }
 
-/**
- * Position `panel` (set to `position: fixed`) relative to `anchor` per `opts`.
- * Idempotent; safe to call repeatedly on scroll/resize or after the panel's
- * content changes size.
- */
-export function placeAnchored(
-  panel: HTMLElement,
-  anchor: PopoverAnchor,
-  opts?: PlacementOptions,
-): void {
-  const placement = opts?.placement ?? "bottom";
-  const align = opts?.align ?? "start";
-  const offset = opts?.offset ?? 4;
-  const flip = opts?.flip ?? true;
-  const clamp = opts?.clamp ?? true;
-  const margin = opts?.margin ?? 8;
-  const matchWidth = opts?.matchAnchorWidth ?? false;
+/** Every PlacementOptions key, defaults resolved, frozen. */
+interface Placement {
+  readonly placement: PopoverPlacement;
+  readonly align: PopoverAlign;
+  readonly offset: number;
+  readonly flip: boolean;
+  readonly clamp: boolean;
+  readonly matchAnchorWidth: boolean | number;
+  readonly margin: number;
+  readonly stretch: "viewport" | null;
+}
 
-  const rect = anchor.getBoundingClientRect();
-  panel.style.position = "fixed";
+/** The normalized value of one placement option, or `undefined` for a key that is not one. */
+function normalizePlacementKey(key: string, value: unknown): unknown {
+  switch (key) {
+    case "placement":
+      return value ?? "bottom";
+    case "align":
+      return value ?? "start";
+    case "offset":
+      return value ?? 4;
+    case "flip":
+    case "clamp":
+      return value ?? true;
+    case "matchAnchorWidth":
+      return value ?? false;
+    case "margin":
+      return value ?? 8;
+    case "stretch":
+      return value ?? null;
+    default:
+      return undefined;
+  }
+}
+
+const PLACEMENT_KEYS = [
+  "placement",
+  "align",
+  "offset",
+  "flip",
+  "clamp",
+  "matchAnchorWidth",
+  "margin",
+  "stretch",
+] as const;
+
+function normalizePlacement(opts: PlacementOptions | undefined): Placement {
+  return readOptions(opts, PLACEMENT_KEYS, normalizePlacementKey) as unknown as Placement;
+}
+
+function isStretched(p: Placement): boolean {
+  return p.stretch === "viewport" && (p.placement === "top" || p.placement === "bottom");
+}
+
+/** Place `panel` against `anchor` through `fx`: the anchor is measured once,
+ *  and every panel write is one checked call. A throwing anchor leaves the
+ *  last placement in place. */
+function placeWith(fx: Fx, panel: HTMLElement, anchor: PopoverAnchor, p: Placement): void {
+  const raw = fx.call(() => anchor.getBoundingClientRect());
+  if (raw === undefined) {
+    return;
+  }
+  const rect = fx.measure(() => snapshotRect(raw));
+  if (rect === undefined) {
+    return;
+  }
+  fx.setStyle(panel, "position", "fixed");
   const vp = viewportBox();
+  const { placement, margin, offset } = p;
 
-  if (opts?.stretch === "viewport" && (placement === "top" || placement === "bottom")) {
+  if (isStretched(p)) {
     // Pin both inline edges. In fixed positioning `right` is measured from the
     // viewport's inline-end edge, so left + right together span the width minus
-    // `margin` on each side — robust to the panel's box-sizing and padding (no
-    // explicit width to fight the app's skin). Clear any min-width a prior
-    // content-sized placement set so it can't widen the pinned panel.
-    panel.style.left = `${margin}px`;
-    panel.style.right = `${margin}px`;
-    panel.style.minWidth = "";
-    // Main axis: anchor-relative, flipping to the other side when it overflows
-    // (panelW is unused by the top/bottom flip test, so 0 is fine).
+    // `margin` on each side, robust to the panel's box-sizing and padding. A
+    // min-width a prior content-sized placement set would widen the pinned panel.
+    fx.setStyle(panel, "left", `${margin.toString()}px`);
+    fx.setStyle(panel, "right", `${margin.toString()}px`);
+    fx.setStyle(panel, "minWidth", "");
+    // panelW is unused by the top/bottom flip test.
     const panelH = panel.offsetHeight;
-    const effective = flip
+    const effective = p.flip
       ? resolvePlacement(placement, rect, 0, panelH, offset, margin, vp)
       : placement;
     const top = effective === "bottom" ? rect.bottom + offset : rect.top - panelH - offset;
-    panel.style.top = `${top}px`;
+    fx.setStyle(panel, "top", `${top.toString()}px`);
     return;
   }
 
-  // Content-sized placement. Clear an inline-end pin a prior stretch placement
-  // may have written so the panel's own width is honored again.
-  panel.style.right = "";
-
-  // Apply matchAnchorWidth first so the measured panel size reflects it — and
-  // CLEAR the inline min-width when the option is off, so disabling it via
-  // setOptions({ matchAnchorWidth: undefined }) doesn't leave the previous
-  // placement's min-width stuck on the panel.
-  if (matchWidth !== false) {
-    const min = matchWidth === true ? rect.width : Math.max(rect.width, matchWidth);
-    panel.style.minWidth = `${min}px`;
-  } else {
-    panel.style.minWidth = "";
-  }
+  // Content-sized: an inline-end pin a prior stretch placement wrote would fight the panel's own width.
+  fx.setStyle(panel, "right", "");
+  // matchAnchorWidth first, so the measured size reflects it; cleared when off,
+  // so turning it off does not leave the previous min-width stuck.
+  const matchWidth = p.matchAnchorWidth;
+  fx.setStyle(
+    panel,
+    "minWidth",
+    matchWidth === false
+      ? ""
+      : `${(matchWidth === true ? rect.width : Math.max(rect.width, matchWidth)).toString()}px`,
+  );
 
   const panelW = panel.offsetWidth;
   const panelH = panel.offsetHeight;
-
-  const effective = flip
+  const effective = p.flip
     ? resolvePlacement(placement, rect, panelW, panelH, offset, margin, vp)
     : placement;
-  const { left, top } = computeCoords(effective, align, rect, panelW, panelH, offset);
+  const { left, top } = computeCoords(effective, p.align, rect, panelW, panelH, offset);
 
   let finalLeft = left;
   let finalTop = top;
-  if (clamp) {
+  if (p.clamp) {
     if (effective === "top" || effective === "bottom") {
       finalLeft = clampCoord(left, panelW, vp.left, vp.width, margin);
     } else {
       finalTop = clampCoord(top, panelH, vp.top, vp.height, margin);
     }
   }
-
-  panel.style.left = `${finalLeft}px`;
-  panel.style.top = `${finalTop}px`;
+  fx.setStyle(panel, "left", `${finalLeft.toString()}px`);
+  fx.setStyle(panel, "top", `${finalTop.toString()}px`);
 }
 
-/** The popup-lifecycle options forwarded from a PopoverOptions object / patch
- *  to the underlying popup controller. Placement keys stay local. A `Record`
- *  over `keyof` so the compiler enforces exhaustiveness BOTH ways: adding an
- *  option to PopupOptions (other than `trigger`, which popover owns) without
- *  listing it here — or listing a key popup no longer has — is a type error,
- *  so a new popup option can never silently fail to forward. */
-const FORWARDED_POPUP_OPTIONS: Record<keyof Omit<PopupOptions, "trigger">, true> = {
-  closeOnOutside: true,
-  closeOnEscape: true,
-  isolateEscape: true,
-  group: true,
-  initialFocus: true,
-  returnFocus: true,
-  haspopup: true,
-  onOpen: true,
-  onClose: true,
-};
+/**
+ * Position `panel` (set to `position: fixed`) relative to `anchor` per `opts`.
+ * Every option is read once, before the anchor is measured or the panel
+ * written. Idempotent; safe to call repeatedly on scroll/resize or after the
+ * panel's content changes size. A throwing anchor or option getter reaches the caller.
+ */
+export function placeAnchored(
+  panel: HTMLElement,
+  anchor: PopoverAnchor,
+  opts?: PlacementOptions,
+): void {
+  placeWith(directFx, panel, anchor, normalizePlacement(opts));
+}
 
-const POPUP_OPTION_KEYS = Object.keys(FORWARDED_POPUP_OPTIONS) as readonly (keyof Omit<
-  PopupOptions,
-  "trigger"
->)[];
+type PopoverConfig = PopupConfig & Placement;
 
-/** Pick the popup-relevant keys PRESENT in `patch` (preserving merge-patch
- *  semantics: an absent key is not forwarded, an explicit undefined is). */
-function popupSubset(patch: PopoverOptionsPatch): PopupOptionsPatch {
-  const out: Record<string, unknown> = {};
-  const source: Record<string, unknown> = patch;
-  for (const key of POPUP_OPTION_KEYS) {
-    if (key in source) {
-      out[key] = source[key];
-    }
+// The anchor is the trigger and is constructor-bound, so `trigger` is never read.
+const POPOVER_KEYS = [...POPUP_KEYS.filter((k) => k !== "trigger"), ...PLACEMENT_KEYS];
+
+/** Read each popover option once into a frozen config whose trigger is `anchorEl`. */
+function normalizePopoverOptions(
+  opts: PopoverOptions | undefined,
+  anchorEl: HTMLElement | null,
+): PopoverConfig {
+  const read = readOptions(opts, POPOVER_KEYS, normalizePopoverKey);
+  return Object.freeze({ ...read, trigger: anchorEl }) as unknown as PopoverConfig;
+}
+
+function normalizePopoverKey(key: string, value: unknown): unknown {
+  if ((PLACEMENT_KEYS as readonly string[]).includes(key)) {
+    return normalizePlacementKey(key, value);
   }
-  return out;
+  // The anchor is the trigger: no patch changes it.
+  return key === "trigger" ? undefined : normalizePopupKey(key, value);
 }
 
 /**
@@ -351,8 +424,8 @@ function popupSubset(patch: PopoverOptionsPatch): PopupOptionsPatch {
  * scroll/resize, and dismisses on outside-click / Escape. It does not build the
  * panel and never removes it from the DOM — the caller owns that element.
  *
- * Built on the popup primitive: popup owns the reveal / light-dismiss
- * lifecycle; this layer adds placeAnchored placement on reveal, rAF-throttled
+ * Built on the popup lifecycle core: popup owns the reveal / light-dismiss
+ * lifecycle; this layer adds placement on every open pass, rAF-throttled
  * anchor tracking (scroll / resize / visualViewport), and the `is-stretched`
  * full-bleed marker.
  */
@@ -361,121 +434,69 @@ export function createPopover(
   panel: HTMLElement,
   opts?: PopoverOptions,
 ): PopoverController {
-  // Element-only operations (ARIA on the trigger, anchor-contains for the
-  // outside-click guard) are the popup layer's, gated on a real element:
-  // a virtual/point anchor has no element to annotate or hit-test.
-  // Positioning via placeAnchored works for both anchor kinds.
+  // A virtual or point anchor has no element to annotate or hit-test.
   const anchorEl = anchor instanceof HTMLElement ? anchor : null;
-
-  // Mutable option state — setOptions() merge-patches this. placeAnchored
-  // reads it fresh on every call, so a patch takes effect on the next
-  // (immediate, for an open popover) reposition.
-  const current: PopoverOptions = { ...opts };
+  const config = untracked(() => normalizePopoverOptions(opts, anchorEl));
 
   let trackingFrame: number | null = null;
-
-  // Whether the CURRENT options put the panel in full-bleed mode. Drives the
-  // `is-stretched` skin hook; positioning itself is inline via placeAnchored.
-  const isStretched = (): boolean => {
-    const placement = current.placement ?? "bottom";
-    return current.stretch === "viewport" && (placement === "top" || placement === "bottom");
-  };
-
-  const place = (): void => {
-    placeAnchored(panel, anchor, current);
-  };
-
-  // Public reposition: synchronous. Callers invoke it after a content change
-  // and expect an immediate re-measure + re-clamp.
-  const reposition = (): void => {
-    if (popup.isOpen) {
-      place();
-    }
-  };
-
-  // Internal tracking reposition: rAF-throttled. Scroll/resize/visualViewport
-  // bursts coalesce into one placeAnchored per frame — if a frame is already
-  // pending, don't schedule another.
+  let kick = (): void => undefined;
+  // Bursts of scroll and resize coalesce into one placement per frame.
   const scheduleReposition = (): void => {
     if (trackingFrame !== null) {
       return;
     }
     trackingFrame = requestAnimationFrame(() => {
       trackingFrame = null;
-      reposition();
+      kick();
     });
   };
-
-  // Track the anchor: capture-phase scroll catches scrolling in any ancestor,
-  // resize covers layout changes, and visualViewport events cover pinch-zoom
-  // and the mobile keyboard. Armed/disarmed alongside the popup's dismissal
-  // listeners (so the tracking also waits out the opening click's tick).
-  const addTracking = (): void => {
-    document.addEventListener("scroll", scheduleReposition, true);
-    window.addEventListener("resize", scheduleReposition);
-    const vv = window.visualViewport;
-    if (vv != null) {
-      vv.addEventListener("resize", scheduleReposition);
-      vv.addEventListener("scroll", scheduleReposition);
-    }
-  };
-
-  const removeTracking = (): void => {
-    if (trackingFrame !== null) {
+  // Capture-phase scroll catches scrolling in any ancestor, resize covers
+  // layout changes, and visualViewport events cover pinch-zoom and the mobile keyboard.
+  const track = (on: boolean): void => {
+    const method = on ? "addEventListener" : "removeEventListener";
+    if (!on && trackingFrame !== null) {
       cancelAnimationFrame(trackingFrame);
       trackingFrame = null;
     }
-    document.removeEventListener("scroll", scheduleReposition, true);
-    window.removeEventListener("resize", scheduleReposition);
+    document[method]("scroll", scheduleReposition, true);
+    window[method]("resize", scheduleReposition);
     const vv = window.visualViewport;
     if (vv != null) {
-      vv.removeEventListener("resize", scheduleReposition);
-      vv.removeEventListener("scroll", scheduleReposition);
+      vv[method]("resize", scheduleReposition);
+      vv[method]("scroll", scheduleReposition);
     }
   };
 
-  // The cast is sound: `current` is a spread of an exact-optional options
-  // object, so the subset never carries an explicitly-undefined value here
-  // (only setOptions patches can, and those go to popup.setOptions instead).
-  const popup = createPopupCore(
+  const core = createPopupCore<PopoverConfig>(
     panel,
-    { ...popupSubset(current), trigger: anchorEl } as PopupOptions,
+    config,
     {
       stateClass: "uip-popover",
-      onReveal: (): void => {
-        if (isStretched()) {
-          // Skin hook for the full-bleed variant (positioning is inline via
-          // placeAnchored; this only lets the app square edges / drop borders).
-          panel.classList.add("is-stretched");
-        }
-        place();
+      shown(fx, c) {
+        fx.toggleClass(panel, "is-stretched", isStretched(c));
+        placeWith(fx, panel, anchor, c);
       },
-      // A show() while open just repositions (idempotent).
-      onShowWhileOpen: place,
-      onListeners: (armed: boolean): void => {
-        if (armed) {
-          addTracking();
-        } else {
-          removeTracking();
-        }
+      leaveEnd(fx) {
+        fx.removeClass(panel, "is-stretched");
       },
-      onLeaveEnd: (): void => {
-        panel.classList.remove("is-stretched");
-      },
+      listeners: track,
     },
+    normalizePopoverKey,
   );
+  kick = core.kick;
+  const popup = core.controller;
 
   return {
-    show(): void {
+    show: () => {
       popup.show();
     },
-    hide(): void {
+    hide: () => {
       popup.hide();
     },
-    toggle(): void {
+    toggle: () => {
       popup.toggle();
     },
-    reposition,
+    reposition: core.kick,
     get isOpen(): boolean {
       return popup.isOpen;
     },
@@ -483,20 +504,9 @@ export function createPopover(
       return panel;
     },
     setOptions(patch: PopoverOptionsPatch): void {
-      Object.assign(current, patch);
-      const sub = popupSubset(patch);
-      if (Object.keys(sub).length > 0) {
-        popup.setOptions(sub);
-      }
-      if (popup.isOpen) {
-        // Apply the new placement immediately: recompute the stretch marker
-        // and re-place. placeAnchored clears the inline styles the other mode
-        // wrote (stretch pins left+right; content-sized restores width).
-        panel.classList.toggle("is-stretched", isStretched());
-        place();
-      }
+      popup.setOptions(patch);
     },
-    dispose(): void {
+    dispose: () => {
       popup.dispose();
     },
   };

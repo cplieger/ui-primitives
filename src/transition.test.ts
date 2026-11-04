@@ -161,3 +161,103 @@ describe("runTransition: 'settled' means it stops touching the element", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 });
+
+describe("runTransition: re-entry from change and the spec's getters", () => {
+  it("a cancelTransition from change takes the element: nothing is armed", () => {
+    const el = mount();
+    const settled = vi.fn();
+    runTransition(el, {
+      change: () => {
+        cancelTransition(el);
+      },
+      settled,
+    });
+    vi.advanceTimersByTime(400);
+    expect(settled).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a runTransition from change wins: only the nested settle runs", () => {
+    const el = mount();
+    const outer = vi.fn();
+    const inner = vi.fn();
+    runTransition(el, {
+      change: () => {
+        runTransition(el, { change: () => undefined, settled: inner });
+      },
+      settled: outer,
+    });
+    vi.advanceTimersByTime(400);
+    expect(outer).not.toHaveBeenCalled();
+    expect(inner).toHaveBeenCalledTimes(1);
+  });
+
+  it("a throw from change arms nothing, leaves nothing reserved, and propagates", () => {
+    const el = mount();
+    const settled = vi.fn();
+    const boom = new Error("change");
+    expect(() => {
+      runTransition(el, {
+        change: () => {
+          throw boom;
+        },
+        settled,
+      });
+    }).toThrow(boom);
+    vi.advanceTimersByTime(400);
+    expect(settled).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a change-only transition whose change re-runs the element leaves only the nested one", () => {
+    const el = mount();
+    const inner = vi.fn();
+    runTransition(el, {
+      change: () => {
+        runTransition(el, { change: () => undefined, settled: inner });
+      },
+    });
+    vi.advanceTimersByTime(400);
+    expect(inner).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("reads change and settled once, before anything: a settled getter's nested run is superseded", () => {
+    const el = mount();
+    const reads: string[] = [];
+    const outer = vi.fn();
+    const nested = vi.fn();
+    const spec = {
+      get change(): () => void {
+        reads.push("change");
+        return () => undefined;
+      },
+      get settled(): () => void {
+        reads.push("settled");
+        runTransition(el, { change: () => undefined, settled: nested });
+        return outer;
+      },
+    };
+    runTransition(el, spec);
+    vi.advanceTimersByTime(400);
+    expect(reads.sort()).toEqual(["change", "settled"]);
+    expect(nested).not.toHaveBeenCalled();
+    expect(outer).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("a throwing change getter leaves a pending settle in place", () => {
+    const el = mount();
+    const first = vi.fn();
+    runTransition(el, { change: () => undefined, settled: first });
+    expect(() => {
+      runTransition(el, {
+        get change(): () => void {
+          throw new Error("getter");
+        },
+      });
+    }).toThrow("getter");
+    vi.advanceTimersByTime(400);
+    expect(first).toHaveBeenCalledTimes(1);
+  });
+});

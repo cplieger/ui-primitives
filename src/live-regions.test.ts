@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 
-import { acquireRegions, regionsOf } from "./live-regions.js";
+import { acquireRegions, keepRegions, regionsOf } from "./live-regions.js";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -94,5 +94,34 @@ describe("acquireRegions", () => {
     expect(h.children[2]).toBe(pair.assertive);
     expect(pair.polite.getAttribute("aria-live")).toBe("polite");
     expect(pair.assertive.getAttribute("aria-live")).toBe("assertive");
+  });
+});
+
+describe("keepRegions", () => {
+  it("keeps the pair through every other owner's release", () => {
+    const h = host();
+    const release = acquireRegions(h);
+    keepRegions(h);
+    const pair = regionsOf(h);
+    release();
+
+    expect(regionsOf(h)).toBe(pair);
+    expect(h.querySelectorAll("[aria-live]")).toHaveLength(2);
+  });
+
+  it("keeps a pair still inside the host, and puts back one the app removed", () => {
+    const h = host();
+    keepRegions(h);
+    const first = regionsOf(h);
+    keepRegions(h);
+    expect(regionsOf(h)).toBe(first);
+
+    h.replaceChildren(document.createElement("p"));
+    keepRegions(h);
+    const back = regionsOf(h);
+    expect(back).toBeDefined();
+    expect(back).not.toBe(first);
+    expect(h.children[1]).toBe(back!.polite);
+    expect(h.children[2]).toBe(back!.assertive);
   });
 });

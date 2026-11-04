@@ -2,7 +2,7 @@
 
 `@cplieger/ui-primitives/transition`
 
-Runs one CSS transition on an element and calls you back once it ends. Every primitive's fade-out uses it.
+Runs one CSS transition on an element and calls you back once it ends. The primitives' fades follow the same settle rule.
 
 ## Usage
 
@@ -20,9 +20,9 @@ cancelTransition(panel);
 
 ## API
 
-- `runTransition(el, spec)` flushes the element's current style, runs `spec.change`, then runs `spec.settled` once. Whatever you wrote before the call is the state it animates from.
+- `runTransition(el, spec)` reads `spec.change` and `spec.settled` once, before it does anything. It flushes the element's current style, runs `change`, then runs `settled` once. Whatever you wrote before the call is the state it animates from. A `cancelTransition` or `runTransition` on the same element from inside `change` takes the element, and this call then arms nothing. Without `settled`, nothing stays pending. A throw from `change` arms nothing and propagates.
 - `TransitionSpec` = `{ change: () => void; settled?: () => void }`.
-- `cancelTransition(el)` drops the settle pending on `el` without running it. It does nothing when none is pending.
+- `cancelTransition(el)` drops the settle pending on `el` without running it. It does nothing when none is pending. The primitives' fades do not go through `runTransition`, so `cancelTransition` on an element a controller drives does not touch that controller.
 
 ## Notes
 

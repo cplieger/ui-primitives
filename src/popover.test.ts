@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import fc from "fast-check";
+import { createRoot } from "@cplieger/reactive";
 
 import {
   placeAnchored,
@@ -1666,14 +1667,13 @@ describe("createPopover — leave animation lifecycle", () => {
     expect(panel.classList.contains("is-stretched")).toBe(false);
   });
 
-  it("dispose() runs the leave and leaves the caller's panel in the DOM", () => {
+  it("dispose() hides the panel at once and leaves it in the DOM", () => {
     const { c, panel } = mountPopover();
     c.show();
     c.dispose();
-    expect(panel.classList.contains("is-leaving")).toBe(true); // fades rather than yanking out instantly
-    expect(panel.isConnected).toBe(true);
-    vi.advanceTimersByTime(400);
     expect(panel.hidden).toBe(true);
+    expect(panel.classList.contains("is-leaving")).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
     expect(panel.isConnected).toBe(true); // the caller owns it; never removed
   });
 });
@@ -1844,5 +1844,273 @@ describe("createPopover — the tracking frame is released on hide", () => {
     // removeEventListener matches on that flag, so a mismatch leaks the tracker.
     expect(docRemove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
     c.dispose();
+  });
+});
+
+describe("createPopover: ends with the reactive owner it was made under", () => {
+  it("disposing the root hides it and stops tracking, and dispose() after that is a no-op", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.appendChild(anchor);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const [disposeRoot, c] = createRoot(
+      (dispose) => [dispose, createPopover(anchor, panel)] as const,
+    );
+    c.show();
+    vi.advanceTimersByTime(1);
+    const docRemove = vi.spyOn(document, "removeEventListener");
+
+    disposeRoot();
+    expect(c.isOpen).toBe(false);
+    expect(anchor.hasAttribute("aria-haspopup")).toBe(false);
+    expect(docRemove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
+
+    anchor.setAttribute("aria-haspopup", "menu");
+    c.dispose();
+    expect(anchor.getAttribute("aria-haspopup")).toBe("menu");
+  });
+});
+
+describe("createPopover: disposed with its owner while open", () => {
+  it("is hidden at once, untracked, with no onClose", () => {
+    const anchor = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchor, panel);
+    stubRect(anchor, 100, 100, 50, 20);
+    stubSize(panel, 80, 40);
+    const onClose = vi.fn();
+    const [disposeRoot, c] = createRoot(
+      (dispose) => [dispose, createPopover(anchor, panel, { onClose })] as const,
+    );
+    c.show();
+    vi.advanceTimersByTime(1);
+    const docRemove = vi.spyOn(document, "removeEventListener");
+
+    disposeRoot();
+    expect(c.isOpen).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(panel.hidden).toBe(true);
+    expect(anchor.hasAttribute("aria-haspopup")).toBe(false);
+    expect(anchor.hasAttribute("aria-expanded")).toBe(false);
+    expect(docRemove).toHaveBeenCalledWith("scroll", expect.any(Function), true);
+    const docAdd = vi.spyOn(document, "addEventListener");
+    try {
+      vi.advanceTimersByTime(400);
+      expect(docAdd).not.toHaveBeenCalled();
+    } finally {
+      docAdd.mockRestore();
+    }
+  });
+});
+
+describe("createPopover: disposed by its virtual anchor while it opens", () => {
+  it("runs no onOpen and leaves no document listener behind", () => {
+    const panel = document.createElement("div");
+    panel.hidden = true;
+    const box: { ctrl?: ReturnType<typeof createPopover>; disposeOnMeasure: boolean } = {
+      disposeOnMeasure: false,
+    };
+    const anchor = {
+      getBoundingClientRect(): DOMRect {
+        if (box.disposeOnMeasure) {
+          box.disposeOnMeasure = false;
+          box.ctrl?.dispose();
+        }
+        return new DOMRect(10, 10, 20, 20);
+      },
+    };
+    const onOpen = vi.fn();
+    const add = vi.spyOn(document, "addEventListener");
+    const remove = vi.spyOn(document, "removeEventListener");
+    try {
+      box.ctrl = createPopover(anchor, panel, { onOpen });
+      box.disposeOnMeasure = true;
+
+      box.ctrl.show();
+      vi.advanceTimersByTime(0);
+
+      const types = (calls: unknown[][]): unknown[] => calls.map(([type]) => type).sort();
+      expect(onOpen).not.toHaveBeenCalled();
+      expect(box.ctrl.isOpen).toBe(false);
+      expect(types(add.mock.calls)).toEqual(types(remove.mock.calls));
+    } finally {
+      add.mockRestore();
+      remove.mockRestore();
+    }
+  });
+});
+
+describe("placeAnchored: options are read before the anchor and the panel", () => {
+  it("reads every option getter, then measures the anchor, then writes the panel", () => {
+    const panel = document.createElement("div");
+    document.body.append(panel);
+    const order: string[] = [];
+    const opts: Record<string, unknown> = {};
+    const values = {
+      placement: "bottom",
+      align: "start",
+      offset: 4,
+      flip: true,
+      clamp: true,
+      matchAnchorWidth: false,
+      margin: 8,
+      stretch: undefined,
+    };
+    for (const [key, value] of Object.entries(values)) {
+      Object.defineProperty(opts, key, {
+        enumerable: true,
+        get: () => {
+          order.push(`option:${key}`);
+          return value;
+        },
+      });
+    }
+    const observer = new MutationObserver(() => undefined);
+    observer.observe(panel, { attributes: true });
+    const anchor = {
+      getBoundingClientRect: (): DOMRect => {
+        order.push("anchor");
+        return rectOf(10, 10, 50, 20);
+      },
+    };
+    placeAnchored(panel, anchor, opts);
+    const firstWrite = observer.takeRecords().length > 0 ? order.length : -1;
+    observer.disconnect();
+
+    const anchorAt = order.indexOf("anchor");
+    expect(anchorAt).toBe(order.length - 1);
+    expect(order.slice(0, anchorAt).every((o) => o.startsWith("option:"))).toBe(true);
+    expect(firstWrite).toBe(order.length);
+  });
+
+  it("a throwing stretch getter leaves the panel untouched", () => {
+    const panel = document.createElement("div");
+    document.body.append(panel);
+    const anchor = { getBoundingClientRect: (): DOMRect => rectOf(10, 10, 50, 20) };
+    expect(() => {
+      placeAnchored(panel, anchor, {
+        get stretch(): "viewport" {
+          throw new Error("stretch");
+        },
+      });
+    }).toThrow("stretch");
+    expect(panel.getAttribute("style")).toBeNull();
+  });
+});
+
+describe("createPopover: an anchor that moves and reports it while it is measured", () => {
+  it("a rect getter that moves the anchor and calls reposition() is placed from the fresh rect", () => {
+    vi.useFakeTimers();
+    const panel = document.createElement("div");
+    document.body.append(panel);
+    let top = 300;
+    let moved = false;
+    const anchor = {
+      getBoundingClientRect: (): DOMRect => {
+        const at = top;
+        return {
+          ...rectOf(100, at, 50, 20),
+          get top(): number {
+            if (!moved) {
+              moved = true;
+              top = 100;
+              ctl.reposition();
+            }
+            return at;
+          },
+          get bottom(): number {
+            return at + 20;
+          },
+        };
+      },
+    };
+    const ctl = createPopover(anchor, panel, { flip: false });
+    ctl.show();
+    expect(topOf(panel)).toBe(100 + 20 + 4);
+    vi.useRealTimers();
+  });
+
+  it("an anchor that calls reposition() from its own getBoundingClientRect converges", () => {
+    vi.useFakeTimers();
+    const panel = document.createElement("div");
+    document.body.append(panel);
+    const anchor = {
+      getBoundingClientRect: (): DOMRect => {
+        ctl.reposition();
+        return rectOf(100, 200, 50, 20);
+      },
+    };
+    const ctl = createPopover(anchor, panel, { flip: false });
+    expect(() => {
+      ctl.show();
+    }).not.toThrow();
+    expect(topOf(panel)).toBe(224);
+    vi.useRealTimers();
+  });
+
+  it("an anchor that calls setOptions() with the current offset while it is measured converges", () => {
+    vi.useFakeTimers();
+    const panel = document.createElement("div");
+    document.body.append(panel);
+    const anchor = {
+      getBoundingClientRect: (): DOMRect => {
+        ctl.setOptions({ offset: 4 });
+        return rectOf(100, 200, 50, 20);
+      },
+    };
+    const ctl = createPopover(anchor, panel, { flip: false });
+    expect(() => {
+      ctl.show();
+    }).not.toThrow();
+    expect(topOf(panel)).toBe(224);
+    vi.useRealTimers();
+  });
+
+  it("an onOpen that fills the panel and calls reposition() places it for its new size", () => {
+    vi.useFakeTimers();
+    const anchorEl = document.createElement("button");
+    stubRect(anchorEl, 100, 400, 50, 20);
+    const panel = document.createElement("div");
+    document.body.append(anchorEl, panel);
+    const ctl = createPopover(anchorEl, panel, {
+      placement: "top",
+      flip: false,
+      onOpen: () => {
+        stubSize(panel, 200, 120);
+        ctl.reposition();
+      },
+    });
+    stubSize(panel, 200, 10);
+    ctl.show();
+    expect(topOf(panel)).toBe(400 - 120 - 4);
+    vi.useRealTimers();
+  });
+});
+
+describe("createPopover: options are read once", () => {
+  it("reads each popup and placement option getter once", () => {
+    const anchorEl = document.createElement("button");
+    const panel = document.createElement("div");
+    document.body.append(anchorEl, panel);
+    const reads: Record<string, number> = {};
+    const opts = {};
+    for (const [key, value] of Object.entries({
+      placement: "top",
+      offset: 12,
+      onOpen: () => undefined,
+    })) {
+      Object.defineProperty(opts, key, {
+        enumerable: true,
+        get: () => {
+          reads[key] = (reads[key] ?? 0) + 1;
+          return value;
+        },
+      });
+    }
+    const ctl = createPopover(anchorEl, panel, opts);
+
+    expect(reads).toEqual({ placement: 1, offset: 1, onOpen: 1 });
+    ctl.dispose();
   });
 });

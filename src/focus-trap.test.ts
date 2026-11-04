@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 
+import { createRoot } from "@cplieger/reactive";
+
 import { trapFocus } from "./focus-trap.js";
 
 // The trap's visibility filter reads getClientRects()/checkVisibility(), which
@@ -318,6 +320,159 @@ describe("trapFocus: releasing the document listener", () => {
     const evt = tabEvent();
     document.dispatchEvent(evt);
     expect(evt.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(outside);
+  });
+});
+
+describe("trapFocus: ends with the reactive owner it was made under", () => {
+  it("disposing the root releases the trap, and release() after that is a no-op", () => {
+    const opener = makeButton("opener");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { container, buttons } = mount("a", "b");
+    const [disposeRoot, release] = createRoot(
+      (dispose) => [dispose, trapFocus(container)] as const,
+    );
+    expect(document.activeElement).toBe(buttons[0]);
+
+    disposeRoot();
+    expect(document.activeElement).toBe(opener);
+    buttons[1]?.focus();
+    const evt = tabEvent();
+    document.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
+
+    release();
+    expect(document.activeElement).toBe(buttons[1]);
+  });
+
+  it("release() under a live root runs once: disposing the root later moves no focus", () => {
+    const opener = makeButton("opener");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { container, buttons } = mount("a", "b");
+    const disposeRoot = createRoot((dispose) => {
+      trapFocus(container)();
+      return dispose;
+    });
+    expect(document.activeElement).toBe(opener);
+
+    buttons[1]?.focus();
+    disposeRoot();
+    expect(document.activeElement).toBe(buttons[1]);
+  });
+});
+
+/** Call `make` while a reactive owner is being disposed; return what it threw. */
+function thrownWhileOwnerCloses(make: () => unknown): unknown {
+  let thrown: unknown;
+  createRoot((dispose, owner) => {
+    owner.onDispose(() => {
+      try {
+        make();
+      } catch (error) {
+        thrown = error;
+      }
+    });
+    dispose();
+  });
+  return thrown;
+}
+
+describe("trapFocus: made while its owner is being disposed", () => {
+  it("throws before moving focus or listening for Tab", () => {
+    const opener = makeButton("opener");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { container } = mount();
+    const add = vi.spyOn(document, "addEventListener");
+
+    try {
+      expect(String(thrownWhileOwnerCloses(() => trapFocus(container)))).toMatch(
+        /cannot create a root under an owner that is being disposed/,
+      );
+      expect(add).not.toHaveBeenCalled();
+    } finally {
+      add.mockRestore();
+    }
+    expect(document.activeElement).toBe(opener);
+    expect(container.hasAttribute("tabindex")).toBe(false);
+    const evt = tabEvent();
+    document.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
+  });
+});
+
+describe("trapFocus: its owner disposed while the trap is being set up", () => {
+  it("releases once after setup, leaving no Tab handling behind", () => {
+    const opener = makeButton("opener");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { container, buttons } = mount("a", "b");
+    let disposeOwner = (): void => undefined;
+    buttons[0]?.addEventListener(
+      "focus",
+      () => {
+        disposeOwner();
+      },
+      { once: true },
+    );
+
+    const release = createRoot((dispose) => {
+      disposeOwner = dispose;
+      return trapFocus(container);
+    });
+    expect(document.activeElement).toBe(opener);
+
+    buttons[1]?.focus();
+    const evt = tabEvent();
+    document.dispatchEvent(evt);
+    expect(evt.defaultPrevented).toBe(false);
+    release();
+    expect(document.activeElement).toBe(buttons[1]);
+  });
+});
+
+describe("trapFocus: options are read once", () => {
+  it("reads each option getter once, at the call, and not again on release", () => {
+    const opener = makeButton("opener");
+    document.body.appendChild(opener);
+    opener.focus();
+    const { container, buttons } = mount("a", "b");
+    const reads = { initialFocus: 0, returnFocus: 0 };
+    const release = trapFocus(container, {
+      get initialFocus(): HTMLElement | null {
+        reads.initialFocus++;
+        return buttons[1] ?? null;
+      },
+      get returnFocus(): boolean {
+        reads.returnFocus++;
+        return true;
+      },
+    });
+    release();
+
+    expect(reads).toEqual({ initialFocus: 1, returnFocus: 1 });
+    expect(document.activeElement).toBe(opener);
+  });
+});
+
+describe("trapFocus: released from a focus handler its Tab redirect reaches", () => {
+  it("restores focus once that handler returns, after the handler's own focus moves", () => {
+    const { container, buttons } = mount("a", "b", "c");
+    const outside = makeButton("outside");
+    document.body.append(outside);
+    const release = trapFocus(container, { returnFocus: outside });
+    buttons[2]!.addEventListener(
+      "focus",
+      () => {
+        release();
+        buttons[1]!.focus();
+      },
+      { once: true },
+    );
+    buttons[0]!.dispatchEvent(tabEvent(true));
+
     expect(document.activeElement).toBe(outside);
   });
 });

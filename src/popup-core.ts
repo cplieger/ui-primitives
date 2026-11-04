@@ -1,10 +1,14 @@
 // popup-core.ts — INTERNAL lifecycle core shared by popup and popover (not a
 // subpath export). `popup` re-exports it as-is; `popover` layers placement on
-// top through the `PopupHooks` seam. One module keeps the group registry
-// shared, so a popup and a popover can share a `group`.
+// top through `PopupLayer`. One module keeps the group registry shared, so a
+// popup and a popover can share a `group`.
 
+import { untracked } from "@cplieger/reactive";
+
+import type { Fx } from "./fx.js";
 import { topmostOpenDialog } from "./modal-host.js";
-import { cancelTransition, runTransition } from "./transition.js";
+import { createDriver, ownedBinding, type Driver } from "./owner.js";
+import { watchSettle } from "./transition.js";
 
 /** The lifecycle half of a popup or popover: the trigger to annotate, which
  *  gestures dismiss the panel, single-open grouping, the two opt-in focus
@@ -63,302 +67,537 @@ export interface PopupController {
   readonly isOpen: boolean;
   /** The panel element (the caller's, never one this controller created). */
   readonly el: HTMLElement;
-  /** Merge-patch the options (see {@link PopupOptionsPatch}). Dismissal
-   *  listeners re-arm if open; a `trigger`/`haspopup` change applies on the
-   *  next `show()`. */
+  /** Merge-patch the options (see {@link PopupOptionsPatch}), each key read
+   *  once. Changed dismissal flags re-arm the listeners while open; a
+   *  `trigger` or `haspopup` change applies at once: the old trigger loses the
+   *  ARIA and, while open, the new one gains it. A patch whose values equal
+   *  the current ones changes nothing. */
   setOptions(patch: PopupOptionsPatch): void;
+  /** Hide the panel at once, with no fade and no `onClose`, restore focus the
+   *  popup moved, drop the trigger's ARIA and leave the group. */
   dispose(): void;
 }
 
-/** Extension seam for the popover layer: popover reuses this exact lifecycle
- *  and layers placement on top through these hooks. Internal by construction —
- *  this module is not a subpath export, so the seam is invisible to package
- *  consumers (the public `popup` wrapper does not accept hooks). */
-export interface PopupHooks {
-  /** State-class base applied to the panel. Default `"uip-popup"`. */
-  stateClass?: string;
-  /** After the panel is revealed + mounted, before ARIA/focus/listeners. */
-  onReveal?: () => void;
-  /** A `show()` while already open (the reveal is skipped). */
-  onShowWhileOpen?: () => void;
-  /** Alongside dismissal-listener arm (`true`) / disarm (`false`). */
-  onListeners?: (armed: boolean) => void;
-  /** When a leave finishes and the panel is about to be `[hidden]`. */
-  onLeaveEnd?: () => void;
+/** Every PopupOptions key present, defaults resolved, frozen; `null` for an
+ *  absent option whose default is no value. */
+export interface PopupConfig {
+  readonly trigger: HTMLElement | null;
+  readonly closeOnOutside: boolean;
+  readonly closeOnEscape: boolean;
+  readonly isolateEscape: boolean;
+  readonly group: string | null;
+  readonly initialFocus: HTMLElement | null;
+  readonly returnFocus: boolean | HTMLElement;
+  /** The serialized attribute; `true` and absence normalize to `"true"`. */
+  readonly haspopup: "true" | "menu" | "listbox" | "tree" | "grid" | "dialog";
+  readonly onOpen: (() => void) | null;
+  readonly onClose: (() => void) | null;
 }
 
-interface GroupEntry {
-  isOpen(): boolean;
-  hide(): void;
+/** The normalized value of one popup option, or `undefined` for a key that is not one. */
+export function normalizePopupKey(key: string, value: unknown): unknown {
+  switch (key) {
+    case "trigger":
+    case "initialFocus":
+      return value ?? null;
+    case "closeOnOutside":
+    case "closeOnEscape":
+    case "isolateEscape":
+      return value ?? true;
+    case "group":
+      return value ?? null;
+    case "returnFocus":
+      return value ?? false;
+    case "haspopup":
+      return value === undefined || value === true ? "true" : value;
+    case "onOpen":
+    case "onClose":
+      return value ?? null;
+    default:
+      return undefined;
+  }
 }
 
-const groups = new Map<string, Set<GroupEntry>>();
+export const POPUP_KEYS = [
+  "trigger",
+  "closeOnOutside",
+  "closeOnEscape",
+  "isolateEscape",
+  "group",
+  "initialFocus",
+  "returnFocus",
+  "haspopup",
+  "onOpen",
+  "onClose",
+] as const;
 
-function joinGroup(name: string, entry: GroupEntry): void {
+/** Read each of `keys` from `opts` once, normalized, into a frozen record. */
+export function readOptions(
+  opts: object | undefined,
+  keys: readonly string[],
+  normalize: (key: string, value: unknown) => unknown,
+): Readonly<Record<string, unknown>> {
+  const source = (opts ?? {}) as Partial<Record<string, unknown>>;
+  return Object.freeze(Object.fromEntries(keys.map((k) => [k, normalize(k, source[k])])));
+}
+
+/** Read each popup option once into a frozen config. */
+export function normalizePopupOptions(opts: PopupOptions | undefined): PopupConfig {
+  return readOptions(opts, POPUP_KEYS, normalizePopupKey) as unknown as PopupConfig;
+}
+
+/** A patch read once: each own enumerable key's normalized value. */
+export type ReadPatch = readonly (readonly [string, unknown])[];
+
+/** Read `patch`'s own enumerable keys once each, normalized; keys `normalize`
+ *  does not know are dropped. An explicit `undefined` resets a key to its default. */
+export function readPatch(
+  patch: object,
+  normalize: (key: string, value: unknown) => unknown,
+): ReadPatch {
+  const source = patch as Record<string, unknown>;
+  const out: (readonly [string, unknown])[] = [];
+  for (const key of Object.keys(source)) {
+    const value = normalize(key, source[key]);
+    if (value !== undefined) {
+      out.push([key, value]);
+    }
+  }
+  return out;
+}
+
+/** `current` with `entries` applied, or `current` itself when no field differs under Object.is. */
+export function mergeOptions<C extends object>(current: C, entries: ReadPatch): C {
+  let next: Record<string, unknown> | null = null;
+  for (const [key, value] of entries) {
+    if (!Object.is((current as Record<string, unknown>)[key], value)) {
+      next ??= { ...(current as Record<string, unknown>) };
+      next[key] = value;
+    }
+  }
+  return next === null ? current : (Object.freeze(next) as C);
+}
+
+/** What a layer adds to a popup's realization (popover's placement). */
+export interface PopupLayer<C> {
+  readonly stateClass: string;
+  /** Realize the layer's part of an open panel, on every pass while open. */
+  shown?(fx: Fx, config: C): void;
+  /** Realize the layer's part of a finished leave. */
+  leaveEnd?(fx: Fx): void;
+  /** Alongside the dismissal listeners' arm and disarm. */
+  listeners?(armed: boolean): void;
+}
+
+interface Member {
+  readonly isOpen: () => boolean;
+  /** Set this member closed without driving it. */
+  readonly close: () => void;
+  readonly flush: () => void;
+}
+
+const groups = new Map<string, Set<Member>>();
+
+function joinGroup(name: string, member: Member): void {
   let set = groups.get(name);
   if (set === undefined) {
     set = new Set();
     groups.set(name, set);
   }
-  set.add(entry);
+  set.add(member);
 }
 
-function leaveGroup(name: string, entry: GroupEntry): void {
+function leaveGroup(name: string, member: Member): void {
   const set = groups.get(name);
   if (set === undefined) {
     return;
   }
-  set.delete(entry);
+  set.delete(member);
   if (set.size === 0) {
     groups.delete(name);
   }
 }
 
 /** Close every open popup in `group` (e.g. collapse all expandable pills when
- *  the app moves focus elsewhere). Unknown group names are a no-op. */
+ *  the app moves focus elsewhere). Every member is hidden, then a callback's
+ *  error is thrown, or an `AggregateError` of several. Unknown group names are
+ *  a no-op. */
 export function closePopupGroup(group: string): void {
-  const set = groups.get(group);
-  if (set === undefined) {
-    return;
+  const members = [...(groups.get(group) ?? [])].filter((m) => m.isOpen());
+  for (const m of members) {
+    m.close();
   }
-  for (const entry of [...set]) {
-    if (entry.isOpen()) {
-      entry.hide();
+  const errors: unknown[] = [];
+  for (const m of members) {
+    try {
+      m.flush();
+    } catch (error) {
+      errors.push(error);
     }
+  }
+  if (errors.length === 1) {
+    throw errors[0];
+  }
+  if (errors.length > 1) {
+    throw new AggregateError(errors, "ui-primitives: several callbacks threw");
   }
 }
 
-/** Core implementation behind `createPopup` and `createPopover`. */
-export function createPopupCore(
+interface PopupState<C> {
+  readonly open: boolean;
+  readonly config: C;
+  /** The element focused when show() was called. */
+  readonly opener: HTMLElement | null;
+  readonly shows: number;
+  readonly hides: number;
+  /** The hide whose leave has settled. */
+  readonly settled: number;
+  /** The peers this show set closed, flushed by its realization. */
+  readonly peers: readonly Member[];
+}
+
+/** Core implementation behind `createPopup` and `createPopover`. `config` is
+ *  already normalized; `normalizeKey` normalizes a `setOptions` patch. */
+export function createPopupCore<C extends PopupConfig>(
   panel: HTMLElement,
-  opts?: PopupOptions,
-  hooks?: PopupHooks,
-): PopupController {
-  // Reads go through `current` so a setOptions patch takes effect immediately.
-  const current: PopupOptions = { ...opts };
-  const stateClass = hooks?.stateClass ?? "uip-popup";
+  config: C,
+  layer: PopupLayer<C>,
+  normalizeKey: (key: string, value: unknown) => unknown,
+): { readonly controller: PopupController; readonly kick: () => void } {
+  return ownedBinding((binding) => {
+    let revealed = false;
+    let annotated: HTMLElement | null = null;
+    let joined: string | null = null;
+    let armed: { readonly outside: boolean; readonly escape: boolean } | null = null;
+    let armTimer: ReturnType<typeof setTimeout> | null = null;
+    let listening = false;
+    let leave: { readonly forHide: number; readonly cancel: () => void } | null = null;
+    let focus: { forShow: number; restore: HTMLElement | null; moved: boolean } = {
+      forShow: 0,
+      restore: null,
+      moved: false,
+    };
+    let restoredFor = 0;
+    let announced = false;
+    let endingFor: number | null = null;
 
-  let open = false;
-  let listening = false;
-  let installTimer: ReturnType<typeof setTimeout> | null = null;
-  let restoreFocus: HTMLElement | null = null;
-  // Whether show() moved focus into the panel — hide() forces focus back out
-  // even without returnFocus, so it is never stranded on the hidden panel
-  // (WCAG 2.4.3).
-  let movedFocusIn = false;
+    const hide = (): void => {
+      const d = driver.state;
+      if (!binding.ended && d.open) {
+        driver.commit({ ...d, open: false, hides: d.hides + 1 });
+      }
+    };
+    const show = (): void => {
+      if (binding.ended) {
+        return;
+      }
+      const d = driver.state;
+      if (d.open) {
+        // A show() while open re-places a popover.
+        driver.kick();
+        return;
+      }
+      const peers =
+        d.config.group === null
+          ? []
+          : [...(groups.get(d.config.group) ?? [])].filter((m) => m !== member && m.isOpen());
+      for (const peer of peers) {
+        peer.close();
+      }
+      const active = document.activeElement;
+      driver.commit({
+        ...d,
+        open: true,
+        shows: d.shows + 1,
+        opener: active instanceof HTMLElement ? active : null,
+        peers,
+      });
+    };
 
-  const entry: GroupEntry = {
-    isOpen: () => open,
-    hide: () => {
-      hide();
-    },
-  };
-  let groupName: string | undefined;
-  const syncGroup = (): void => {
-    if (current.group === groupName) {
-      return;
-    }
-    if (groupName !== undefined) {
-      leaveGroup(groupName, entry);
-    }
-    groupName = current.group;
-    if (groupName !== undefined) {
-      joinGroup(groupName, entry);
-    }
-  };
-  syncGroup();
-
-  // Lets a re-show mid-fade re-reveal cleanly instead of the stale leave
-  // firing later and hiding the panel again.
-  const clearLeave = (): void => {
-    cancelTransition(panel);
-    panel.classList.remove("is-leaving");
-  };
-
-  const onDocClick = (e: MouseEvent): void => {
-    const target = e.target;
-    // A click on the trigger keeps the popup open — its own handler typically toggles.
-    if (
-      target instanceof Node &&
-      (panel.contains(target) || current.trigger?.contains(target) === true)
-    ) {
-      return;
-    }
-    hide();
-  };
-
-  const onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") {
-      // Isolate by default so the same Escape doesn't also close a parent modal.
-      if (current.isolateEscape ?? true) {
-        e.stopPropagation();
+    const onDocClick = (e: MouseEvent): void => {
+      const target = e.target;
+      // A click on the trigger keeps the popup open: its own handler typically toggles.
+      if (
+        target instanceof Node &&
+        (panel.contains(target) || driver.state.config.trigger?.contains(target) === true)
+      ) {
+        return;
       }
       hide();
-    }
-  };
-
-  const addListeners = (): void => {
-    installTimer = null;
-    listening = true;
-    if (current.closeOnOutside ?? true) {
-      document.addEventListener("click", onDocClick);
-    }
-    if (current.closeOnEscape ?? true) {
-      document.addEventListener("keydown", onKeyDown);
-    }
-    hooks?.onListeners?.(true);
-  };
-
-  const removeListeners = (): void => {
-    // The one cancellation point, and the whole reason a deferred install can
-    // never arm a closed popup: `open` goes false only in hide(), which calls
-    // this on the next line, and setOptions() calls it before it re-arms.
-    if (installTimer !== null) {
-      clearTimeout(installTimer);
-      installTimer = null;
-    }
-    if (!listening) {
-      return;
-    }
-    listening = false;
-    document.removeEventListener("click", onDocClick);
-    document.removeEventListener("keydown", onKeyDown);
-    hooks?.onListeners?.(false);
-  };
-
-  // Deferred so the click that opened the popup doesn't immediately self-close.
-  const armListenersDeferred = (): void => {
-    installTimer = setTimeout(addListeners, 0);
-  };
-
-  const show = (): void => {
-    clearLeave();
-    if (open) {
-      hooks?.onShowWhileOpen?.();
-      return;
-    }
-    if (groupName !== undefined) {
-      const set = groups.get(groupName);
-      if (set !== undefined) {
-        for (const peer of [...set]) {
-          if (peer !== entry && peer.isOpen()) {
-            peer.hide();
-          }
+    };
+    const onKeyDown = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") {
+        // Isolated by default so the same Escape doesn't also close a parent modal.
+        if (driver.state.config.isolateEscape) {
+          e.stopPropagation();
+        }
+        hide();
+      }
+    };
+    const disarm = (): void => {
+      if (armTimer !== null) {
+        clearTimeout(armTimer);
+        armTimer = null;
+      }
+      armed = null;
+      if (listening) {
+        listening = false;
+        document.removeEventListener("click", onDocClick);
+        document.removeEventListener("keydown", onKeyDown);
+        layer.listeners?.(false);
+      }
+    };
+    const arm = (flags: { readonly outside: boolean; readonly escape: boolean }): void => {
+      disarm();
+      armed = flags;
+      // Deferred so the click that opened the popup doesn't immediately self-close.
+      armTimer = setTimeout(() => {
+        armTimer = null;
+        listening = true;
+        if (flags.outside) {
+          document.addEventListener("click", onDocClick);
+        }
+        if (flags.escape) {
+          document.addEventListener("keydown", onKeyDown);
+        }
+        layer.listeners?.(true);
+      }, 0);
+    };
+    const syncGroup = (name: string | null): void => {
+      if (joined !== name) {
+        if (joined !== null) {
+          leaveGroup(joined, member);
+        }
+        joined = name;
+        if (name !== null) {
+          joinGroup(name, member);
         }
       }
-    }
-    open = true;
-    panel.classList.add(stateClass);
-    panel.hidden = false;
-    if (!panel.isConnected) {
-      // showModal() inerts everything outside the dialog subtree, so a
-      // disconnected panel must host inside the open dialog to stay usable.
-      const host = current.trigger?.closest("dialog[open]") ?? topmostOpenDialog() ?? document.body;
-      host.appendChild(panel);
-    }
-    // runTransition commits the resting state before adding is-open, so the
-    // transition plays from it.
-    runTransition(panel, {
-      change: () => {
-        panel.classList.add("is-open");
+    };
+    const cancelLeave = (): void => {
+      leave?.cancel();
+      leave = null;
+    };
+    /** Move focus back out, once per hide: to the restore target, else off the panel. */
+    const restoreFocus = (fx: Fx): void => {
+      const { restore, moved } = focus;
+      focus = { ...focus, restore: null, moved: false };
+      if (restore?.isConnected === true) {
+        fx.focus(restore);
+        return;
+      }
+      const active = document.activeElement;
+      if (moved && active instanceof HTMLElement && panel.contains(active)) {
+        fx.blur(active);
+      }
+    };
+    const settle = (h: number): void => {
+      const d = driver.state;
+      if (!d.open && d.hides === h && d.settled !== h) {
+        driver.commit({ ...d, settled: h });
+      }
+    };
+
+    const driver: Driver<PopupState<C>> = createDriver<PopupState<C>>({
+      initial: { open: false, config, opener: null, shows: 0, hides: 0, settled: 0, peers: [] },
+      realize(fx, d) {
+        const c = d.config;
+        syncGroup(c.group);
+        if (annotated !== null && annotated !== c.trigger) {
+          const old = annotated;
+          fx.removeAttr(old, "aria-expanded");
+          fx.removeAttr(old, "aria-haspopup");
+          annotated = null;
+        }
+        if (d.open) {
+          cancelLeave();
+          fx.removeClass(panel, "is-leaving");
+          for (const peer of d.peers) {
+            fx.call(peer.flush);
+          }
+          revealed = true;
+          fx.addClass(panel, layer.stateClass);
+          fx.setProp(panel, "hidden", false);
+          if (!panel.isConnected) {
+            // showModal() inerts everything outside the dialog subtree, so a
+            // disconnected panel must host inside the open dialog to stay usable.
+            const host = c.trigger?.closest("dialog[open]") ?? topmostOpenDialog() ?? document.body;
+            fx.append(host, panel);
+          }
+          if (!panel.classList.contains("is-open")) {
+            // The resting state is committed first, so the transition plays from it.
+            panel.getBoundingClientRect();
+            fx.addClass(panel, "is-open");
+          }
+          layer.shown?.(fx, c);
+          if (c.trigger !== null) {
+            annotated = c.trigger;
+            fx.setAttr(c.trigger, "aria-expanded", "true");
+            fx.setAttr(c.trigger, "aria-haspopup", c.haspopup);
+          }
+          if (focus.forShow !== d.shows) {
+            const moved = c.initialFocus?.isConnected === true;
+            const restore =
+              c.returnFocus instanceof HTMLElement
+                ? c.returnFocus
+                : c.returnFocus || moved
+                  ? d.opener
+                  : null;
+            // The token first: a restart must not move focus twice.
+            focus = { forShow: d.shows, restore, moved };
+            if (moved) {
+              fx.focus(c.initialFocus);
+            }
+          }
+          if (armed?.outside !== c.closeOnOutside || armed.escape !== c.closeOnEscape) {
+            arm({ outside: c.closeOnOutside, escape: c.closeOnEscape });
+          }
+          return;
+        }
+        disarm();
+        if (annotated !== null) {
+          // Both halves: a restart inside the open branch's pair can leave one unwritten.
+          fx.setAttr(annotated, "aria-haspopup", c.haspopup);
+          fx.setAttr(annotated, "aria-expanded", "false");
+        }
+        if (restoredFor !== d.hides) {
+          restoredFor = d.hides;
+          restoreFocus(fx);
+        }
+        if (!revealed) {
+          return;
+        }
+        // The leave: two class diffs, the watcher, then the end writes once it
+        // settled. A panel a restart left hidden has nothing to fade.
+        if (d.settled !== d.hides && !(panel.hidden && !panel.classList.contains("is-leaving"))) {
+          if (panel.classList.contains("is-open") || !panel.classList.contains("is-leaving")) {
+            panel.getBoundingClientRect();
+          }
+          fx.removeClass(panel, "is-open");
+          fx.addClass(panel, "is-leaving");
+          if (leave?.forHide !== d.hides) {
+            cancelLeave();
+            const h = d.hides;
+            leave = {
+              forHide: h,
+              cancel: watchSettle(panel, () => {
+                settle(h);
+              }),
+            };
+          }
+          return;
+        }
+        if (endingFor !== d.hides) {
+          if (!panel.classList.contains("is-leaving")) {
+            // Nothing to fade: another controller revealed the panel, or a
+            // restart left it hidden before it was revealed.
+            cancelLeave();
+            revealed = false;
+            return;
+          }
+          // Recorded first: a restart inside the end writes must finish them.
+          endingFor = d.hides;
+        }
+        cancelLeave();
+        fx.removeClass(panel, "is-leaving");
+        layer.leaveEnd?.(fx);
+        fx.setProp(panel, "hidden", true);
+        revealed = false;
+        endingFor = null;
+      },
+      notify(fx, d) {
+        if (d.open && !announced) {
+          announced = true;
+          const onOpen = d.config.onOpen;
+          if (onOpen !== null) {
+            fx.call(onOpen);
+          }
+        } else if (!d.open && announced) {
+          announced = false;
+          const onClose = d.config.onClose;
+          if (onClose !== null) {
+            fx.call(onClose);
+          }
+        }
+      },
+      terminal(fx) {
+        disarm();
+        cancelLeave();
+        syncGroup(null);
+        restoreFocus(fx);
+        if (annotated !== null) {
+          const trigger = annotated;
+          annotated = null;
+          fx.removeAttr(trigger, "aria-haspopup");
+          fx.removeAttr(trigger, "aria-expanded");
+        }
+        if (revealed) {
+          fx.removeClass(panel, "is-open", "is-leaving");
+          layer.leaveEnd?.(fx);
+          fx.setProp(panel, "hidden", true);
+          revealed = false;
+        }
       },
     });
-    hooks?.onReveal?.();
-    current.trigger?.setAttribute("aria-expanded", "true");
-    current.trigger?.setAttribute("aria-haspopup", String(current.haspopup ?? "true"));
-    // Capture the restore target before moving initial focus, so it records
-    // what was focused at open time rather than initialFocus itself.
-    const returnFocus = current.returnFocus;
-    const initialFocus = current.initialFocus;
-    const willMoveFocusIn = initialFocus?.isConnected === true;
-    if (returnFocus instanceof HTMLElement) {
-      restoreFocus = returnFocus;
-    } else if (returnFocus === true || willMoveFocusIn) {
-      const active = document.activeElement;
-      restoreFocus = active instanceof HTMLElement ? active : null;
-    }
-    if (initialFocus?.isConnected === true) {
-      initialFocus.focus();
-      movedFocusIn = true;
-    }
-    armListenersDeferred();
-    current.onOpen?.();
-  };
 
-  const hide = (): void => {
-    if (!open) {
-      return;
-    }
-    open = false;
-    removeListeners();
-    current.trigger?.setAttribute("aria-expanded", "false");
-    // Synchronous — focus must not wait for the fade. Blur as a fallback when
-    // the moved-in focus has no restore target left.
-    const target = restoreFocus;
-    const didMoveFocusIn = movedFocusIn;
-    restoreFocus = null;
-    movedFocusIn = false;
-    if (target?.isConnected) {
-      target.focus();
-    } else if (didMoveFocusIn) {
-      const active = document.activeElement;
-      if (active instanceof HTMLElement && panel.contains(active)) {
-        active.blur();
-      }
-    }
-    // A re-show cancels this settle (clearLeave), so it can't yank a
-    // re-shown panel shut.
-    runTransition(panel, {
-      change: () => {
-        panel.classList.remove("is-open");
-        panel.classList.add("is-leaving");
+    const member: Member = {
+      isOpen: () => !binding.ended && driver.state.open,
+      close: () => {
+        const d = driver.state;
+        if (d.open) {
+          driver.set({ ...d, open: false, hides: d.hides + 1 });
+        }
       },
-      settled: () => {
-        panel.classList.remove("is-leaving");
-        hooks?.onLeaveEnd?.();
-        panel.hidden = true;
+      flush: () => {
+        driver.flush();
       },
-    });
-    current.onClose?.();
-  };
+    };
 
-  return {
-    show,
-    hide,
-    toggle(): void {
-      if (open) {
-        hide();
-      } else {
-        show();
-      }
-    },
-    get isOpen(): boolean {
-      return open;
-    },
-    get el(): HTMLElement {
-      return panel;
-    },
-    setOptions(patch: PopupOptionsPatch): void {
-      Object.assign(current, patch);
-      syncGroup();
-      if (open) {
-        // Deferred for the same reason as show(): must not install a listener
-        // the same click trips.
-        removeListeners();
-        armListenersDeferred();
-      }
-    },
-    dispose(): void {
-      hide();
-      removeListeners();
-      // hide() only flips aria-expanded to "false"; the trigger no longer
-      // owns a popup at all, so drop the ARIA it advertised entirely.
-      current.trigger?.removeAttribute("aria-haspopup");
-      current.trigger?.removeAttribute("aria-expanded");
-      if (groupName !== undefined) {
-        leaveGroup(groupName, entry);
-        groupName = undefined;
-      }
-    },
-  };
+    const controller: PopupController = {
+      show,
+      hide,
+      toggle(): void {
+        if (driver.state.open) {
+          hide();
+        } else {
+          show();
+        }
+      },
+      get isOpen(): boolean {
+        return !binding.ended && driver.state.open;
+      },
+      get el(): HTMLElement {
+        return panel;
+      },
+      setOptions(patch: PopupOptionsPatch): void {
+        if (binding.ended) {
+          return;
+        }
+        // Read before the state, so a getter that re-enters commits first.
+        const entries = untracked(() => readPatch(patch, normalizeKey));
+        const d = driver.state;
+        const next = mergeOptions(d.config, entries);
+        // A getter that disposed the controller released the driver, which then ignores this.
+        if (next !== d.config) {
+          driver.commit({ ...d, config: next });
+        }
+      },
+      dispose: binding.dispose,
+    };
+
+    return {
+      controller: {
+        controller,
+        kick: () => {
+          driver.kick();
+        },
+      },
+      start: () => {
+        driver.flush();
+      },
+      release: () => {
+        driver.release();
+      },
+    };
+  });
 }

@@ -6,7 +6,7 @@ ui-primitives adds accessible toasts, tooltips, popovers, dialogs and focus hand
 
 ![A demo settings page built with ui-primitives and an example skin, showing an open modal with a popover menu, a tooltip, two toasts, an expanded disclosure, a theme switch and skeleton rows](docs/images/header.png)
 
-It replaces the timers, focus handling, ARIA attributes and dismiss logic you would otherwise write around `<dialog>`, live regions and positioned panels. It ships as ESM-only TypeScript source and has one runtime dependency, [`@cplieger/reactive`](https://github.com/cplieger/reactive). It needs TypeScript 6 or later, a bundler that compiles TypeScript source, and Chrome or Edge 97, Firefox 104 or Safari 15.4 or later. It is licensed under Apache-2.0.
+It replaces the timers, focus handling, ARIA attributes and dismiss logic you would otherwise write around `<dialog>`, live regions and positioned panels. It ships as ESM-only TypeScript source and has one runtime dependency, [`@cplieger/reactive`](https://github.com/cplieger/reactive). It needs TypeScript 6 or later, a bundler that compiles TypeScript source, and Chrome or Edge 132, Firefox 133 or Safari 26 or later. It is licensed under Apache-2.0.
 
 ## Why use it
 
@@ -16,7 +16,7 @@ ui-primitives is built for apps that draw their interface with plain DOM code an
 - You style it with ordinary CSS, through `--uip-*` custom properties and rules for the `.uip-*` classes.
 - `ask()` replaces `window.confirm` and `window.prompt` with a dialog you can style and `await`.
 - Toasts and screen-reader announcements keep working inside an open modal `<dialog>`.
-- Importing a module touches no DOM. A bundler can drop every primitive you do not import.
+- The root entry, `./dialog`, `./modal`, `./ask`, `./announce`, `./toast`, `./popup`, `./popover` and `./tooltip` start watching the `open` attribute of dialogs when they load, so they need a DOM at import. `./disclosure`, `./focus-trap`, `./roving-focus`, `./skeleton`, `./theme`, `./view-transition` and `./transition` touch no DOM at import. A bundler can drop every primitive you do not import.
 - Animations respect `prefers-reduced-motion`.
 
 Consider [Radix Primitives](https://www.radix-ui.com/primitives/docs/overview/introduction) if you build in React. Its unstyled components follow the WAI-ARIA patterns and handle focus and keyboard navigation. Consider [Floating UI](https://floating-ui.com/docs/getting-started) if you need only to anchor a floating element to its trigger, in any framework or none.
