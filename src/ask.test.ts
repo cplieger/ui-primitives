@@ -505,3 +505,98 @@ describe("ask — preemption arms no stray leave lifecycle", () => {
     await expect(p2).resolves.toBeNull();
   });
 });
+
+describe("ask — a gesture answers the question its dialog shows", () => {
+  it("an Escape inside the dialog's opening, after a newer unshown ask, leaves the newer one live", async () => {
+    const first = ask("First?");
+    click(booleanDlg(), ".uip-ask-cancel");
+    await expect(first).resolves.toBe(false);
+    vi.advanceTimersByTime(400);
+    const dlg = booleanDlg();
+    const settled: boolean[] = [];
+    dlg.addEventListener(
+      "focusin",
+      () => {
+        void ask("Second?").then((v) => settled.push(v));
+        dlg.dispatchEvent(new Event("cancel", { cancelable: true }));
+      },
+      { once: true },
+    );
+    const third = ask("Third?");
+    await expect(third).resolves.toBe(false);
+    await Promise.resolve();
+
+    expect(settled).toEqual([]);
+    expect(dlg.open).toBe(true);
+    expect(dlg.querySelector(".uip-ask-msg")?.textContent).toBe("Second?");
+    click(dlg, ".uip-ask-ok");
+    await Promise.resolve();
+    expect(settled).toEqual([true]);
+  });
+});
+
+describe("ask — an ask() started from code the outer call runs", () => {
+  it("one from an option getter runs first, and the outer call preempts it", async () => {
+    let inner: Promise<boolean> | undefined;
+    const outer = ask("outer", {
+      get title(): string {
+        inner ??= ask("inner");
+        return "T";
+      },
+    });
+    await expect(inner).resolves.toBe(false);
+    expect(booleanDlg().querySelector(".uip-ask-msg")?.textContent).toBe("outer");
+    click(booleanDlg(), ".uip-ask-ok");
+    await expect(outer).resolves.toBe(true);
+  });
+
+  it("one from a focus listener the outer call reaches is the later call and preempts it", async () => {
+    let inner: Promise<boolean> | undefined;
+    const onFocus = (): void => {
+      inner ??= ask("inner");
+    };
+    document.addEventListener("focusin", onFocus, true);
+    const outer = ask("outer");
+    document.removeEventListener("focusin", onFocus, true);
+    await expect(outer).resolves.toBe(false);
+    expect(inner).toBeDefined();
+    expect(booleanDlg().querySelector(".uip-ask-msg")?.textContent).toBe("inner");
+    click(booleanDlg(), ".uip-ask-ok");
+    await expect(inner).resolves.toBe(true);
+  });
+});
+
+describe("ask — options are read once", () => {
+  it("reads each option getter once, at the call", async () => {
+    const reads = { title: 0, confirmLabel: 0 };
+    const p = ask("Read?", {
+      get title(): string {
+        reads.title++;
+        return "T";
+      },
+      get confirmLabel(): string {
+        reads.confirmLabel++;
+        return "Yes";
+      },
+    });
+    click(booleanDlg(), ".uip-ask-ok");
+    await expect(p).resolves.toBe(true);
+    vi.advanceTimersByTime(400);
+
+    expect(reads).toEqual({ title: 1, confirmLabel: 1 });
+  });
+});
+
+describe("ask — a close the browser makes", () => {
+  it("resolves the question with its cancel value at the next microtask", async () => {
+    let settled: boolean | null = null;
+    void ask("Delete?").then((v) => {
+      settled = v;
+    });
+    booleanDlg().close();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+  });
+});

@@ -28,7 +28,8 @@ button.addEventListener("click", () => {
 
 ## API
 
-- `rovingFocus(container, selector, opts?)` returns `{ focusFirst(); refresh(); dispose() }`.
+- `rovingFocus(container, selector, opts?)` returns `{ focusFirst(); refresh(); dispose() }`. After `dispose()`, `focusFirst()` and `refresh()` do nothing. A `dispose()` from code the controller is calling, such as an item's attribute callback, ends the controller at once, and its teardown completes as soon as your code returns.
+- A controller made under a `@cplieger/reactive` owner, such as `createRoot`, a `bindList` row or an effect created under one, ends with that owner as `dispose()` would, and a later `dispose()` does nothing. Setup and every method run untracked, never under that owner. When the owner ends a controller, the handlers its teardown reaches run inside reactive's disposal, where creating an effect throws.
 - `RovingFocusOptions` = `{ orientation?: "vertical" | "horizontal"; wrap?; homeEnd?; activate? }`. By default navigation is vertical and wraps, Home and End work, and Enter and Space activate an item.
 
 ## Notes

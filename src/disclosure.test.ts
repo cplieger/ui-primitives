@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 
+import { createRoot } from "@cplieger/reactive";
+
 import { createDisclosure } from "./disclosure.js";
 
 afterEach(() => {
@@ -599,6 +601,136 @@ describe("createDisclosure: a superseded settle must not fire late", () => {
       region.dispatchEvent(new Event("transitionend"));
       expect(region.style.height).toBe("42px");
     } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("createDisclosure: ends with the reactive owner it was made under", () => {
+  it("disposing the root unwires the trigger, and dispose() after that is a no-op", () => {
+    const { trigger, region } = mount();
+    const [disposeRoot, ctrl] = createRoot(
+      (dispose) => [dispose, createDisclosure(trigger, region, { animate: false })] as const,
+    );
+
+    disposeRoot();
+    trigger.click();
+    expect(ctrl.isOpen).toBe(false);
+
+    region.style.height = "5px";
+    ctrl.dispose();
+    expect(region.style.height).toBe("5px");
+  });
+});
+
+/** Call `make` while a reactive owner is being disposed; return what it threw. */
+function thrownWhileOwnerCloses(make: () => unknown): unknown {
+  let thrown: unknown;
+  createRoot((dispose, owner) => {
+    owner.onDispose(() => {
+      try {
+        make();
+      } catch (error) {
+        thrown = error;
+      }
+    });
+    dispose();
+  });
+  return thrown;
+}
+
+describe("createDisclosure: made while its owner is being disposed", () => {
+  it("throws before touching the trigger or the region", () => {
+    const { trigger, region } = mount("div");
+    const add = vi.spyOn(trigger, "addEventListener");
+
+    expect(String(thrownWhileOwnerCloses(() => createDisclosure(trigger, region)))).toMatch(
+      /cannot create a root under an owner that is being disposed/,
+    );
+    expect(add).not.toHaveBeenCalled();
+    expect(region.id).toBe("");
+    expect(region.className).toBe("");
+    expect(region.hasAttribute("aria-hidden")).toBe(false);
+    expect(trigger.getAttributeNames()).toEqual([]);
+  });
+});
+
+describe("createDisclosure: its owner disposed while the disclosure is being set up", () => {
+  it("unwires once after setup, so the trigger no longer toggles it", () => {
+    let disposeOwner = (): void => undefined;
+    class OwnerClosingTrigger extends HTMLElement {
+      static observedAttributes = ["aria-controls"];
+      attributeChangedCallback(): void {
+        disposeOwner();
+      }
+    }
+    customElements.define("uip-test-owner-closing-trigger", OwnerClosingTrigger);
+    const { trigger, region } = mount("uip-test-owner-closing-trigger");
+
+    const ctrl = createRoot((dispose) => {
+      disposeOwner = dispose;
+      return createDisclosure(trigger, region, { animate: false });
+    });
+    trigger.click();
+    expect(ctrl.isOpen).toBe(false);
+    trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+    expect(ctrl.isOpen).toBe(false);
+
+    region.style.height = "5px";
+    ctrl.dispose();
+    expect(region.style.height).toBe("5px");
+  });
+});
+
+describe("createDisclosure: after dispose()", () => {
+  it("open(), close() and toggle() do nothing", () => {
+    const { trigger, region } = mount();
+    const onToggle = vi.fn();
+    const ctrl = createDisclosure(trigger, region, { animate: false, onToggle });
+    ctrl.dispose();
+
+    ctrl.open();
+    ctrl.toggle();
+    expect(ctrl.isOpen).toBe(false);
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(region.inert).toBe(true);
+    ctrl.close();
+    expect(onToggle).not.toHaveBeenCalled();
+  });
+});
+
+describe("createDisclosure: disposed by its trigger while a mutator runs", () => {
+  let disposeOnExpanded: (() => void) | null = null;
+  customElements.define(
+    "uip-test-disposing-trigger",
+    class extends HTMLElement {
+      static observedAttributes = ["aria-expanded"];
+      attributeChangedCallback(): void {
+        const fn = disposeOnExpanded;
+        disposeOnExpanded = null;
+        fn?.();
+      }
+    },
+  );
+
+  it("an aria-expanded callback that disposes it leaves no transition timer and no onToggle", () => {
+    vi.useFakeTimers();
+    try {
+      const trigger = document.createElement("uip-test-disposing-trigger");
+      const region = document.createElement("div");
+      region.textContent = "body";
+      document.body.append(trigger, region);
+      const onToggle = vi.fn();
+      const ctrl = createDisclosure(trigger, region, { onToggle });
+      disposeOnExpanded = ctrl.dispose;
+
+      ctrl.open();
+
+      expect(vi.getTimerCount()).toBe(0);
+      expect(onToggle).not.toHaveBeenCalled();
+      expect(region.style.height).toBe("");
+    } finally {
+      disposeOnExpanded = null;
       vi.useRealTimers();
     }
   });

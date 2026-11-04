@@ -98,6 +98,7 @@
     "NOTICE",
     "README.md",
     "!src/**/*.test.ts",
-    "!src/**/*-setup.ts"
+    "!src/**/*-setup.ts",
+    "!src/**/test-helpers/**"
   ]
 }

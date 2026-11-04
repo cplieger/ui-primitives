@@ -7,7 +7,9 @@
  * @module
  */
 
-import { createPopupCore } from "./popup-core.js";
+import { untracked } from "@cplieger/reactive";
+
+import { createPopupCore, normalizePopupKey, normalizePopupOptions } from "./popup-core.js";
 import type { PopupController, PopupOptions } from "./popup-core.js";
 
 export { closePopupGroup } from "./popup-core.js";
@@ -16,5 +18,6 @@ export type { PopupController, PopupOptions, PopupOptionsPatch } from "./popup-c
 /** Wire `panel` into a revealable, light-dismissing popup. Never positions or
  *  removes it from the DOM — the caller owns the element, placement, and motion. */
 export function createPopup(panel: HTMLElement, opts?: PopupOptions): PopupController {
-  return createPopupCore(panel, opts);
+  const config = untracked(() => normalizePopupOptions(opts));
+  return createPopupCore(panel, config, { stateClass: "uip-popup" }, normalizePopupKey).controller;
 }

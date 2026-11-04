@@ -11,6 +11,10 @@
  * @module
  */
 
+import { untracked } from "@cplieger/reactive";
+
+import { createDriver, ownedBinding } from "./owner.js";
+
 /** The standard focusable-element selector. Elements are additionally filtered
  *  to those that are rendered (see `isVisible`) at each Tab. */
 const FOCUSABLE =
@@ -46,86 +50,108 @@ export interface FocusTrapOptions {
 
 /** Trap Tab focus within `container`. Returns a release function. */
 export function trapFocus(container: HTMLElement, opts?: FocusTrapOptions): () => void {
-  const previousFocus =
-    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const o = untracked(() => ({
+    initialFocus: opts?.initialFocus ?? null,
+    returnFocus: opts?.returnFocus ?? true,
+  }));
 
   const getFocusable = (): HTMLElement[] =>
     [...container.querySelectorAll<HTMLElement>(FOCUSABLE)].filter(isVisible);
 
-  const initialFocusables = getFocusable();
-  if (initialFocusables.length === 0) {
-    // Fail closed: with nothing focusable, the container itself holds focus so
-    // Tab can't escape to the page behind it.
-    container.tabIndex = -1;
-    container.focus();
-  } else {
-    const initialFocus = opts?.initialFocus ?? null;
-    if (initialFocus !== null) {
-      // Only focus an explicit initialFocus target that is still in the
-      // document. A detached node (e.g. a returnFocus opener chained from a
-      // modal that has since been removed) is a safe no-op, not a throw.
-      if (initialFocus.isConnected) {
-        initialFocus.focus();
+  return ownedBinding((binding) => {
+    const previousFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    let listening = false;
+    let entered = false;
+
+    /** Where Tab must go instead of the browser's default, or null to leave it. */
+    const redirect = (e: KeyboardEvent): HTMLElement | null => {
+      const focusable = getFocusable();
+      const active = document.activeElement;
+      const inside = active instanceof Node && container.contains(active);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (first === undefined || last === undefined) {
+        // No focusable targets: pin focus to the container, never let Tab out.
+        return container;
       }
-    } else {
-      initialFocusables[0]?.focus();
-    }
-  }
-
-  const onKeyDown = (e: KeyboardEvent): void => {
-    if (e.key !== "Tab") {
-      return;
-    }
-    const focusable = getFocusable();
-    const active = document.activeElement;
-    const inside = active instanceof Node && container.contains(active);
-
-    if (focusable.length === 0) {
-      // No focusable targets — pin focus to the container, never let Tab out.
-      e.preventDefault();
-      container.focus();
-      return;
-    }
-
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (first === undefined || last === undefined) {
-      return;
-    }
-
-    if (!inside) {
-      // Focus is outside the container (it escaped, or was never inside).
-      // Pull it back to the appropriate edge.
-      e.preventDefault();
-      (e.shiftKey ? last : first).focus();
-      return;
-    }
-    if (e.shiftKey) {
-      if (active === first) {
-        e.preventDefault();
-        last.focus();
+      if (!inside) {
+        // Focus escaped, or was never inside: pull it back to the edge.
+        return e.shiftKey ? last : first;
       }
-    } else if (active === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
+      if (e.shiftKey ? active === first : active === last) {
+        return e.shiftKey ? last : first;
+      }
+      return null;
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Tab") {
+        return;
+      }
+      driver.act((fx) => {
+        const target = redirect(e);
+        if (target !== null) {
+          e.preventDefault();
+          fx.focus(target);
+        }
+      });
+    };
+    // Capture phase on `document` (not `container`): focus that is currently
+    // outside the container still routes through here so it can be redirected in.
+    const listen = (on: boolean): void => {
+      if (listening !== on) {
+        listening = on;
+        if (on) {
+          document.addEventListener("keydown", onKey, true);
+        } else {
+          document.removeEventListener("keydown", onKey, true);
+        }
+      }
+    };
 
-  // Capture phase on `document` (not `container`): focus that is currently
-  // outside the container still routes through here so it can be redirected in.
-  document.addEventListener("keydown", onKeyDown, true);
+    const driver = createDriver<null>({
+      initial: null,
+      realize(fx) {
+        listen(true);
+        if (entered) {
+          return;
+        }
+        entered = true;
+        const focusable = getFocusable();
+        if (focusable.length === 0) {
+          // Fail closed: with nothing focusable, the container itself holds
+          // focus so Tab can't escape to the page behind it.
+          // The attribute: a div's tabIndex property already reads -1 without it.
+          fx.setAttr(container, "tabindex", "-1");
+          fx.focus(container);
+          return;
+        }
+        // A detached initialFocus (an opener chained from a removed modal) is
+        // a safe no-op, not a throw.
+        const target = o.initialFocus ?? focusable[0];
+        if (target?.isConnected === true) {
+          fx.focus(target);
+        }
+      },
+      terminal(fx) {
+        listen(false);
+        const target =
+          o.returnFocus === true ? previousFocus : o.returnFocus === false ? null : o.returnFocus;
+        // Focusing a detached node throws in some engines and no-ops in others.
+        if (target?.isConnected === true) {
+          fx.focus(target);
+        }
+      },
+    });
 
-  return (): void => {
-    document.removeEventListener("keydown", onKeyDown, true);
-    const returnFocus = opts?.returnFocus ?? true;
-    if (returnFocus === false) {
-      return;
-    }
-    const target = returnFocus instanceof HTMLElement ? returnFocus : previousFocus;
-    // Only restore focus to a target that is still in the document; focusing a
-    // detached node throws in some engines and silently no-ops in others.
-    if (target?.isConnected) {
-      target.focus();
-    }
-  };
+    return {
+      controller: binding.dispose,
+      start: () => {
+        driver.flush();
+      },
+      release: () => {
+        driver.release();
+      },
+    };
+  });
 }

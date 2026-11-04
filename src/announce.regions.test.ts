@@ -44,7 +44,7 @@ function elementsAddedOrRemoved(fn: () => void): Node[] {
 }
 
 describe("announce into a modal's own pair", () => {
-  it("lands in the open modal's polite region and adds or moves no region, then or when the text lands", () => {
+  it("lands in the open modal's and the root's polite regions and adds or moves no region, then or when the text lands", () => {
     mountLiveRegions(document.body);
     const modal = createModal(document.createElement("div"));
     modal.open();
@@ -61,25 +61,45 @@ describe("announce into a modal's own pair", () => {
       }),
     ).toEqual([]);
     expect(target.textContent).toBe("x");
-    expect(politeIn(document.body).textContent).toBe("");
+    expect(politeIn(document.body).textContent).toBe("x");
   });
 
-  it("re-delivers to the root when the modal closes before the text lands", () => {
+  it("lands in the root, cleared with the modal's, when the modal closes before the text lands", () => {
     mountLiveRegions(document.body);
     const modal = createModal(document.createElement("div"));
     modal.open();
     const inModal = politeIn(modal.el);
+    const root = politeIn(document.body);
+    announce("earlier");
+    vi.advanceTimersByTime(100);
+    expect(root.textContent).toBe("earlier");
 
     announce("saved");
     vi.advanceTimersByTime(50);
+    // The landing runs in the close's own task (fake timers): the close's record is not yet delivered.
     modal.dispose();
     vi.advanceTimersByTime(50);
     expect(inModal.textContent).toBe("");
-
-    const root = politeIn(document.body);
-    expect(root.textContent).toBe("");
-    vi.advanceTimersByTime(100);
     expect(root.textContent).toBe("saved");
+  });
+
+  it("starts over, clearing every live region, when a modal opens before the text lands", () => {
+    mountLiveRegions(document.body);
+    const root = politeIn(document.body);
+    const modal = createModal(document.createElement("div"));
+    const inModal = politeIn(modal.el);
+    inModal.textContent = "same";
+
+    announce("same");
+    vi.advanceTimersByTime(50);
+    modal.open();
+    vi.advanceTimersByTime(50);
+    expect(inModal.textContent).toBe("");
+    expect(root.textContent).toBe("");
+
+    vi.advanceTimersByTime(100);
+    expect(inModal.textContent).toBe("same");
+    expect(root.textContent).toBe("same");
   });
 });
 

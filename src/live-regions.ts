@@ -43,11 +43,9 @@ export function regionsOf(host: HTMLElement): RegionPair | undefined {
   return mount !== undefined && isInside(mount.pair, host) ? mount.pair : undefined;
 }
 
-/** Hold `host`'s polite and assertive pair as a new owner, appending a pair
- *  as its last two children unless one is still inside it. Returns this
- *  owner's release: idempotent, it drops only this owner, and the pair leaves
- *  `host` when its last owner releases. */
-export function acquireRegions(host: HTMLElement): () => void {
+/** `host`'s mount, with a pair appended as its last two children unless one is
+ *  still inside it. */
+function mount(host: HTMLElement): Mount {
   let mount = mounts.get(host);
   if (mount === undefined) {
     mount = { pair: appendPair(host), owners: new Set() };
@@ -56,7 +54,24 @@ export function acquireRegions(host: HTMLElement): () => void {
     removePair(mount.pair);
     mount.pair = appendPair(host);
   }
-  const held = mount;
+  return mount;
+}
+
+/** The owner that never releases. */
+const forLife = Symbol("live-region owner for the host's life");
+
+/** Give `host` a pair for the rest of its life, appending one as its last two
+ *  children unless one is still inside it. */
+export function keepRegions(host: HTMLElement): void {
+  mount(host).owners.add(forLife);
+}
+
+/** Hold `host`'s polite and assertive pair as a new owner, appending a pair
+ *  as its last two children unless one is still inside it. Returns this
+ *  owner's release: idempotent, it drops only this owner, and the pair leaves
+ *  `host` when its last owner releases. */
+export function acquireRegions(host: HTMLElement): () => void {
+  const held = mount(host);
   const owner = Symbol("live-region owner");
   held.owners.add(owner);
   return () => {

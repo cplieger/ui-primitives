@@ -22,6 +22,6 @@
   },
   "publish": {
     "include": ["LICENSE", "NOTICE", "README.md", "src/**/*.ts", "css/**/*.css"],
-    "exclude": ["src/**/*.test.ts", "src/**/*-setup.ts"]
+    "exclude": ["src/**/*.test.ts", "src/**/*-setup.ts", "src/**/test-helpers/**"]
   }
 }

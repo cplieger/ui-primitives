@@ -2,7 +2,8 @@
  * transition.ts — Run one CSS transition on an element and finalize it once it
  * ends. A transition needs its start state flushed before the change, or the
  * browser coalesces both writes into one frame and nothing animates;
- * `runTransition` does that flush. Every primitive's leave lifecycle uses it.
+ * `runTransition` does that flush. The primitives' fades follow the same
+ * settle rule through their own private watcher.
  * @module
  */
 
@@ -33,6 +34,34 @@ export interface TransitionSpec {
  *  so a settle armed against a node that is then dropped retains nothing. */
 const inFlight = new WeakMap<HTMLElement, () => void>();
 
+/** @internal Arm one settle on `el`: the first `transitionend` whose target is
+ *  `el`, or the fallback ceiling, whichever comes first. Fires once; returns
+ *  its cancel. */
+export function watchSettle(el: HTMLElement, onSettled: () => void): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const detach = (): void => {
+    el.removeEventListener("transitionend", onEnd);
+    if (timer !== null) {
+      clearTimeout(timer);
+      timer = null;
+    }
+  };
+  // Detaching (not a latch) is what makes this fire once: one change can end
+  // several transitions, and by the second event the listener is gone.
+  const fire = (): void => {
+    detach();
+    onSettled();
+  };
+  const onEnd = (e: TransitionEvent): void => {
+    if (e.target === el) {
+      fire();
+    }
+  };
+  el.addEventListener("transitionend", onEnd);
+  timer = setTimeout(fire, SETTLE_FALLBACK_MS);
+  return detach;
+}
+
 /**
  * Drop the settle pending on `el` WITHOUT running it. For a caller that is
  * taking the element somewhere the pending callback must not follow: a reopen
@@ -48,48 +77,43 @@ export function cancelTransition(el: HTMLElement): void {
 }
 
 /**
- * Run one CSS transition on `el` to completion. `spec.settled` runs once on
- * the first `transitionend` targeting `el` directly, or after the fallback
- * ceiling. Drops any settle already pending on `el` first, so a caller never
- * has to ask whether it still owns the element's transition.
+ * Run one CSS transition on `el`: `settled` runs once, on the first
+ * `transitionend` targeting `el` or after the fallback ceiling. `change` and
+ * `settled` are read once, first, and any settle pending on `el` is dropped.
+ * A `cancelTransition` or `runTransition` on `el` from inside `change` takes
+ * the element and this call arms nothing; a throw from `change` arms nothing.
  */
 export function runTransition(el: HTMLElement, spec: TransitionSpec): void {
+  const change = spec.change;
+  const settled = spec.settled;
   cancelTransition(el);
 
   // Reading a layout property forces the engine to resolve the style written
   // so far; without it the change below lands in the same frame.
   el.getBoundingClientRect();
 
-  spec.change();
-
-  const settled = spec.settled;
-  if (settled === undefined) {
+  const reservation = (): void => undefined;
+  inFlight.set(el, reservation);
+  try {
+    change();
+  } catch (error) {
+    if (inFlight.get(el) === reservation) {
+      inFlight.delete(el);
+    }
+    throw error;
+  }
+  if (inFlight.get(el) !== reservation) {
     return;
   }
-
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  const detach = (): void => {
-    el.removeEventListener("transitionend", onEnd);
-    if (timer !== null) {
-      clearTimeout(timer);
-      timer = null;
-    }
-  };
-  // Detaching the listener (not a latch) is what makes this run once: a
-  // single change can end several transitions (opacity + transform both
-  // animating), and by the second event the listener is already gone.
-  const finish = (): void => {
+  if (settled === undefined) {
     inFlight.delete(el);
-    detach();
-    settled();
-  };
-  const onEnd = (e: TransitionEvent): void => {
-    if (e.target === el) {
-      finish();
+    return;
+  }
+  const cancel = watchSettle(el, () => {
+    if (inFlight.get(el) === cancel) {
+      inFlight.delete(el);
     }
-  };
-
-  el.addEventListener("transitionend", onEnd);
-  timer = setTimeout(finish, SETTLE_FALLBACK_MS);
-  inFlight.set(el, detach);
+    settled();
+  });
+  inFlight.set(el, cancel);
 }

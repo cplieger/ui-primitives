@@ -1,6 +1,9 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 
+import { createRoot } from "@cplieger/reactive";
+
 import { rovingFocus } from "./roving-focus.js";
+import { reactingElement } from "./test-helpers/reacting.js";
 
 afterEach(() => {
   document.body.replaceChildren();
@@ -251,5 +254,141 @@ describe("rovingFocus: nothing holds focus at all", () => {
 
     expect(document.activeElement).toBe(items[0]);
     expect(items.map((i) => i.getAttribute("tabindex"))).toEqual(["0", "-1", "-1"]);
+  });
+});
+
+describe("rovingFocus: ends with the reactive owner it was made under", () => {
+  it("disposing the root stops arrow-key handling, and dispose() after that is a no-op", () => {
+    const { container, items } = menu(["a", "b", "c"]);
+    const [disposeRoot, nav] = createRoot(
+      (dispose) => [dispose, rovingFocus(container, ".item")] as const,
+    );
+    items[0]?.focus();
+
+    disposeRoot();
+    expect(pressKey(container, "ArrowDown").defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(items[0]);
+
+    const remove = vi.spyOn(container, "removeEventListener");
+    nav.dispose();
+    expect(remove).not.toHaveBeenCalled();
+  });
+});
+
+/** Call `make` while a reactive owner is being disposed; return what it threw. */
+function thrownWhileOwnerCloses(make: () => unknown): unknown {
+  let thrown: unknown;
+  createRoot((dispose, owner) => {
+    owner.onDispose(() => {
+      try {
+        make();
+      } catch (error) {
+        thrown = error;
+      }
+    });
+    dispose();
+  });
+  return thrown;
+}
+
+describe("rovingFocus: made while its owner is being disposed", () => {
+  it("throws before setting a tabindex or listening for keys", () => {
+    const { container, items } = menu(["a", "b"]);
+    const add = vi.spyOn(container, "addEventListener");
+
+    expect(String(thrownWhileOwnerCloses(() => rovingFocus(container, ".item")))).toMatch(
+      /cannot create a root under an owner that is being disposed/,
+    );
+    expect(add).not.toHaveBeenCalled();
+    expect(items.map((i) => i.hasAttribute("tabindex"))).toEqual([false, false]);
+    items[0]?.focus();
+    expect(pressKey(container, "ArrowDown").defaultPrevented).toBe(false);
+  });
+});
+
+describe("rovingFocus: after dispose()", () => {
+  it("focusFirst() and refresh() do nothing", () => {
+    const { container, items } = menu(["a", "b", "c"]);
+    const nav = rovingFocus(container, ".item");
+    items[2]?.focus();
+    nav.dispose();
+
+    nav.focusFirst();
+    expect(document.activeElement).toBe(items[2]);
+    items.forEach((i) => {
+      i.setAttribute("tabindex", "0");
+    });
+    nav.refresh();
+    expect(items.map((i) => i.getAttribute("tabindex"))).toEqual(["0", "0", "0"]);
+  });
+});
+
+describe("rovingFocus: disposed from an item's tabindex callback", () => {
+  function reactingMenu(n: number): {
+    container: HTMLElement;
+    items: ReturnType<typeof reactingElement>[];
+  } {
+    const container = document.createElement("div");
+    const items = Array.from({ length: n }, () => {
+      const item = reactingElement();
+      item.className = "item";
+      container.append(item);
+      return item;
+    });
+    document.body.append(container);
+    return { container, items };
+  }
+
+  it("refresh() writes no tabindex after the write whose callback disposed it", () => {
+    const { container, items } = reactingMenu(2);
+    const nav = rovingFocus(container, ".item");
+    const added = [reactingElement(), reactingElement()];
+    let disposed = false;
+    const late: string[] = [];
+    for (const item of [...items, ...added]) {
+      item.className = "item";
+      item.onAttr = (name) => {
+        if (name !== "tabindex") {
+          return;
+        }
+        if (disposed) {
+          late.push(item.getAttribute("tabindex") ?? "");
+          return;
+        }
+        disposed = true;
+        nav.dispose();
+      };
+    }
+    container.append(...added);
+
+    nav.refresh();
+
+    expect(disposed).toBe(true);
+    expect(late).toEqual([]);
+  });
+
+  it("a focusin writes no tabindex after the write whose callback disposed it", () => {
+    const { container, items } = reactingMenu(3);
+    const nav = rovingFocus(container, ".item");
+    let disposed = false;
+    const late: string[] = [];
+    for (const item of items) {
+      item.onAttr = (name) => {
+        if (name !== "tabindex") {
+          return;
+        }
+        if (disposed) {
+          late.push(item.getAttribute("tabindex") ?? "");
+          return;
+        }
+        disposed = true;
+        nav.dispose();
+      };
+    }
+
+    items[1]?.focus();
+
+    expect(disposed).toBe(true);
+    expect(late).toEqual([]);
   });
 });

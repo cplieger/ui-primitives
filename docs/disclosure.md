@@ -23,8 +23,11 @@ d.isOpen; // boolean
 
 ## API
 
-- `createDisclosure(trigger, region, opts?)` returns `{ open(); close(); toggle(); readonly isOpen; dispose() }`. `trigger` is an `HTMLElement` or `null`, which selects region-only mode below.
-- `DisclosureOptions` = `{ open?; animate?; onToggle?: (open: boolean, source: "user" | "api") => void }`. By default the region starts closed and animates. `source` is `"user"` for a trigger toggle and `"api"` for a controller call, which lets an auto-collapse state machine record that the user took over.
+- `createDisclosure(trigger, region, opts?)` returns `{ open(); close(); toggle(); readonly isOpen; dispose() }`. `trigger` is an `HTMLElement` or `null`, which selects region-only mode below. After `dispose()`, `open()`, `close()` and `toggle()` do nothing. A `dispose()` from code the controller is calling, such as a custom trigger's attribute callback, ends the controller at once, and its teardown completes as soon as your code returns. A disclosure disposed mid-change keeps its committed state fully reflected and settles its height, with no tween and no `onToggle`.
+- A controller made under a `@cplieger/reactive` owner, such as `createRoot`, a `bindList` row or an effect created under one, ends with that owner as `dispose()` would, and a later `dispose()` does nothing. Setup and every method run untracked, never under that owner. When the owner ends a controller, the handlers its teardown reaches run inside reactive's disposal, where creating an effect throws.
+- `DisclosureOptions` = `{ open?; animate?; onToggle?: (open: boolean, source: "user" | "api") => void }`. By default the region starts closed and animates. `source` is `"user"` for a trigger toggle and `"api"` for a controller call, which lets an auto-collapse state machine record that the user took over. `onToggle` fires only when the state differs from the last one it reported, so a change your callback undid before the controller finished applying it reports nothing and does not replay its animation.
+- A method called from code the controller is calling records the new state at once, and `isOpen` reads it. The controller applies it, then notifies, as soon as your code returns.
+- Errors thrown by your callbacks never interrupt the controller. It finishes the change and notifies, then throws them from the call that started the work, one as itself and several as an `AggregateError`. From an event or a timer, the browser reports them as uncaught.
 
 ### Region-only mode (`trigger: null`)
 

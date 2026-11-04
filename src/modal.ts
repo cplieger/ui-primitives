@@ -2,18 +2,17 @@
  * modal.ts — Native-`<dialog>` modal built from caller content. `dialog` wraps
  * an EXISTING `<dialog>`; `modal` builds one from arbitrary content. Adds ARIA
  * wiring, drag-safe backdrop dismissal, the shared fade-out lifecycle, and an
- * iOS-safe scroll-lock — iOS Safari ignores `overflow:hidden` on the root for
- * touch-scroll, so the body is pinned via position:fixed at the negated
- * scroll offset instead.
+ * iOS-safe scroll-lock (`scroll-lock.ts`).
  *
  * @module
  */
 
-import { el } from "@cplieger/reactive";
+import { el, untracked } from "@cplieger/reactive";
 
-import { closeDialog, openDialog, wireBackdropDismiss } from "./dialog.js";
-import { endOpen } from "./modal-host.js";
-import { cancelTransition } from "./transition.js";
+import { listenBackdrop } from "./dialog.js";
+import { dialogEngine, type DialogEngine, type DialogFacet } from "./dialog-engine.js";
+import { SUPERSEDED, ownedBinding } from "./owner.js";
+import { _resetScrollLockForTest, flushScrollLock, holdScrollLock } from "./scroll-lock.js";
 
 /** Everything {@link createModal} needs beyond the content: the dismissal
  *  gestures and their veto, the ARIA role and the label/description ids (both
@@ -44,7 +43,8 @@ export interface ModalOptions {
   /** Lock background page scroll while open, ref-counted across nested modals.
    *  iOS-safe (position:fixed body + scroll restore). Default `true`. */
   scrollLock?: boolean;
-  /** Invoked after this modal has finished closing. */
+  /** Invoked once each time the modal goes from shown to closed, whoever
+   *  closed it. */
   onClose?: () => void;
 }
 
@@ -53,83 +53,23 @@ export interface ModalOptions {
  *  lifetime of the thing it belongs to and disposing with it. */
 export interface ModalController {
   /** Show as a platform modal — focus containment, top layer and background
-   *  inerting come from `showModal()` — and take the scroll lock. Throws as
-   *  `openDialog` does, with the lock released: after `dispose()`, or while
-   *  the caller shows `el` as a popover. */
+   *  inerting come from `showModal()` — and take the scroll lock. Throws an
+   *  `InvalidStateError` once `dispose()` has begun; a refused `showModal()`
+   *  throws as `openDialog` does, with no scroll lock held. */
   open(): void;
   /** Close through the fade-out lifecycle. Programmatic, so `canDismiss` does
    *  not apply. */
   close(): void;
   /** The `<dialog>` this controller built, with the caller's content inside.
-   *  `dispose()` spends it: the node, and the caller's content with it, leaves
-   *  the document, while this reference keeps reading it back. */
+   *  `openDialog(el)` and `closeDialog(el)` drive this modal as `open()` and
+   *  `close()` do, and `createDialog(el)` throws. `dispose()` spends it: the
+   *  node, and the caller's content with it, leaves the document, while this
+   *  reference keeps reading it back. */
   readonly el: HTMLDialogElement;
   readonly isOpen: boolean;
   /** Unwire the dismissal listeners, close immediately (no fade), release the
    *  scroll lock, and remove the dialog from the document. */
   dispose(): void;
-}
-
-// Ref-counted: nested modals lock once, release only when the last closes.
-interface SavedBodyStyle {
-  position: string;
-  top: string;
-  left: string;
-  right: string;
-  width: string;
-  overflow: string;
-}
-let scrollLockCount = 0;
-let savedScrollY = 0;
-let savedBody: SavedBodyStyle | null = null;
-
-function applyScrollLock(): void {
-  scrollLockCount++;
-  if (scrollLockCount !== 1) {
-    return;
-  }
-  savedScrollY = window.scrollY;
-  const s = document.body.style;
-  savedBody = {
-    position: s.position,
-    top: s.top,
-    left: s.left,
-    right: s.right,
-    width: s.width,
-    overflow: s.overflow,
-  };
-  s.position = "fixed";
-  s.top = `-${savedScrollY}px`;
-  s.left = "0";
-  s.right = "0";
-  s.width = "100%";
-  s.overflow = "hidden";
-}
-
-function restoreBody(): void {
-  if (savedBody === null) {
-    return;
-  }
-  const s = document.body.style;
-  s.position = savedBody.position;
-  s.top = savedBody.top;
-  s.left = savedBody.left;
-  s.right = savedBody.right;
-  s.width = savedBody.width;
-  s.overflow = savedBody.overflow;
-  savedBody = null;
-}
-
-function releaseScrollLock(): void {
-  if (scrollLockCount === 0) {
-    return;
-  }
-  scrollLockCount--;
-  if (scrollLockCount !== 0) {
-    return;
-  }
-  restoreBody();
-  window.scrollTo(0, savedScrollY);
 }
 
 /** Auto-detect an accessible-name target: a descendant whose id ends `-title`. */
@@ -151,122 +91,156 @@ function autoDescribeId(content: HTMLElement): string | null {
  *  focus-return-to-opener; this adds ARIA wiring, drag-safe backdrop dismissal,
  *  the fade-out lifecycle, and an iOS-safe scroll-lock. */
 export function createModal(content: HTMLElement, opts?: ModalOptions): ModalController {
-  const closeOnBackdrop = opts?.closeOnBackdrop ?? true;
-  const closeOnEscape = opts?.closeOnEscape ?? true;
-  const role = opts?.role ?? "dialog";
-  const scrollLock = opts?.scrollLock ?? true;
-  const onClose = opts?.onClose;
+  const o = untracked(() => ({
+    closeOnBackdrop: opts?.closeOnBackdrop ?? true,
+    closeOnEscape: opts?.closeOnEscape ?? true,
+    role: opts?.role ?? "dialog",
+    scrollLock: opts?.scrollLock ?? true,
+    onClose: opts?.onClose,
+    canDismiss: opts?.canDismiss,
+    initialFocus: opts?.initialFocus ?? null,
+    labelledBy: opts?.labelledBy,
+    describedBy: opts?.describedBy,
+  }));
 
-  content.classList.add("uip-modal-dialog");
-  const dialog = el("dialog", { className: "uip-modal" }, content) as HTMLDialogElement;
-  if (role === "alertdialog") {
-    dialog.setAttribute("role", "alertdialog");
-    dialog.classList.add("uip-modal--alert");
-  }
-  const labelledBy = opts?.labelledBy ?? autoLabelId(content);
-  if (labelledBy !== null) {
-    dialog.setAttribute("aria-labelledby", labelledBy);
-  }
-  const describedBy = opts?.describedBy ?? autoDescribeId(content);
-  if (describedBy !== null) {
-    dialog.setAttribute("aria-describedby", describedBy);
-  }
-  document.body.appendChild(dialog);
+  return ownedBinding((binding) => {
+    const labelledBy = o.labelledBy ?? autoLabelId(content);
+    const describedBy = o.describedBy ?? autoDescribeId(content);
+    const dialog = el("dialog", {
+      className: o.role === "alertdialog" ? "uip-modal uip-modal--alert" : "uip-modal",
+      ...(o.role === "alertdialog" ? { role: "alertdialog" } : {}),
+      ...(labelledBy === null ? {} : { "aria-labelledby": labelledBy }),
+      ...(describedBy === null ? {} : { "aria-describedby": describedBy }),
+    }) as HTMLDialogElement;
+    const me = Symbol("modal");
+    let engine: DialogEngine | null = null;
+    let disarm: (() => void) | null = null;
+    let focusedFor = 0;
+    let reported: "shown" | "closed" = "closed";
 
-  let locked = false;
-  const releaseLock = (): void => {
-    if (locked) {
-      releaseScrollLock();
-      locked = false;
-    }
-  };
-
-  const doClose = (): void => {
-    if (!dialog.open) {
-      return;
-    }
-    closeDialog(dialog, () => {
-      releaseLock();
-      onClose?.();
-    });
-  };
-
-  // User dismissals (backdrop, Escape) route through the guard; programmatic
-  // close() calls doClose directly and always closes.
-  const dismiss = (): void => {
-    if (opts?.canDismiss?.() === false) {
-      return;
-    }
-    doClose();
-  };
-
-  const cleanupBackdrop = closeOnBackdrop ? wireBackdropDismiss(dialog, dismiss) : null;
-  const onCancel = (e: Event): void => {
-    // A descendant's bubbling `cancel` is not an Escape (see createDialog).
-    if (e.target !== dialog) {
-      return;
-    }
-    // The platform fires `cancel` on Escape then closes instantly. Intercept it
-    // so the fade-out lifecycle runs (or so Escape is ignored entirely, or
-    // refused by the guard).
-    e.preventDefault();
-    if (closeOnEscape) {
-      dismiss();
-    }
-  };
-  dialog.addEventListener("cancel", onCancel);
-
-  return {
-    el: dialog,
-    get isOpen(): boolean {
-      return dialog.open && !dialog.classList.contains("is-leaving");
-    },
-    open(): void {
-      if (dialog.open) {
-        // Reopened mid fade-out: cancel the pending close and drop the leaving
-        // state. The scroll-lock was never released, so there is nothing to
-        // re-acquire.
-        cancelTransition(dialog);
-        dialog.classList.remove("is-leaving");
+    const dismiss = (): void => {
+      const e = engine;
+      if (binding.ended || e?.phase !== "open") {
         return;
       }
-      if (scrollLock) {
-        applyScrollLock();
-        locked = true;
+      if (o.canDismiss !== undefined) {
+        const answer = e.consult(o.canDismiss);
+        if (answer === SUPERSEDED || !answer) {
+          return;
+        }
       }
-      try {
-        openDialog(dialog);
-      } catch (error) {
-        releaseLock();
-        throw error;
+      e.close();
+      e.flush();
+    };
+    const onCancel = (e: Event): void => {
+      // A descendant's bubbling `cancel` is not an Escape (see createDialog).
+      if (e.target !== dialog) {
+        return;
       }
-      const initial = opts?.initialFocus;
-      if (initial?.isConnected) {
-        initial.focus();
+      e.preventDefault();
+      if (o.closeOnEscape) {
+        dismiss();
       }
-    },
-    close: doClose,
-    dispose(): void {
-      cleanupBackdrop?.();
-      dialog.removeEventListener("cancel", onCancel);
-      // Cancel any in-flight leave so its pending settle never runs.
-      cancelTransition(dialog);
-      dialog.classList.remove("is-leaving");
-      releaseLock();
-      dialog.close();
-      endOpen(dialog);
-      content.classList.remove("uip-modal-dialog");
-      dialog.remove();
-    },
-  };
+    };
+
+    const facet: DialogFacet = {
+      prepare(fx) {
+        if (disarm === null) {
+          dialog.addEventListener("cancel", onCancel);
+          const removeBackdrop = o.closeOnBackdrop ? listenBackdrop(dialog, dismiss) : null;
+          disarm = () => {
+            dialog.removeEventListener("cancel", onCancel);
+            removeBackdrop?.();
+          };
+        }
+        fx.addClass(content, "uip-modal-dialog");
+        if (content.parentNode !== dialog) {
+          fx.append(dialog, content);
+        }
+        if (!dialog.isConnected) {
+          fx.append(document.body, dialog);
+        }
+      },
+      derive(d) {
+        if (!o.scrollLock) {
+          return;
+        }
+        const e = engine;
+        // Read live at every lock check, so a close the browser makes stops the lock's writes.
+        holdScrollLock(me, d === null || e === null ? null : () => e.phase !== "closed");
+      },
+      follow(fx, d) {
+        if (o.scrollLock) {
+          fx.call(flushScrollLock);
+        }
+        const target = o.initialFocus;
+        if (d.phase === "open" && focusedFor !== d.opens) {
+          focusedFor = d.opens;
+          if (target?.isConnected === true) {
+            fx.focus(target);
+          }
+        }
+      },
+      notify(fx, d) {
+        const shown = d.phase !== "closed";
+        if (reported === "shown" && !shown) {
+          reported = "closed";
+          if (o.onClose !== undefined) {
+            fx.call(o.onClose);
+          }
+        } else if (shown) {
+          reported = "shown";
+        }
+      },
+      cleanup(fx) {
+        disarm?.();
+        disarm = null;
+        if (o.scrollLock) {
+          fx.call(flushScrollLock);
+        }
+        fx.removeClass(content, "uip-modal-dialog");
+        fx.remove(dialog);
+      },
+    };
+
+    return {
+      controller: {
+        el: dialog,
+        get isOpen(): boolean {
+          return !binding.ended && engine?.phase === "open";
+        },
+        open(): void {
+          if (binding.ended || engine === null) {
+            throw new DOMException("The modal is disposed", "InvalidStateError");
+          }
+          engine.open();
+          engine.flush();
+        },
+        close(): void {
+          if (!binding.ended && engine !== null) {
+            engine.close();
+            engine.flush();
+          }
+        },
+        dispose: binding.dispose,
+      },
+      start: () => {
+        const e = dialogEngine(dialog);
+        engine = e;
+        e.attach(facet);
+        e.flush();
+      },
+      release: () => {
+        if (engine !== null) {
+          engine.retire(facet);
+          engine.flush();
+        }
+      },
+    };
+  });
 }
 
 /** Test-only: restore any active scroll-lock and reset shared state. */
 export function _resetForTest(): void {
-  if (scrollLockCount > 0) {
-    restoreBody();
-  }
-  scrollLockCount = 0;
-  savedScrollY = 0;
-  savedBody = null;
+  _resetScrollLockForTest();
 }
